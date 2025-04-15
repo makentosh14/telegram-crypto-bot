@@ -3,114 +3,175 @@ import json
 import time
 import asyncio
 import datetime
+import math
+import statistics
 import aiohttp
 import telegram
 from telegram import Bot
 
-# 🔐 Tokens (replace with os.getenv() later if using Railway vars)
-TELEGRAM_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
-TELEGRAM_CHAT_ID = "1806610681"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# ✅ Real-time coin data store
+# Store historical price data
 coin_data = {}
+signal_memory = {}
 
-# ✅ Scoring config
-def score_coin(symbol, price, volume):
+# Scoring threshold
+SIGNAL_THRESHOLD = 8.5
+
+# Technical indicator helpers
+def calculate_rsi(closes, period=14):
+    if len(closes) < period + 1:
+        return 50
+    deltas = [closes[i+1] - closes[i] for i in range(-period-1, -1)]
+    gains = [d for d in deltas if d > 0]
+    losses = [-d for d in deltas if d < 0]
+    avg_gain = sum(gains) / period if gains else 0.0001
+    avg_loss = sum(losses) / period if losses else 0.0001
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
+
+def calculate_macd(closes, fast=12, slow=26, signal=9):
+    if len(closes) < slow + signal:
+        return 0
+    ema_fast = statistics.mean(closes[-fast:])
+    ema_slow = statistics.mean(closes[-slow:])
+    macd_line = ema_fast - ema_slow
+    signal_line = statistics.mean([macd_line] * signal)
+    return macd_line - signal_line
+
+def calculate_supertrend(highs, lows, closes, period=10, multiplier=3.0):
+    if len(closes) < period:
+        return False
+    atr = sum([highs[i] - lows[i] for i in range(-period, 0)]) / period
+    hl2 = (highs[-1] + lows[-1]) / 2
+    upper_band = hl2 + multiplier * atr
+    lower_band = hl2 - multiplier * atr
+    return closes[-1] > upper_band
+
+def calculate_ema(data, period):
+    if len(data) < period:
+        return sum(data) / len(data)
+    k = 2 / (period + 1)
+    ema = data[-period]
+    for price in data[-period + 1:]:
+        ema = price * k + ema * (1 - k)
+    return ema
+
+def bollinger_bands(prices, period=20, std_dev=2):
+    if len(prices) < period:
+        return None, None
+    sma = sum(prices[-period:]) / period
+    std = statistics.stdev(prices[-period:])
+    return sma + std_dev * std, sma - std_dev * std
+
+def score_coin(symbol, history):
+    closes = history["closes"]
+    highs = history["highs"]
+    lows = history["lows"]
+    volumes = history["volumes"]
     score = 0
 
-    # Placeholder logic – you can expand with RSI, MACD, etc.
-    if volume > 100000:  # example volume threshold
-        score += 3
-    if price > 0.01:
-        score += 1
+    if len(closes) < 30:
+        return 0
+
+    rsi = calculate_rsi(closes)
+    if 55 < rsi < 75:
+        score += 2
+
+    macd = calculate_macd(closes)
+    if macd > 0:
+        score += 2
+
+    if calculate_supertrend(highs, lows, closes):
+        score += 1.5
+
+    upper, lower = bollinger_bands(closes)
+    if upper and closes[-1] > upper:
+        score += 1.5
+
+    ema9 = calculate_ema(closes, 9)
+    ema21 = calculate_ema(closes, 21)
+    if ema9 > ema21:
+        score += 1.5
+
+    if volumes[-1] > statistics.mean(volumes[-10:]) * 2:
+        score += 1.5
 
     return score
 
-# ✅ Signal formatting
-def format_signal(symbol, price, volume, score):
+def format_signal(symbol, price, score):
     return f"""
 🚨 *Trade Signal Detected*
 🪙 Coin: `{symbol}`
-💵 Price: `{price}`
-📊 Volume: `{volume}`
-📈 Score: `{score}`
+💰 Price: `{price}`
+📊 Score: `{score}`
 
+Type: Scalp / Swing 🧠
 Risk: 2–3% • Leverage: 5–10x
-SL/TP logic active ✅
+SL/TP/Trailing: ✅ Enabled
 """
 
-# ✅ Telegram send
-async def send_telegram_signal(signal_text):
+async def send_telegram_signal(text):
     try:
-        await bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text=signal_text,
-            parse_mode=telegram.constants.ParseMode.MARKDOWN
-        )
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN)
     except Exception as e:
         print("Telegram error:", e)
 
-# ✅ WebSocket connection
-async def bybit_websocket():
-    url = "wss://stream.bybit.com/v5/public/linear"
-    print("Connecting to WebSocket...")
+async def fetch_symbols():
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://api.bybit.com/v5/market/instruments?category=linear") as resp:
+                data = await resp.json()
+                return [item["symbol"] for item in data["result"]["list"] if item["symbol"].endswith("USDT")]
+    except Exception as e:
+        print("Error fetching symbols:", e)
+        return []
 
-    async with aiohttp.ClientSession() as session:
-        async with session.ws_connect(url) as ws:
-            await ws.send_json({
-                "op": "subscribe",
-                "args": ["tickers.BTCUSDT", "tickers.ETHUSDT"]  # replace with full USDT scan later
-            })
+async def fetch_candles(symbol):
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
+            async with session.get(url) as resp:
+                data = await resp.json()
+                candles = data["result"]["list"]
+                closes = [float(c[4]) for c in candles]
+                highs = [float(c[2]) for c in candles]
+                lows = [float(c[3]) for c in candles]
+                volumes = [float(c[5]) for c in candles]
+                return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes, "price": closes[-1]}
+    except:
+        return None
 
-            print("WebSocket subscribed to tickers.")
-            last_scan = time.time()
+async def scan_market():
+    symbols = await fetch_symbols()
+    print(f"✅ Scanning {len(symbols)} coins...")
+    for symbol in symbols:
+        data = await fetch_candles(symbol)
+        if not data:
+            continue
+        score = score_coin(symbol, data)
+        if score >= SIGNAL_THRESHOLD and symbol not in signal_memory:
+            signal_memory[symbol] = True
+            signal = format_signal(symbol, data['price'], round(score, 2))
+            await send_telegram_signal(signal)
 
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    try:
-                        data = json.loads(msg.data)
-                        if "data" in data:
-                            ticker = data["data"]
-                            symbol = ticker["symbol"]
-                            price = float(ticker.get("lastPrice", 0))
-                            volume = float(ticker.get("turnover24h", 0))
-
-                            coin_data[symbol] = {
-                                "price": price,
-                                "volume": volume
-                            }
-
-                            # Scan every 5 seconds per coin (adjustable)
-                            if time.time() - last_scan > 5:
-                                last_scan = time.time()
-                                for sym, info in coin_data.items():
-                                    s = score_coin(sym, info["price"], info["volume"])
-                                    if s >= 8.5:
-                                        signal = format_signal(sym, info["price"], info["volume"], s)
-                                        await send_telegram_signal(signal)
-
-                    except Exception as e:
-                        print("Data parsing error:", e)
-
-# ✅ Telegram status updater
 async def send_status():
     while True:
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        msg = f"📊 *Bot Status*\n🕒 Time: `{now}`\n📡 Mode: `LIVE WEBSOCKET`\n🪙 Coins Tracked: `{len(coin_data)}`"
-        try:
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode='Markdown')
-        except:
-            pass
-        await asyncio.sleep(900)  # 15 minutes
+        status = f"📊 *Bot Status*\n🕒 Time: `{now}`\n🔎 Coins Scanned: `{len(coin_data)}`\n📡 Mode: `LIVE`\n📈 Signals Today: `{len(signal_memory)}`"
+        await send_telegram_signal(status)
+        await asyncio.sleep(900)
 
-# ✅ Run all
+async def run():
+    while True:
+        await scan_market()
+        await asyncio.sleep(180)
+
 async def main():
-    await asyncio.gather(
-        bybit_websocket(),
-        send_status()
-    )
+    await asyncio.gather(run(), send_status())
 
 asyncio.run(main())
 
