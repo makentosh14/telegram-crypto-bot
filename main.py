@@ -26,16 +26,8 @@ btc_dominance = 54.0  # Simulated fallback
 eth_btc_ratio = 0.06  # Simulated fallback
 # === Pull Tradable Bybit Symbols ===
 def fetch_bybit_symbols():
-    url = "https://api.bytick.com/v5/market/instruments?category=linear"  # Mirror of bybit.com
-    try:
-        res = requests.get(url, timeout=5)
-        data = res.json()
-        symbols = [s["symbol"] for s in data["result"]["list"] if "USDT" in s["symbol"]]
-        print(f"Fetched {len(symbols)} symbols from Bytick: {len(symbols)}")
-        return symbols
-    except Exception as e:
-        print("Error fetching symbols:", e)
-        return []
+    return ["BTCUSDT", "ETHUSDT", "PEPEUSDT", "WIFUSDT", "FLOKIUSDT"]
+
 
 # === Fake Market Conditions (Sim for altseason logic)
 def update_market_conditions():
