@@ -121,22 +121,39 @@ async def send_telegram_signal(text):
     except Exception as e:
         print("Telegram error:", e)
 
+import hmac
+import hashlib
+import time
+
 async def fetch_symbols():
     try:
+        timestamp = str(int(time.time() * 1000))
+        recv_window = "5000"
+        query = f"category=linear&limit=1000"
+        param_str = f"{timestamp}{BYBIT_API_KEY}{recv_window}{query}"
+        signature = hmac.new(
+            bytes(os.getenv("BYBIT_API_SECRET"), "utf-8"),
+            msg=bytes(param_str, "utf-8"),
+            digestmod=hashlib.sha256
+        ).hexdigest()
+
         headers = {
-            "User-Agent": "Mozilla/5.0"
+            "X-BAPI-API-KEY": os.getenv("BYBIT_API_KEY"),
+            "X-BAPI-TIMESTAMP": timestamp,
+            "X-BAPI-SIGN": signature,
+            "X-BAPI-RECV-WINDOW": recv_window,
+            "Content-Type": "application/json"
         }
+
+        url = f"https://api.bybit.com/v5/market/instruments?{query}"
         async with aiohttp.ClientSession(headers=headers) as session:
-            url = "https://api.bybit.com/v5/market/instruments?category=linear"
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    print(f"Error: Bybit API returned status {resp.status}")
+                    print(f"Error: Bybit API returned {resp.status}")
                     return []
                 raw = await resp.json()
-                if not raw or "result" not in raw or "list" not in raw["result"]:
-                    print("Error: 'result' or 'list' missing from API response")
-                    return []
-                return [item["symbol"] for item in raw["result"]["list"] if item.get("symbol", "").endswith("USDT")]
+                result = raw.get("result", {})
+                return [item["symbol"] for item in result.get("list", []) if item["symbol"].endswith("USDT")]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
