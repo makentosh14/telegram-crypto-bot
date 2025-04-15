@@ -130,15 +130,14 @@ import time
 async def fetch_symbols():
     try:
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
-            url = "https://api.bybit.com/v5/market/instruments?category=linear"
+            url = "https://api.bybit.com/v2/public/symbols"
             async with session.get(url) as resp:
                 print(f"Fetch URL: {url}, Status: {resp.status}")
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-                result = data.get("result", {})
-                symbol_list = result.get("list", [])
-                return [coin["symbol"] for coin in symbol_list if coin.get("symbol", "").endswith("USDT")]
+                symbols = data.get("result", [])
+                return [s["name"] for s in symbols if s.get("quote_currency") == "USDT"]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
