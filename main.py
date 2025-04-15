@@ -1,3 +1,6 @@
+print("Token Loaded:", TELEGRAM_TOKEN)
+print("Chat ID:", TELEGRAM_CHAT_ID)
+
 import os
 import time
 import datetime
