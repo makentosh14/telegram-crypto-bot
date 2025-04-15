@@ -124,17 +124,14 @@ async def send_telegram_signal(text):
 async def fetch_symbols():
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://api.bybit.com/v5/market/instruments?category=linear") as resp:
+            url = "https://api.bybit.com/v2/public/symbols"
+            async with session.get(url) as resp:
                 if resp.status != 200:
                     print(f"Error: Bybit API returned status {resp.status}")
                     return []
-                raw = await resp.json()
-                result = raw.get("result")
-                if not result or "list" not in result:
-                    print("Error: 'list' not found in result")
-                    return []
-                symbols = [item["symbol"] for item in result["list"] if item["symbol"].endswith("USDT")]
-                return symbols
+                data = await resp.json()
+                result = data.get("result", [])
+                return [item["name"] for item in result if item["quote_currency"] == "USDT"]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
