@@ -133,11 +133,10 @@ async def fetch_symbols():
                     print(f"Error: Bybit API returned status {resp.status}")
                     return []
                 raw = await resp.json()
-                result = raw.get("result", {})
-                if "list" not in result:
-                    print("Error: 'list' not found in result")
+                if not raw or "result" not in raw or "list" not in raw["result"]:
+                    print("Error: 'result' or 'list' missing from API response")
                     return []
-                return [item["symbol"] for item in result["list"] if item["symbol"].endswith("USDT")]
+                return [item["symbol"] for item in raw["result"]["list"] if item.get("symbol", "").endswith("USDT")]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
