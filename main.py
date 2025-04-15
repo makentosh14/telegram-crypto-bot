@@ -1,3 +1,4 @@
+print("🚀 Bot starting...")
 import os
 import json
 import time
