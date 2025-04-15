@@ -129,41 +129,25 @@ import time
 
 async def fetch_symbols():
     try:
-        BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
-        BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
-        timestamp = str(int(time.time() * 1000))
-        recv_window = "5000"
-        query = "category=linear"
-        param_str = f"category=linear"
-        sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{param_str}"
-
-        signature = hmac.new(
-            bytes(BYBIT_API_SECRET, "utf-8"),
-            msg=bytes(sign_payload, "utf-8"),
-            digestmod=hashlib.sha256
-        ).hexdigest()
-
         headers = {
-            "X-BAPI-API-KEY": BYBIT_API_KEY,
-            "X-BAPI-TIMESTAMP": timestamp,
-            "X-BAPI-SIGN": signature,
-            "X-BAPI-RECV-WINDOW": recv_window,
-            "Content-Type": "application/json"
+            "User-Agent": "Mozilla/5.0"
         }
-
-        url = f"https://api.bybit.com/v5/market/instruments?{query}"
-
         async with aiohttp.ClientSession(headers=headers) as session:
+            url = "https://api.bybit.com/v5/market/instruments?category=linear"
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    print(f"Error: Bybit API returned {resp.status}")
+                    print(f"Error: Bybit API returned status {resp.status}")
                     return []
                 raw = await resp.json()
                 result = raw.get("result", {})
-                return [item["symbol"] for item in result.get("list", []) if item["symbol"].endswith("USDT")]
+                if "list" not in result:
+                    print("Error: 'list' not found in result")
+                    return []
+                return [item["symbol"] for item in result["list"] if item.get("symbol", "").endswith("USDT")]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
+
 
 async def fetch_candles(symbol):
     try:
