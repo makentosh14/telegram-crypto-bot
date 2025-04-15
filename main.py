@@ -134,7 +134,7 @@ async def fetch_symbols():
             async with session.get(url) as resp:
                 print(f"Fetch URL: {url}, Status: {resp.status}")
                 if resp.status != 200:
-                    print(await resp.text())  # helpful log
+                    print(await resp.text())
                     return []
                 data = await resp.json()
                 result = data.get("result", {})
@@ -146,8 +146,8 @@ async def fetch_symbols():
 
 async def fetch_candles(symbol):
     try:
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
-            url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
             async with session.get(url) as resp:
                 if resp.status != 200:
                     print(f"Candle fetch error for {symbol}, Status: {resp.status}")
@@ -168,7 +168,7 @@ async def fetch_candles(symbol):
                     "price": closes[-1]
                 }
     except Exception as e:
-        print("Candle fetch error:", e)
+        print(f"Candle fetch error for {symbol}:", e)
         return None
 
 async def scan_market():
