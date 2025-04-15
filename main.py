@@ -74,8 +74,8 @@ async def bybit_websocket():
                         if "data" in data:
                             ticker = data["data"]
                             symbol = ticker["symbol"]
-                            price = float(ticker["lastPrice"])
-                            volume = float(ticker["turnover24h"])
+                            price = float(ticker.get("lastPrice", 0))
+                            volume = float(ticker.get("turnover24h", 0))
 
                             coin_data[symbol] = {
                                 "price": price,
