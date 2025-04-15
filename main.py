@@ -145,7 +145,7 @@ async def fetch_symbols():
 async def fetch_candles(symbol):
     try:
         async with aiohttp.ClientSession() as session:
-            url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
+           url = f"https://api.bybit.com/v2/public/kline/list?symbol={symbol}&interval=1&limit=100"
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return None
