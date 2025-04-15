@@ -145,16 +145,16 @@ async def fetch_symbols():
 async def fetch_candles(symbol):
     try:
         async with aiohttp.ClientSession() as session:
-           url = f"https://api.bybit.com/v2/public/kline/list?symbol={symbol}&interval=1&limit=100"
+            url = f"https://api.bybit.com/v2/public/kline/list?symbol={symbol}&interval=1&limit=100"
             async with session.get(url) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.json()
-                candles = data["result"]["list"]
-                closes = [float(c[4]) for c in candles]
-                highs = [float(c[2]) for c in candles]
-                lows = [float(c[3]) for c in candles]
-                volumes = [float(c[5]) for c in candles]
+                candles = data.get("result", [])
+                closes = [float(c["close"]) for c in candles]
+                highs = [float(c["high"]) for c in candles]
+                lows = [float(c["low"]) for c in candles]
+                volumes = [float(c["volume"]) for c in candles]
                 return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes, "price": closes[-1]}
     except Exception as e:
         print("Candle fetch error:", e)
