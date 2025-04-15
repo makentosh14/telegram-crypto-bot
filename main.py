@@ -30,8 +30,11 @@ def fetch_bybit_symbols():
     try:
         res = requests.get(url, timeout=5)
         data = res.json()
-        return [s["symbol"] for s in data["result"]["list"] if "USDT" in s["symbol"]]
-    except:
+        symbols = [s["symbol"] for s in data["result"]["list"] if "USDT" in s["symbol"]]
+        print(f"Fetched {len(symbols)} symbols from Bybit.")
+        return symbols
+    except Exception as e:
+        print("Error fetching symbols:", e)
         return []
 
 # === Fake Market Conditions (Sim for altseason logic)
