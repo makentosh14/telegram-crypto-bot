@@ -129,31 +129,27 @@ import time
 
 async def fetch_symbols():
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-        async with aiohttp.ClientSession(headers=headers) as session:
+        async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             url = "https://api.bybit.com/v5/market/instruments?category=linear"
             async with session.get(url) as resp:
+                print(f"Fetch URL: {url}, Status: {resp.status}")
                 if resp.status != 200:
-                    print(f"Error: Bybit API returned status {resp.status}")
                     return []
-                raw = await resp.json()
-                result = raw.get("result", {})
-                if "list" not in result:
-                    print("Error: 'list' not found in result")
-                    return []
-                return [item["symbol"] for item in result["list"] if item.get("symbol", "").endswith("USDT")]
+                data = await resp.json()
+                result = data.get("result", {})
+                symbol_list = result.get("list", [])
+                return [coin["symbol"] for coin in symbol_list if coin.get("symbol", "").endswith("USDT")]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
-
 
 async def fetch_candles(symbol):
     try:
         async with aiohttp.ClientSession() as session:
             url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
             async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
                 data = await resp.json()
                 candles = data["result"]["list"]
                 closes = [float(c[4]) for c in candles]
@@ -161,7 +157,8 @@ async def fetch_candles(symbol):
                 lows = [float(c[3]) for c in candles]
                 volumes = [float(c[5]) for c in candles]
                 return {"closes": closes, "highs": highs, "lows": lows, "volumes": volumes, "price": closes[-1]}
-    except:
+    except Exception as e:
+        print("Candle fetch error:", e)
         return None
 
 async def scan_market():
