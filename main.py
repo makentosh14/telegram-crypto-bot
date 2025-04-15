@@ -116,7 +116,7 @@ SL/TP/Trailing: ✅ Enabled
 
 async def send_telegram_signal(text):
     try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode=telegram.constants.ParseMode.MARKDOWN)
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="Markdown"
     except Exception as e:
         print("Telegram error:", e)
 
@@ -125,7 +125,9 @@ async def fetch_symbols():
         async with aiohttp.ClientSession() as session:
             async with session.get("https://api.bybit.com/v5/market/instruments?category=linear") as resp:
                 data = await resp.json()
-                return [item["symbol"] for item in data["result"]["list"] if item["symbol"].endswith("USDT")]
+                result = data.get("result", {})
+                symbols = result.get("list", [])
+                return [item["symbol"] for item in symbols if item["symbol"].endswith("USDT")]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
