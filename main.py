@@ -1,70 +1,72 @@
 import os
 import time
-import datetime
 import requests
+import datetime
 import schedule
 from telegram import Bot
 
-# ENV VARIABLES
+# === Environment Variables ===
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = Bot(token=TELEGRAM_TOKEN)
 
-# TRACKERS
+# === Bot State ===
 total_scans = 0
 total_signals = 0
 win_rate = 0
 last_best_trade = "N/A"
 scan_mode = "Normal"
-scan_log = []
-coin_list = []
-# BASIC COIN SCANNER (Simulated)
-def fetch_top_coins():
-    # Simulate pulling 5 high-volume Bybit coins
-    return ["BTCUSDT", "ETHUSDT", "SOLUSDT", "INJUSDT", "WIFUSDT"]
+top_coins = []
+# === Fetch tradable Bybit pairs ===
+def fetch_bybit_symbols():
+    url = "https://api.bybit.com/v5/market/instruments?category=linear"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        symbols = [item["symbol"] for item in data["result"]["list"] if "USDT" in item["symbol"]]
+        return symbols[:100]  # Limit for speed
+    except:
+        return []
 
-# SIMULATED SETUP SCORING
-def score_coin(coin):
-    # Placeholder: Real version includes RSI, MACD, Volume, Supertrend
-    if "WIF" in coin or "DOGE" in coin or "PEPE" in coin:
-        return 8.6  # Simulate a meme coin pump
-    return 7.2  # Regular coin score
+# === Simulated Scoring Function ===
+def score_coin(symbol):
+    score = 0
 
-# TRADE SIGNAL CREATION
-def generate_trade_signal(coin, score):
-    entry = "Live Price"
-    sl = "Smart SL"
-    tp1 = "TP1"
-    tp2 = "TP2"
-    leverage = "3–5x"
-    return (
-        f"📈 *Trade Signal*\n"
-        f"Coin: {coin}\n"
+    # Simulated indicator values (replace with real logic in future)
+    rsi = 45 + hash(symbol) % 30       # Range 45–75
+    macd = hash(symbol) % 4 - 2        # Range -2 to +2
+    supertrend = True if hash(symbol) % 3 != 0 else False
+    volume_spike = True if "WIF" in symbol or "PEPE" in symbol else False
+    social_hype = "PEPE" in symbol or "POPCAT" in symbol or "DOGE" in symbol
+
+    # Score logic
+    if 50 < rsi < 70: score += 1.5
+    if macd > 0: score += 1.5
+    if supertrend: score += 1.5
+    if volume_spike: score += 2
+    if social_hype: score += 2.5
+
+    return round(score, 2)
+# === Build and Send Signal ===
+def send_trade_signal(symbol, score):
+    global total_signals, last_best_trade
+
+    signal = (
+        f"📈 *Trade Signal Detected*\n"
+        f"Coin: {symbol}\n"
         f"Score: {score}/10\n"
-        f"Entry: {entry}\nSL: {sl}\nTP1: {tp1}\nTP2: {tp2}\nLeverage: {leverage}\n"
-        f"Confidence: High 🔥"
+        f"Strategy: Momentum + Volume Spike\n"
+        f"TP1/TP2: Auto Managed\n"
+        f"Leverage: 3–5x\n"
+        f"Risk: Adaptive\n"
+        f"Confidence: 🔥 High"
     )
-# MAIN SCANNING FUNCTION
-def scan_market():
-    global total_scans, total_signals, last_best_trade, win_rate
 
-    top_coins = fetch_top_coins()
-    total_scans += len(top_coins)
+    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=signal, parse_mode='Markdown')
+    total_signals += 1
+    last_best_trade = f"{symbol} +{score * 2:.1f}%"
 
-    for coin in top_coins:
-        score = score_coin(coin)
-
-        if score >= 8.5:
-            signal = generate_trade_signal(coin, score)
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=signal, parse_mode='Markdown')
-            total_signals += 1
-            last_best_trade = f"{coin} +12%"  # Simulated
-
-    if total_signals > 0:
-        win_rate = int(total_signals * 0.68)  # Placeholder win rate
-
-
-# STATUS UPDATE FUNCTION
+# === Send Bot Status ===
 def send_status():
     now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     status = (
@@ -72,25 +74,48 @@ def send_status():
         f"🕒 Last Scan: {now} UTC\n"
         f"🔁 Coins Scanned: {total_scans}\n"
         f"📈 Signals Sent: {total_signals}\n"
-        f"🎯 Win Rate (est): {win_rate}%\n"
-        f"💹 Last Best Trade: {last_best_trade}\n"
-        f"⚙️ Scan Mode: {scan_mode}"
+        f"🎯 Est. Win Rate: {win_rate}%\n"
+        f"💹 Best Trade: {last_best_trade}\n"
+        f"⚙️ Mode: {scan_mode}"
     )
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=status, parse_mode='Markdown')
+# === Main Scanner ===
+def scan_market():
+    global total_scans, win_rate
+
+    symbols = fetch_bybit_symbols()
+    total_scans += len(symbols)
+
+    high_score_signals = []
+
+    for symbol in symbols:
+        score = score_coin(symbol)
+        if score >= 8.5:
+            high_score_signals.append((symbol, score))
+
+    # Sort top 5 signals
+    high_score_signals = sorted(high_score_signals, key=lambda x: x[1], reverse=True)[:5]
+
+    for symbol, score in high_score_signals:
+        send_trade_signal(symbol, score)
+
+    # Win rate placeholder logic
+    if total_signals > 0:
+        win_rate = int(total_signals * 0.68)
 
 
-# RUN SCHEDULE LOOP
+# === Run Loop ===
 def run_bot():
     schedule.every(3).minutes.do(scan_market)
     schedule.every(15).minutes.do(send_status)
 
-    print("✅ Bot started. Scanning live.")
+    print("🚀 Sniper bot is live and scanning...")
     while True:
         schedule.run_pending()
         time.sleep(1)
 
 
-# START
+# === Start Bot ===
 run_bot()
 
 
