@@ -116,7 +116,7 @@ SL/TP/Trailing: ✅ Enabled
 
 async def send_telegram_signal(text):
     try:
-        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="Markdown"
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="Markdown")
     except Exception as e:
         print("Telegram error:", e)
 
