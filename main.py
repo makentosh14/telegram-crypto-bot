@@ -94,7 +94,9 @@ def send_trade_signal():
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode=ParseMode.MARKDOWN)
 
 def handle_commands():
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+   from datetime import datetime, timezone
+now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
     status = (
         f"✅ *Bot Status*\n\n"
         f"Time: {now} UTC\n"
