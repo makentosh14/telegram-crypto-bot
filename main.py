@@ -93,10 +93,10 @@ def send_trade_signal():
 
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode=ParseMode.MARKDOWN)
 
-def handle_commands():
-   from datetime import datetime, timezone
-now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+from datetime import datetime, timezone
 
+def handle_commands():
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     status = (
         f"✅ *Bot Status*\n\n"
         f"Time: {now} UTC\n"
@@ -107,6 +107,7 @@ now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         f"Trailing Stop: ENABLED"
     )
     bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=status, parse_mode=ParseMode.MARKDOWN)
+
 
 def handle_portfolio():
     wins = sum(1 for t in trade_memory if "TP" in t["result"])
