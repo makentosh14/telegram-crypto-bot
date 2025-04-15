@@ -9,8 +9,8 @@ import aiohttp
 import telegram
 from telegram import Bot
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
+TELEGRAM_CHAT_ID = "1806610681"
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
