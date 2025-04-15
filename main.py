@@ -124,10 +124,16 @@ async def fetch_symbols():
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get("https://api.bybit.com/v5/market/instruments?category=linear") as resp:
-                raw = await resp.json()
-                if not raw or "result" not in raw or "list" not in raw["result"]:
+                if resp.status != 200:
+                    print(f"Error: Bybit API returned status {resp.status}")
                     return []
-                return [item["symbol"] for item in raw["result"]["list"] if item["symbol"].endswith("USDT")]
+                raw = await resp.json()
+                result = raw.get("result")
+                if not result or "list" not in result:
+                    print("Error: 'list' not found in result")
+                    return []
+                symbols = [item["symbol"] for item in result["list"] if item["symbol"].endswith("USDT")]
+                return symbols
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
