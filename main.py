@@ -176,18 +176,31 @@ async def scan_market():
     symbols = await fetch_symbols()
     print(f"✅ Scanning {len(symbols)} coins...")
 
+    results = []
+
     for symbol in symbols:
         data = await fetch_candles(symbol)
         if not data:
             continue
-
-        coin_data[symbol] = data  # ✅ This line tracks how many coins were actually scanned
-
         score = score_coin(symbol, data)
+        results.append((symbol, round(score, 2)))
+
+    # Sort results by score (high → low)
+    results.sort(key=lambda x: x[1], reverse=True)
+
+    # Print each coin's score
+    print("\n🔍 Coin Scores:")
+    for symbol, score in results:
+        print(f"{symbol}: Score = {score}")
+
+    # Send signal for high-scoring coins
+    for symbol, score in results:
         if score >= SIGNAL_THRESHOLD and symbol not in signal_memory:
             signal_memory[symbol] = True
-            signal = format_signal(symbol, data['price'], round(score, 2))
+            data = await fetch_candles(symbol)  # re-fetch for price
+            signal = format_signal(symbol, data['price'], score)
             await send_telegram_signal(signal)
+
             
 async def send_status():
     while True:
