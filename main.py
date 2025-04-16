@@ -134,11 +134,11 @@ async def fetch_symbols():
             async with session.get(url) as resp:
                 print(f"Fetching symbols... Status: {resp.status}")
                 if resp.status != 200:
-                    print("Symbol fetch failed:", await resp.text())
+                    print(await resp.text())
                     return []
                 data = await resp.json()
                 instruments = data.get("result", {}).get("list", [])
-                symbols = [i["symbol"] for i in instruments if i.get("symbol", "").endswith("USDT")]
+                symbols = [item["symbol"] for item in instruments if "USDT" in item["symbol"]]
                 print(f"✅ Fetched {len(symbols)} symbols: {symbols[:5]} ...")
                 return symbols
     except Exception as e:
@@ -151,12 +151,15 @@ async def fetch_candles(symbol):
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    print(f"Candle fetch error for {symbol}, Status: {resp.status}")
+                    print(f"❌ Candle fetch error for {symbol}, Status: {resp.status}")
                     return None
                 data = await resp.json()
                 candles = data.get("result", {}).get("list", [])
                 if not candles:
                     return None
+
+                # Reverse and format data
+                candles = candles[::-1]
                 closes = [float(c[4]) for c in candles]
                 highs = [float(c[2]) for c in candles]
                 lows = [float(c[3]) for c in candles]
@@ -169,7 +172,7 @@ async def fetch_candles(symbol):
                     "price": closes[-1]
                 }
     except Exception as e:
-        print(f"Candle fetch error for {symbol}:", e)
+        print(f"❌ Candle fetch error for {symbol}:", e)
         return None
 
 async def scan_market():
