@@ -132,19 +132,22 @@ async def fetch_symbols():
         url = "https://api.bybit.com/v5/market/instruments-info?category=linear"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             async with session.get(url) as resp:
+                print(f"Fetching symbols... Status: {resp.status}")
                 if resp.status != 200:
-                    print(await resp.text())
+                    print("Symbol fetch failed:", await resp.text())
                     return []
                 data = await resp.json()
-                symbols = data.get("result", {}).get("list", [])
-                return [s["symbol"] for s in symbols if s.get("symbol", "").endswith("USDT")]
+                instruments = data.get("result", {}).get("list", [])
+                symbols = [i["symbol"] for i in instruments if i.get("symbol", "").endswith("USDT")]
+                print(f"✅ Fetched {len(symbols)} symbols: {symbols[:5]} ...")
+                return symbols
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
 
 async def fetch_candles(symbol):
     try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1"
+        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
