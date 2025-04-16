@@ -180,9 +180,12 @@ async def scan_market():
         if not data:
             continue
         score = score_coin(symbol, data)
+        print(f"🧪 {symbol} → Score: {round(score, 2)}")
+        
         if score >= SIGNAL_THRESHOLD and symbol not in signal_memory:
             signal_memory[symbol] = True
             signal = format_signal(symbol, data['price'], round(score, 2))
+            print(f"🚨 SIGNAL TRIGGERED → {symbol} @ {data['price']} (Score: {round(score, 2)})")
             await send_telegram_signal(signal)
 
 async def send_status():
