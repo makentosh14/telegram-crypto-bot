@@ -175,19 +175,20 @@ async def fetch_candles(symbol):
 async def scan_market():
     symbols = await fetch_symbols()
     print(f"✅ Scanning {len(symbols)} coins...")
+
     for symbol in symbols:
         data = await fetch_candles(symbol)
         if not data:
             continue
+
+        coin_data[symbol] = data  # ✅ This line tracks how many coins were actually scanned
+
         score = score_coin(symbol, data)
-        print(f"🧪 {symbol} → Score: {round(score, 2)}")
-        
         if score >= SIGNAL_THRESHOLD and symbol not in signal_memory:
             signal_memory[symbol] = True
             signal = format_signal(symbol, data['price'], round(score, 2))
-            print(f"🚨 SIGNAL TRIGGERED → {symbol} @ {data['price']} (Score: {round(score, 2)})")
             await send_telegram_signal(signal)
-
+            
 async def send_status():
     while True:
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
