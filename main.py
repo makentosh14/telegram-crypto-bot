@@ -129,7 +129,7 @@ import time
 
 async def fetch_symbols():
     try:
-        url = "https://api.bybit.com/v5/market/instruments?category=linear"
+        url = "https://api.bybit.com/v2/public/symbols"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             async with session.get(url) as resp:
                 print(f"Fetch URL: {url}, Status: {resp.status}")
@@ -137,29 +137,28 @@ async def fetch_symbols():
                     print(await resp.text())
                     return []
                 data = await resp.json()
-                result = data.get("result", {})
-                symbol_list = result.get("list", [])
-                return [item["symbol"] for item in symbol_list if item["symbol"].endswith("USDT")]
+                symbols = data.get("result", [])
+                return [s["name"] for s in symbols if s.get("quote_currency") == "USDT"]
     except Exception as e:
         print("Error fetching symbols:", e)
         return []
 
 async def fetch_candles(symbol):
     try:
-        url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval=1&limit=100"
+        url = f"https://api.bybit.com/v2/public/kline/list?symbol={symbol}&interval=1&limit=100"
         async with aiohttp.ClientSession(headers={"User-Agent": "Mozilla/5.0"}) as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
                     print(f"Candle fetch error for {symbol}, Status: {resp.status}")
                     return None
                 data = await resp.json()
-                candles = data.get("result", {}).get("list", [])
+                candles = data.get("result", [])
                 if not candles:
                     return None
-                closes = [float(c[4]) for c in candles]
-                highs = [float(c[2]) for c in candles]
-                lows = [float(c[3]) for c in candles]
-                volumes = [float(c[5]) for c in candles]
+                closes = [float(c["close"]) for c in candles]
+                highs = [float(c["high"]) for c in candles]
+                lows = [float(c["low"]) for c in candles]
+                volumes = [float(c["volume"]) for c in candles]
                 return {
                     "closes": closes,
                     "highs": highs,
