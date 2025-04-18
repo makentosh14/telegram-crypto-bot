@@ -5,6 +5,7 @@ from telegram_bot import send_telegram_signal, send_status_report
 from trade_executor import execute_trade
 from trend_filters import update_market_mode
 from risk_manager import get_risk_per_trade
+from trend_filters import get_trend_context
 from config import (
     SCAN_INTERVAL, ENABLE_SCALP, ENABLE_INTRADAY, ENABLE_SWING,
     TELEGRAM_CHAT_ID, MODE, ENABLE_TREND_FILTERS,
