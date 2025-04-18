@@ -3,6 +3,7 @@ MODE = "LIVE"  # LIVE or TEST
 SCAN_INTERVAL = 180  # Default scan cycle in seconds (3 min)
 
 # === API KEYS ===
+BYBIT_API_URL = "https://api.bybit.com"
 BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
 BYBIT_API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
 TELEGRAM_BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
