@@ -1,83 +1,89 @@
 import time
-from scanner import scan_market
-from signal_memory import update_signal_memory
-from telegram_bot import send_telegram_signal, send_status_report
-from trade_executor import execute_trade
-from trend_filters import update_market_mode
-from risk_manager import get_risk_per_trade
+from scanner import fetch_symbols, fetch_candles
+from score import score_symbol
+from telegram_bot import send_telegram_message
+from trade_executor import execute_trade_if_valid
 from trend_filters import get_trend_context
-from config import (
-    SCAN_INTERVAL, ENABLE_SCALP, ENABLE_INTRADAY, ENABLE_SWING,
-    TELEGRAM_CHAT_ID, MODE, ENABLE_TREND_FILTERS,
-    SEND_SIGNAL_ALERTS, ENABLE_AI_SIGNAL_MEMORY, ENABLE_SMART_EXIT_MANAGER
-)
-from bybit_api import fetch_all_symbols, fetch_candles
+from signal_memory import log_signal, is_duplicate_signal
 
-print("🚀 Bot starting...")
-symbols = fetch_all_symbols()
-print(f"✅ Fetched {len(symbols)} symbols.")
+# === Global Settings ===
+TRADING_MODE = "auto"  # options: 'signal' or 'auto'
 
-while True:
-    print(f"🔁 Starting scan cycle...")
+def main():
+    print("🚀 Bot starting...")
 
-    update_market_mode() if ENABLE_TREND_FILTERS else None
-
-    all_signals = []
-
-    for symbol in symbols:
+    while True:
         try:
-            candles_by_tf = {
-                tf: fetch_candles(symbol, tf)
-                for tf in ["5m", "15m", "1h"]
-            }
+            # === Get market context ===
+            trend_context = get_trend_context()
+            btc_trend = trend_context['btc_trend']
+            altseason = trend_context['altseason']
 
-            score, breakdown = scan_market(symbol, candles_by_tf)
+            if btc_trend == 'downtrend':
+                allow_meme_trades = False
+                max_risk_per_trade = 0.015
+                scan_interval = 180
+            elif altseason:
+                allow_meme_trades = True
+                max_risk_per_trade = 0.04
+                scan_interval = 120
+            else:
+                allow_meme_trades = True
+                max_risk_per_trade = 0.025
+                scan_interval = 180
 
-            if score >= 4:  # Score threshold for valid trade
-                strategy_type = (
-                    "Scalp" if breakdown['5m'] > 0 else
-                    "Intraday" if breakdown['15m'] > 0 else
-                    "Swing"
+            # === Telegram update hourly ===
+            current_minute = int(time.time() / 60)
+            if current_minute % 60 == 0:
+                send_telegram_message(
+                    f"📊 Market Context:\n"
+                    f"BTC Trend: {'📈 Uptrend' if btc_trend == 'uptrend' else '📉 Downtrend'}\n"
+                    f"Altseason: {'✅ Yes' if altseason else '❌ No'}\n"
+                    f"Scan Interval: {scan_interval}s\n"
+                    f"Risk: {int(max_risk_per_trade * 100)}%"
                 )
 
-                if (
-                    (strategy_type == "Scalp" and not ENABLE_SCALP) or
-                    (strategy_type == "Intraday" and not ENABLE_INTRADAY) or
-                    (strategy_type == "Swing" and not ENABLE_SWING)
-                ):
-                    continue
+            # === Fetch coins ===
+            symbols = fetch_symbols()
+            print(f"✅ Fetched {len(symbols)} symbols.")
 
-                signal = {
-                    "symbol": symbol,
-                    "score": score,
-                    "strategy": strategy_type,
-                    "breakdown": breakdown
+            # === Scan symbols ===
+            top_signals = []
+            for symbol in symbols:
+                candles_by_timeframe = {
+                    tf: fetch_candles(symbol, tf) for tf in ['5m', '15m', '1h']
                 }
+                score, tf_scores = score_symbol(symbol, candles_by_timeframe)
 
-                all_signals.append(signal)
+                if score >= 3:  # You can fine-tune threshold
+                    if not is_duplicate_signal(symbol):
+                        signal_data = {
+                            'symbol': symbol,
+                            'score': score,
+                            'tf_scores': tf_scores,
+                            'btc_trend': btc_trend,
+                            'altseason': altseason
+                        }
+                        log_signal(symbol)
 
-                if SEND_SIGNAL_ALERTS:
-                    send_telegram_signal(signal)
+                        if TRADING_MODE == "auto":
+                            execute_trade_if_valid(signal_data, max_risk=max_risk_per_trade)
+                        else:
+                            send_telegram_message(
+                                f"🚨 Trade Setup: {symbol}\nScore: {score}\n"
+                                f"TF Scores: {tf_scores}"
+                            )
 
-                if MODE == "LIVE":
-                    risk = get_risk_per_trade(signal)
-                    execute_trade(signal, risk)
+                        top_signals.append(symbol)
 
-                if ENABLE_SMART_EXIT_MANAGER:
-                    pass  # Exit manager runs as part of executor or separate thread
-
-                if ENABLE_AI_SIGNAL_MEMORY:
-                    update_signal_memory(symbol, score)
+            if not top_signals:
+                print("⚠️ No high-quality signals this round.")
 
         except Exception as e:
-            print(f"⚠️ Error scanning {symbol}: {e}")
-            continue
+            send_telegram_message(f"❌ Error in main loop: {str(e)}")
+            time.sleep(10)
 
-    if all_signals:
-        print(f"✅ {len(all_signals)} high-score setups found.")
-    else:
-        print("❌ No valid trade setups found this cycle.")
+        time.sleep(scan_interval)
 
-    send_status_report(len(symbols), len(all_signals))
-
-    time.sleep(SCAN_INTERVAL)
+if __name__ == "__main__":
+    main()
