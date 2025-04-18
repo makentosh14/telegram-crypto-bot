@@ -1,21 +1,29 @@
 def calculate_ema(prices, period):
     if len(prices) < period:
-        return sum(prices) / len(prices)
-    
-    k = 2 / (period + 1)
-    ema = prices[0]
-    for price in prices[1:]:
-        ema = price * k + ema * (1 - k)
+        return []
+    ema = []
+    multiplier = 2 / (period + 1)
+    sma = sum(prices[:period]) / period
+    ema.append(sma)
+    for price in prices[period:]:
+        ema.append((price - ema[-1]) * multiplier + ema[-1])
     return ema
 
-def calculate_macd(prices, short_period=12, long_period=26, signal_period=9):
-    if len(prices) < long_period + signal_period:
-        return 0, 0  # Not enough data
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    if len(prices) < slow + signal:
+        return 0, 0
+    ema_fast = calculate_ema(prices, fast)
+    ema_slow = calculate_ema(prices, slow)
 
-    short_ema = [calculate_ema(prices[i - short_period:i], short_period) for i in range(short_period, len(prices))]
-    long_ema = [calculate_ema(prices[i - long_period:i], long_period) for i in range(long_period, len(prices))]
+    if len(ema_fast) < len(ema_slow):
+        ema_fast = ema_fast[-len(ema_slow):]
+    else:
+        ema_slow = ema_slow[-len(ema_fast):]
 
-    macd_line = [s - l for s, l in zip(short_ema[-len(long_ema):], long_ema)]
-    signal_line = [calculate_ema(macd_line[i - signal_period:i], signal_period) for i in range(signal_period, len(macd_line))]
+    macd_line = [fast - slow for fast, slow in zip(ema_fast, ema_slow)]
+    signal_line = calculate_ema(macd_line, signal)
 
-    return round(macd_line[-1], 5), round(signal_line[-1], 5)
+    if not macd_line or not signal_line:
+        return 0, 0
+
+    return macd_line[-1], signal_line[-1]
