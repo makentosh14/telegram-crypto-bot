@@ -1,43 +1,79 @@
-def btc_dominance_filter(btc_dominance, threshold=50):
-    """
-    Filters altcoin signals based on BTC dominance.
-    """
-    return btc_dominance < threshold  # Favor altcoins when BTC dominance is lower
+import requests
 
+def get_btc_trend(btc_candles):
+    """
+    Determines the BTC trend based on EMA cross and price position.
+    Returns: 'uptrend', 'downtrend', or 'sideways'
+    """
+    closes = [float(c['close']) for c in btc_candles]
+    if len(closes) < 100:
+        return 'sideways'
 
-def eth_btc_ratio_filter(eth_btc_ratio, min_ratio=0.06):
-    """
-    Filters for altseason based on ETH/BTC ratio strength.
-    """
-    return eth_btc_ratio > min_ratio
+    ema_short = sum(closes[-20:]) / 20
+    ema_long = sum(closes[-50:]) / 50
 
+    if ema_short > ema_long and closes[-1] > ema_short:
+        return 'uptrend'
+    elif ema_short < ema_long and closes[-1] < ema_short:
+        return 'downtrend'
+    else:
+        return 'sideways'
 
-def is_altseason(btc_dominance, eth_btc_ratio, meme_volume_spike=False):
+def get_eth_btc_ratio():
     """
-    Determines if the market is in altseason mode.
+    Fetches the ETH/BTC ratio from Binance or another source.
     """
-    dominance_ok = btc_dominance_filter(btc_dominance)
-    eth_ok = eth_btc_ratio_filter(eth_btc_ratio)
-    return (dominance_ok and eth_ok) or meme_volume_spike
+    try:
+        response = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=ETHBTC", timeout=3)
+        if response.status_code == 200:
+            eth_btc = float(response.json()['price'])
+            return eth_btc
+    except:
+        pass
+    return None
 
+def detect_altseason(btc_dominance_data, eth_btc_ratio):
+    """
+    Uses BTC dominance drop + rising ETH/BTC ratio to detect early altseason.
+    """
+    if not btc_dominance_data or not eth_btc_ratio:
+        return False
 
-def detect_market_phase(btc_price_change_24h, btc_dominance_change_24h):
-    """
-    Detects current market phase: bullish, bearish, or sideways.
-    """
-    if btc_price_change_24h > 3:
-        return "bullish"
-    elif btc_price_change_24h < -3:
-        return "bearish"
-    elif abs(btc_dominance_change_24h) < 0.5:
-        return "sideways"
-    return "ranging"
+    recent = btc_dominance_data[-1]
+    previous = btc_dominance_data[-5]
 
+    if recent < previous - 1.0 and eth_btc_ratio > 0.06:
+        return True
+    return False
 
-def auto_scan_cycle_mode(btc_dominance, eth_btc_ratio, meme_volume_spike, high_volatility_detected):
+def get_trend_context():
     """
-    Returns recommended scan cycle speed in seconds based on market conditions.
+    Used by the bot to determine if it should:
+    - Be aggressive with alts (altseason)
+    - Be meme-focused (meme season)
+    - Be conservative (BTC dominance)
+    Returns: {
+        'btc_trend': 'uptrend'/'downtrend'/'sideways',
+        'eth_btc_ratio': float,
+        'altseason': True/False
+    }
     """
-    if is_altseason(btc_dominance, eth_btc_ratio, meme_volume_spike) or high_volatility_detected:
-        return 120  # faster scan every 2 mins
-    return 180  # normal 3 mins
+    btc_candles = fetch_btc_candles()  # from Bybit or Binance
+    btc_dominance = fetch_btc_dominance()  # from CoinGecko or alt API
+    eth_btc = get_eth_btc_ratio()
+
+    btc_trend = get_btc_trend(btc_candles)
+    altseason = detect_altseason(btc_dominance, eth_btc)
+
+    return {
+        'btc_trend': btc_trend,
+        'eth_btc_ratio': eth_btc,
+        'altseason': altseason
+    }
+
+# Mock placeholder functions – you can replace these with real Bybit/WebSocket sources.
+def fetch_btc_candles():
+    return []
+
+def fetch_btc_dominance():
+    return [52.1, 52.0, 51.8, 51.4, 50.8]  # Example mock data
