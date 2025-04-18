@@ -1,0 +1,13 @@
+requests
+websocket-client
+pandas
+numpy
+ta
+python-dotenv
+python-telegram-bot==13.15
+schedule
+pytz
+aiohttp
+asyncio
+httpx
+colorama
