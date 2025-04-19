@@ -7,50 +7,53 @@ from bollinger import detect_bollinger_breakout
 from ema import detect_ema_crossover
 from trend_filters import detect_breakout
 
-def score_symbol(symbol, candles_by_tf):
+def score_symbol(symbol, candles_by_timeframe):
     scores = {}
     total_score = 0
-    weights = {'5m': 0.3, '15m': 0.4, '1h': 0.3}
+    weighted_scores = {
+        '5m': 0.3,
+        '15m': 0.4,
+        '1h': 0.3
+    }
 
-    for tf, candles in candles_by_tf.items():
+    for tf, candles in candles_by_timeframe.items():
         tf_score = 0
         if not candles or len(candles) < 50:
             scores[tf] = 0
             continue
 
         close_prices = [float(c['close']) for c in candles]
-        high_prices = [float(c['high']) for c in candles]
-        low_prices = [float(c['low']) for c in candles]
 
-        # RSI Score
+        # RSI
         rsi = calculate_rsi(close_prices)
         if rsi < 30:
             tf_score += 1
         elif rsi > 70:
             tf_score -= 1
 
-        # MACD Score
+        # MACD
         macd, signal = calculate_macd(close_prices)
         if macd > signal:
             tf_score += 1
         elif macd < signal:
             tf_score -= 1
 
-        # Supertrend Score
-        st = get_supertrend_signal(candles)
-        if st == "buy":
+        # Supertrend
+        supertrend_signal = get_supertrend_signal(candles)
+        if supertrend_signal == 'buy':
             tf_score += 1
-        elif st == "sell":
+        elif supertrend_signal == 'sell':
             tf_score -= 1
 
-        # Volume Spike Detection
+        # Volume Spike
         if detect_volume_spike(candles):
             tf_score += 1
 
-        # Bullish Pattern Detection
-        tf_score += detect_bullish_patterns(candles)
+        # Candle Pattern Score
+        pattern_score = detect_bullish_patterns(candles)
+        tf_score += pattern_score
 
-        # Bollinger Bands Breakout
+        # Bollinger Breakout
         if detect_bollinger_breakout(close_prices):
             tf_score += 1
 
@@ -58,12 +61,11 @@ def score_symbol(symbol, candles_by_tf):
         if detect_ema_crossover(close_prices):
             tf_score += 1
 
-        # Resistance Breakout
+        # Breakout Detection
         if detect_breakout(candles):
             tf_score += 1
 
         scores[tf] = tf_score
-        total_score += tf_score * weights[tf]
+        total_score += tf_score * weighted_scores[tf]
 
     return round(total_score, 2), scores
-
