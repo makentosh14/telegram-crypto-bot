@@ -1,76 +1,65 @@
-def get_supertrend_signal(candles, period=10, multiplier=3):
-    if len(candles) < period + 1:
-        return None
+# supertrend.py
 
-    # Prepare lists
-    high = [float(c['high']) for c in candles]
-    low = [float(c['low']) for c in candles]
-    close = [float(c['close']) for c in candles]
-
-    atr = calculate_atr(high, low, close, period)
-    if not atr:
-        return None
-
-    # Supertrend calculation
-    final_upperband = []
-    final_lowerband = []
-    supertrend = []
-    direction = []
-
-    for i in range(period, len(close)):
-        hl2 = (high[i] + low[i]) / 2
-        upperband = hl2 + (multiplier * atr[i - period])
-        lowerband = hl2 - (multiplier * atr[i - period])
-
-        if i == period:
-            final_upperband.append(upperband)
-            final_lowerband.append(lowerband)
-            supertrend.append(lowerband)
-            direction.append(True)
-            continue
-
-        if close[i] > final_upperband[-1]:
-            direction.append(True)
-        elif close[i] < final_lowerband[-1]:
-            direction.append(False)
-        else:
-            direction.append(direction[-1])
-
-            if direction[-1] and lowerband < final_lowerband[-1]:
-                lowerband = final_lowerband[-1]
-            if not direction[-1] and upperband > final_upperband[-1]:
-                upperband = final_upperband[-1]
-
-        final_upperband.append(upperband)
-        final_lowerband.append(lowerband)
-
-        if direction[-1]:
-            supertrend.append(lowerband)
-        else:
-            supertrend.append(upperband)
-
-    # Determine signal
-    if direction[-1] and not direction[-2]:
-        return "buy"
-    elif not direction[-1] and direction[-2]:
-        return "sell"
-    else:
-        return None
-
-
-def calculate_atr(high, low, close, period=10):
-    tr_list = []
-    for i in range(1, len(close)):
-        tr = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
-        tr_list.append(tr)
-
-    if len(tr_list) < period:
+def calculate_supertrend(candles, period=10, multiplier=3):
+    if len(candles) < period:
         return []
 
-    atr = []
-    atr.append(sum(tr_list[:period]) / period)  # first ATR value is SMA
+    atr_values = []
+    supertrend = []
+    final_upperband = []
+    final_lowerband = []
 
-    for i in range(period, len(tr_list)):
-        atr.append((atr[-1] * (period - 1) + tr_list[i]) / period)
+    for i in range(len(candles)):
+        high = float(candles[i]['high'])
+        low = float(candles[i]['low'])
+        close = float(candles[i]['close'])
 
-    return atr
+        if i == 0:
+            tr = high - low
+        else:
+            prev_close = float(candles[i - 1]['close'])
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+
+        if i < period:
+            atr_values.append(tr)
+            supertrend.append(None)
+            final_upperband.append(None)
+            final_lowerband.append(None)
+        else:
+            if i == period:
+                atr = sum(atr_values[-period:]) / period
+            else:
+                atr = (atr_values[-1] * (period - 1) + tr) / period
+            atr_values.append(atr)
+
+            hl2 = (high + low) / 2
+            upperband = hl2 + multiplier * atr
+            lowerband = hl2 - multiplier * atr
+
+            if close <= final_upperband[-1] if final_upperband[-1] is not None else True:
+                trend = 'down'
+            elif close >= final_lowerband[-1] if final_lowerband[-1] is not None else False:
+                trend = 'up'
+            else:
+                trend = supertrend[-1] if supertrend[-1] else 'down'
+
+            if trend == 'up':
+                upperband = None
+            else:
+                lowerband = None
+
+            supertrend.append(trend)
+            final_upperband.append(upperband)
+            final_lowerband.append(lowerband)
+
+    return supertrend
+
+def get_supertrend_signal(candles):
+    trend = calculate_supertrend(candles)
+    if not trend or len(trend) < 2:
+        return None
+    if trend[-2] == 'down' and trend[-1] == 'up':
+        return 'buy'
+    elif trend[-2] == 'up' and trend[-1] == 'down':
+        return 'sell'
+    return None
