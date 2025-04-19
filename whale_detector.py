@@ -1,56 +1,32 @@
-import time
+def detect_whale_heatmap_activity(candles, threshold_ratio=3.0):
+    if len(candles) < 30:
+        return False
+    last_close = float(candles[-1]['close'])
+    last_volume = float(candles[-1]['volume'])
+    avg_volume = sum(float(c['volume']) for c in candles[-30:-1]) / 29
+    return last_volume > avg_volume * threshold_ratio
 
-# Simulated whale wallet activity store (extend with real data source or API)
-WHALE_WALLETS = {
-    'wallet1': [],
-    'wallet2': [],
-    'wallet3': [],
-}
+def detect_volume_divergence(candles):
+    if len(candles) < 10:
+        return False
+    recent_volumes = [float(c['volume']) for c in candles[-10:]]
+    recent_closes = [float(c['close']) for c in candles[-10:]]
 
-def simulate_wallet_activity(symbol, price, wallet="wallet1"):
-    """
-    Adds simulated buy activity to a whale wallet (for mock/demo use).
-    """
-    WHALE_WALLETS[wallet].append({
-        'symbol': symbol,
-        'price': price,
-        'timestamp': time.time()
-    })
+    avg_volume = sum(recent_volumes[:-1]) / (len(recent_volumes) - 1)
+    volume_spike = recent_volumes[-1] > avg_volume * 2
+    price_lag = recent_closes[-1] <= recent_closes[-2]
 
-def detect_coordinated_whale_activity(symbol, price, threshold=3, timeframe=180):
-    """
-    Detects if multiple whale wallets bought the same symbol within a short time window.
-    """
-    count = 0
-    now = time.time()
+    return volume_spike and price_lag
 
-    for wallet, txs in WHALE_WALLETS.items():
-        for tx in txs:
-            if tx['symbol'] == symbol and now - tx['timestamp'] <= timeframe:
-                if abs(tx['price'] - price) / price < 0.01:  # within 1% price range
-                    count += 1
-                    break
+def detect_liquidity_trap(candles):
+    if len(candles) < 5:
+        return False
+    low_wicks = [float(c['low']) for c in candles[-5:-1]]
+    last_low = float(candles[-1]['low'])
+    last_close = float(candles[-1]['close'])
+    fake_break = last_low < min(low_wicks) and last_close > last_low
+    return fake_break
 
-    return count >= threshold
-
-
-def detect_whale_heatmap(symbol, recent_buys, threshold=3):
-    """
-    Detects clusters of large buy volumes on the same coin in a short window.
-    `recent_buys` should be a list of dicts like:
-    [{'symbol': 'DOGEUSDT', 'amount': 100000, 'wallet': 'xyz', 'timestamp': 123456789}]
-    """
-    count = 0
-    for tx in recent_buys:
-        if tx['symbol'] == symbol and tx['amount'] > 50000:
-            count += 1
-
-    return count >= threshold
-
-
-def debug_whale_log(symbol):
-    print(f"[🐋] Whale check for {symbol}:")
-    for wallet, txs in WHALE_WALLETS.items():
-        for tx in txs:
-            if tx['symbol'] == symbol:
-                print(f"  → {wallet} bought at {tx['price']}")
+def scan_telegram_discord_mentions(symbol):
+    # Placeholder - requires integration with actual services or scrapers
+    return False
