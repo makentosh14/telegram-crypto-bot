@@ -1,3 +1,5 @@
+# main.py
+
 import time
 from scanner import fetch_symbols, fetch_candles
 from score import score_symbol
@@ -5,11 +7,12 @@ from telegram_bot import send_telegram_message
 from trade_executor import execute_trade_if_valid
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
+from logger import log
 
 TRADING_MODE = "auto"  # options: 'signal' or 'auto'
 
 def main():
-    print("🚀 Bot starting...")
+    log("🚀 Bot starting...")
 
     while True:
         try:
@@ -41,7 +44,7 @@ def main():
                 )
 
             symbols = fetch_symbols()
-            print(f"✅ Fetched {len(symbols)} symbols.")
+            log(f"✅ Fetched {len(symbols)} symbols.")
 
             top_signals = []
             for symbol in symbols:
@@ -72,7 +75,7 @@ def main():
                         top_signals.append(symbol)
 
             if not top_signals:
-                print("⚠️ No high-quality signals this round.")
+                log("⚠️ No high-quality signals this round.")
 
         except Exception as e:
             send_telegram_message(f"❌ Error in main loop: {str(e)}")
