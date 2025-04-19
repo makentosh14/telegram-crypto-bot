@@ -17,6 +17,7 @@ ENABLE_SWING = True
 ENABLE_SPOT_TRADING = True
 
 # === TIMEFRAMES USED ===
+TIMEFRAMES = ['5m', '15m', '1h']
 ENABLED_TIMEFRAMES = ["5m", "15m", "1h"]
 
 # === RISK SETTINGS ===
