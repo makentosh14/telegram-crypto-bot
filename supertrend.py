@@ -1,70 +1,76 @@
-def calculate_atr(candles, period=10):
-    tr_values = []
-    for i in range(1, len(candles)):
-        high = float(candles[i]['high'])
-        low = float(candles[i]['low'])
-        prev_close = float(candles[i-1]['close'])
-
-        tr = max(
-            high - low,
-            abs(high - prev_close),
-            abs(low - prev_close)
-        )
-        tr_values.append(tr)
-
-    if len(tr_values) < period:
-        return []
-
-    atr = []
-    initial = sum(tr_values[:period]) / period
-    atr.append(initial)
-
-    for i in range(period, len(tr_values)):
-        value = (atr[-1] * (period - 1) + tr_values[i]) / period
-        atr.append(value)
-
-    return atr
-
-def get_supertrend_signal(candles, period=10, multiplier=3.0):
+def get_supertrend_signal(candles, period=10, multiplier=3):
     if len(candles) < period + 1:
-        return "neutral"
+        return None
 
-    atr = calculate_atr(candles, period)
-    if not atr or len(atr) < len(candles) - period:
-        return "neutral"
+    # Prepare lists
+    high = [float(c['high']) for c in candles]
+    low = [float(c['low']) for c in candles]
+    close = [float(c['close']) for c in candles]
 
-    supertrend = []
+    atr = calculate_atr(high, low, close, period)
+    if not atr:
+        return None
+
+    # Supertrend calculation
     final_upperband = []
     final_lowerband = []
-    trend = []
+    supertrend = []
+    direction = []
 
-    for i in range(period, len(candles)):
-        hl2 = (float(candles[i]['high']) + float(candles[i]['low'])) / 2
+    for i in range(period, len(close)):
+        hl2 = (high[i] + low[i]) / 2
         upperband = hl2 + (multiplier * atr[i - period])
         lowerband = hl2 - (multiplier * atr[i - period])
 
         if i == period:
+            final_upperband.append(upperband)
+            final_lowerband.append(lowerband)
             supertrend.append(lowerband)
-            trend.append(True)  # Uptrend
-        else:
-            if float(candles[i - 1]['close']) > final_upperband[-1]:
-                trend.append(True)
-            elif float(candles[i - 1]['close']) < final_lowerband[-1]:
-                trend.append(False)
-            else:
-                trend.append(trend[-1])
+            direction.append(True)
+            continue
 
-            if trend[-1]:
-                supertrend.append(max(lowerband, supertrend[-1]))
-            else:
-                supertrend.append(min(upperband, supertrend[-1]))
+        if close[i] > final_upperband[-1]:
+            direction.append(True)
+        elif close[i] < final_lowerband[-1]:
+            direction.append(False)
+        else:
+            direction.append(direction[-1])
+
+            if direction[-1] and lowerband < final_lowerband[-1]:
+                lowerband = final_lowerband[-1]
+            if not direction[-1] and upperband > final_upperband[-1]:
+                upperband = final_upperband[-1]
 
         final_upperband.append(upperband)
         final_lowerband.append(lowerband)
 
-    current_trend = trend[-1]
-    if current_trend:
-        return "buy"
-    else:
-        return "sell"
+        if direction[-1]:
+            supertrend.append(lowerband)
+        else:
+            supertrend.append(upperband)
 
+    # Determine signal
+    if direction[-1] and not direction[-2]:
+        return "buy"
+    elif not direction[-1] and direction[-2]:
+        return "sell"
+    else:
+        return None
+
+
+def calculate_atr(high, low, close, period=10):
+    tr_list = []
+    for i in range(1, len(close)):
+        tr = max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1]))
+        tr_list.append(tr)
+
+    if len(tr_list) < period:
+        return []
+
+    atr = []
+    atr.append(sum(tr_list[:period]) / period)  # first ATR value is SMA
+
+    for i in range(period, len(tr_list)):
+        atr.append((atr[-1] * (period - 1) + tr_list[i]) / period)
+
+    return atr
