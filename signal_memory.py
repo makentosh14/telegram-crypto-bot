@@ -1,30 +1,21 @@
-import json
-import os
-from datetime import datetime, timedelta
+import time
 
-SIGNAL_MEMORY_FILE = "logs/signal_memory.json"
+# In-memory cache for recent signals
+recent_signals = {}
 
-def load_signal_memory():
-    if not os.path.exists(SIGNAL_MEMORY_FILE):
-        return {}
-    with open(SIGNAL_MEMORY_FILE, "r") as file:
-        return json.load(file)
-
-def save_signal_memory(memory):
-    os.makedirs(os.path.dirname(SIGNAL_MEMORY_FILE), exist_ok=True)
-    with open(SIGNAL_MEMORY_FILE, "w") as file:
-        json.dump(memory, file, indent=2)
-
-def is_duplicate_signal(symbol):
-    memory = load_signal_memory()
-    last_signal_time = memory.get(symbol)
-    if last_signal_time:
-        last_time = datetime.strptime(last_signal_time, "%Y-%m-%d %H:%M:%S")
-        if datetime.utcnow() - last_time < timedelta(minutes=30):
-            return True
-    return False
+# Time window in seconds to prevent duplicate signals (e.g., 30 minutes)
+DUPLICATE_SIGNAL_WINDOW = 1800
 
 def log_signal(symbol):
-    memory = load_signal_memory()
-    memory[symbol] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    save_signal_memory(memory)
+    recent_signals[symbol] = int(time.time())
+
+def is_duplicate_signal(symbol):
+    now = int(time.time())
+    last_time = recent_signals.get(symbol, 0)
+    return (now - last_time) < DUPLICATE_SIGNAL_WINDOW
+
+def cleanup_old_signals():
+    now = int(time.time())
+    to_remove = [symbol for symbol, t in recent_signals.items() if now - t > DUPLICATE_SIGNAL_WINDOW]
+    for symbol in to_remove:
+        del recent_signals[symbol]
