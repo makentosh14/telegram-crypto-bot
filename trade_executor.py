@@ -1,48 +1,72 @@
-from bybit_api import place_order, set_leverage_mode, set_leverage, get_balance
-from telegram_bot import send_trade_execution, send_error_report
-import time
+from bybit_api import (
+    place_order, set_leverage, set_leverage_mode, get_balance,
+    get_price, is_futures_pair, is_spot_pair
+)
+from risk_manager import calculate_position_size
+from exit_manager import generate_tp_sl
+from telegram_bot import send_telegram_message
+from config import DEFAULT_LEVERAGE, MARGIN_MODE, TRADING_PAIR_WHITELIST
 
-DEFAULT_LEVERAGE = 10
-DEFAULT_MARGIN_MODE = "CROSS"
-DEFAULT_TRADE_RISK = 0.03  # 3% of balance per trade
+def execute_trade_if_valid(signal, max_risk):
+    symbol = signal['symbol']
+    score = signal['score']
 
-def calculate_position_size(symbol, price, balance, risk_pct=DEFAULT_TRADE_RISK, leverage=DEFAULT_LEVERAGE):
-    # Risk-based fixed % of balance, adjusted by leverage
-    risk_amount = balance * risk_pct
-    position_size = (risk_amount * leverage) / price
-    return round(position_size, 3)
-
-def execute_trade(symbol, side, entry, sl, tp1, tp2, market_type="futures", leverage=DEFAULT_LEVERAGE, margin_mode=DEFAULT_MARGIN_MODE):
     try:
-        # 1. Fetch balance
-        balance = get_balance(market_type)
-        if balance < 10:
-            send_error_report("Trade Rejected", "Low balance")
+        if not symbol.endswith("USDT"):
+            print(f"⚠️ Skipping non-USDT pair: {symbol}")
             return
 
-        # 2. Set leverage & margin
-        set_leverage_mode(symbol, margin_mode, market_type)
-        set_leverage(symbol, leverage, market_type)
+        if TRADING_PAIR_WHITELIST and symbol not in TRADING_PAIR_WHITELIST:
+            print(f"⚠️ {symbol} not in whitelist.")
+            return
 
-        # 3. Calculate position size
-        qty = calculate_position_size(symbol, entry, balance, DEFAULT_TRADE_RISK, leverage)
+        price = get_price(symbol)
+        balance = get_balance()
+        quantity = calculate_position_size(balance, price, max_risk, DEFAULT_LEVERAGE)
 
-        # 4. Place market order
-        response = place_order(
-            symbol=symbol,
-            side=side,
-            qty=qty,
-            entry_price=entry,
-            stop_loss=sl,
-            tp1=tp1,
-            tp2=tp2,
-            market_type=market_type
+        if quantity <= 0:
+            print(f"⚠️ Skipping {symbol}, quantity too low: {quantity}")
+            return
+
+        sl, tp1, tp2 = generate_tp_sl(symbol, price)
+
+        if is_futures_pair(symbol):
+            set_leverage_mode(symbol, MARGIN_MODE)
+            set_leverage(symbol, DEFAULT_LEVERAGE)
+
+            order = place_order(
+                symbol=symbol,
+                side="Buy",
+                qty=quantity,
+                entry=price,
+                sl=sl,
+                tp1=tp1,
+                tp2=tp2,
+                type="futures"
+            )
+
+        elif is_spot_pair(symbol):
+            order = place_order(
+                symbol=symbol,
+                side="Buy",
+                qty=quantity,
+                entry=price,
+                sl=sl,
+                tp1=tp1,
+                tp2=tp2,
+                type="spot"
+            )
+
+        else:
+            print(f"⚠️ Unknown market type for {symbol}")
+            return
+
+        send_telegram_message(
+            f"✅ Executed Trade:\n"
+            f"Symbol: {symbol}\n"
+            f"Score: {score}\n"
+            f"Entry: {price}\nSL: {sl}\nTP1: {tp1}\nTP2: {tp2}\nQty: {quantity}"
         )
 
-        # 5. Telegram alert
-        send_trade_execution(symbol, side, qty, entry, sl, tp1, tp2)
-        print(f"[TRADE EXECUTED] {symbol} {side} x{qty} @ {entry}")
-
     except Exception as e:
-        send_error_report("execute_trade", str(e))
-        time.sleep(2)
+        send_telegram_message(f"❌ Trade execution failed for {symbol}: {str(e)}")
