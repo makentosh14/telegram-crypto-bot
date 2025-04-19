@@ -1,40 +1,31 @@
-# config.py
+import os
 
+# === Bybit API ===
+BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
+BYBIT_API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
 BYBIT_API_URL = "https://api.bybit.com"
-BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
-TELEGRAM_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
+# === Telegram Bot ===
+TELEGRAM_BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
 TELEGRAM_CHAT_ID = "1806610681"
-ASSISTANT_CHAT_ID = "YOUR_PRIVATE_ASSISTANT_CHANNEL_ID"
 
-API_KEY = "tL7vmTEDT5B8mp4Yer"
-API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
+# === Scanning Settings ===
+TIMEFRAMES = ['5m', '15m', '1h']
+SYMBOL_LIMIT = 500  # Limit if needed
 
-TIMEFRAMES = ["5m", "15m", "1h"]
+# === Risk Settings ===
+DEFAULT_RISK = 0.03
+SCALP_RISK = 0.03
+SWING_RISK = 0.015
+MEME_RISK = 0.02
+MAX_DAILY_LOSS = 0.10
 
-MAX_RISK_DEFAULT = 0.03
-MAX_RISK_MEME = 0.02
-MAX_RISK_SWING = 0.015
-MAX_RISK_ALTSEASON = 0.05
+# === Trade Settings ===
+TP_RATIO_1 = 1.5
+TP_RATIO_2 = 2.5
+USE_TRAILING_SL = True
+TRAIL_SL_OFFSET = 0.3  # 30% behind high
 
-DAILY_LOSS_LIMIT = 0.10  # Bot pauses after losing 10% in a day
-MAX_CONSECUTIVE_LOSSES = 3
-
-MIN_SCORE_TO_TRADE = 3.5
-SPOT_VOLUME_THRESHOLD = 1000000  # For low-cap detection
-
-# For AI memory + sentiment
-SIGNAL_HISTORY_FILE = "logs/signal_history.json"
-WIN_LOSS_LOG = "logs/trade_results.json"
-
-# Scanner speed
-SCAN_INTERVAL_DEFAULT = 180  # 3 minutes
-SCAN_INTERVAL_FAST = 60
-SCAN_INTERVAL_SUPERFAST = 3
-
-# Trailing Stop
-USE_TRAILING_STOP = True
-TRAIL_SL_PERCENT = 0.015
 
 # Leverage
 USE_AUTO_LEVERAGE = True
