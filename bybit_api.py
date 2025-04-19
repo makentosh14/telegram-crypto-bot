@@ -1,106 +1,141 @@
 import requests
+import time
 import hmac
 import hashlib
-import time
 import json
-from config import BYBIT_API_KEY, BYBIT_API_SECRET
+from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL, TRADE_MODE
 
-BASE_URL = "https://api.bybit.com"
-
-def get_server_time():
-    return int(time.time() * 1000)
-
-def sign_request(secret, params):
+def sign_request(params):
     sorted_params = sorted(params.items())
-    query_string = '&'.join([f"{k}={v}" for k, v in sorted_params])
-    return hmac.new(bytes(secret, "utf-8"), bytes(query_string, "utf-8"), hashlib.sha256).hexdigest()
+    query_string = '&'.join(f"{k}={v}" for k, v in sorted_params)
+    timestamp = str(int(time.time() * 1000))
+    to_sign = f"{timestamp}{BYBIT_API_KEY}{query_string}"
+    signature = hmac.new(
+        BYBIT_API_SECRET.encode(),
+        to_sign.encode(),
+        hashlib.sha256
+    ).hexdigest()
+    return timestamp, signature
 
-def private_request(method, endpoint, params=None):
-    if params is None:
-        params = {}
-
-    params["api_key"] = BYBIT_API_KEY
-    params["timestamp"] = get_server_time()
-    params["recvWindow"] = 5000
-    params["sign"] = sign_request(BYBIT_API_SECRET, params)
-
-    if method == "GET":
-        response = requests.get(BASE_URL + endpoint, params=params)
-    elif method == "POST":
-        response = requests.post(BASE_URL + endpoint, data=params)
-    else:
-        raise ValueError("Unsupported method")
-
-    if response.status_code != 200:
-        print(f"❌ API Error: {response.text}")
-    return response.json()
+def get_headers():
+    return {
+        "Content-Type": "application/json",
+        "X-BYBIT-API-KEY": BYBIT_API_KEY
+    }
 
 def get_balance():
-    result = private_request("GET", "/v2/private/wallet/balance", {"coin": "USDT"})
-    return float(result["result"]["USDT"]["available_balance"])
+    endpoint = f"{BYBIT_API_URL}/v5/account/wallet-balance?accountType=UNIFIED"
+    headers = get_headers()
+    timestamp = str(int(time.time() * 1000))
+    sign_payload = f"{timestamp}{BYBIT_API_KEY}"
+    signature = hmac.new(BYBIT_API_SECRET.encode(), sign_payload.encode(), hashlib.sha256).hexdigest()
+    headers["X-BYBIT-API-SIGN"] = signature
+    headers["X-BYBIT-API-TIMESTAMP"] = timestamp
+    headers["X-BYBIT-API-RECV-WINDOW"] = "5000"
+    try:
+        resp = requests.get(endpoint, headers=headers)
+        data = resp.json()
+        return float(data["result"]["list"][0]["totalEquity"])
+    except Exception:
+        return 0
 
-def get_open_positions(symbol):
-    data = private_request("GET", "/v2/private/position/list", {"symbol": symbol})
-    return data.get("result", [])
+def place_order(symbol, side, qty, sl=None, tp=None):
+    endpoint = f"{BYBIT_API_URL}/v5/order/create"
+    headers = get_headers()
+    timestamp = str(int(time.time() * 1000))
 
-def set_leverage(symbol, leverage):
-    private_request("POST", "/v2/private/position/leverage/save", {
+    body = {
+        "category": "linear",
         "symbol": symbol,
-        "leverage": leverage
-    })
-
-def set_leverage_mode(symbol, mode="Cross"):
-    if mode.lower() not in ["cross", "isolated"]:
-        mode = "Cross"
-    private_request("POST", "/v2/private/position/switch-isolated", {
-        "symbol": symbol,
-        "is_isolated": 0 if mode.lower() == "cross" else 1,
-        "buy_leverage": 10,
-        "sell_leverage": 10
-    })
-
-def place_order(symbol, side, qty, entry_price, tp_price=None, sl_price=None):
-    print(f"📤 Placing order: {symbol} | {side} | Qty: {qty}")
-    params = {
         "side": side,
-        "symbol": symbol,
-        "order_type": "Market",
-        "qty": qty,
-        "time_in_force": "GoodTillCancel",
-        "reduce_only": False,
-        "close_on_trigger": False
+        "orderType": "Market",
+        "qty": str(qty),
+        "timeInForce": "GoodTillCancel",
     }
-    response = private_request("POST", "/v2/private/order/create", params)
-    print(f"🟢 Order Response: {response}")
 
-    if tp_price:
-        set_tp(symbol, side, qty, tp_price)
-    if sl_price:
-        set_sl(symbol, side, qty, sl_price)
+    if TRADE_MODE == "spot":
+        body["category"] = "spot"
 
-def set_tp(symbol, side, qty, tp_price):
-    trigger = {
+    if sl:
+        body["stopLoss"] = str(sl)
+    if tp:
+        body["takeProfit"] = str(tp)
+
+    sign_payload = f"{timestamp}{BYBIT_API_KEY}{json.dumps(body)}"
+    signature = hmac.new(BYBIT_API_SECRET.encode(), sign_payload.encode(), hashlib.sha256).hexdigest()
+
+    headers["X-BYBIT-API-SIGN"] = signature
+    headers["X-BYBIT-API-TIMESTAMP"] = timestamp
+    headers["X-BYBIT-API-RECV-WINDOW"] = "5000"
+
+    try:
+        resp = requests.post(endpoint, headers=headers, data=json.dumps(body))
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def set_leverage(symbol, leverage=10):
+    endpoint = f"{BYBIT_API_URL}/v5/position/set-leverage"
+    headers = get_headers()
+    timestamp = str(int(time.time() * 1000))
+
+    body = {
+        "category": "linear",
         "symbol": symbol,
-        "side": "Sell" if side == "Buy" else "Buy",
-        "order_type": "Limit",
-        "qty": qty,
-        "price": tp_price,
-        "time_in_force": "GoodTillCancel",
-        "reduce_only": True
+        "buyLeverage": str(leverage),
+        "sellLeverage": str(leverage),
     }
-    res = private_request("POST", "/v2/private/order/create", trigger)
-    print(f"🎯 TP Order: {res}")
 
-def set_sl(symbol, side, qty, sl_price):
-    trigger = {
+    sign_payload = f"{timestamp}{BYBIT_API_KEY}{json.dumps(body)}"
+    signature = hmac.new(BYBIT_API_SECRET.encode(), sign_payload.encode(), hashlib.sha256).hexdigest()
+
+    headers["X-BYBIT-API-SIGN"] = signature
+    headers["X-BYBIT-API-TIMESTAMP"] = timestamp
+    headers["X-BYBIT-API-RECV-WINDOW"] = "5000"
+
+    try:
+        resp = requests.post(endpoint, headers=headers, data=json.dumps(body))
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def set_margin_mode(symbol, mode="ISOLATED"):
+    endpoint = f"{BYBIT_API_URL}/v5/position/set-margin-mode"
+    headers = get_headers()
+    timestamp = str(int(time.time() * 1000))
+
+    body = {
+        "category": "linear",
         "symbol": symbol,
-        "side": "Sell" if side == "Buy" else "Buy",
-        "order_type": "Market",
-        "qty": qty,
-        "stop_loss": sl_price,
-        "reduce_only": True,
-        "time_in_force": "ImmediateOrCancel"
+        "tradeMode": 1 if mode == "ISOLATED" else 0
     }
-    res = private_request("POST", "/v2/private/order/create", trigger)
-    print(f"🛡 SL Order: {res}")
 
+    sign_payload = f"{timestamp}{BYBIT_API_KEY}{json.dumps(body)}"
+    signature = hmac.new(BYBIT_API_SECRET.encode(), sign_payload.encode(), hashlib.sha256).hexdigest()
+
+    headers["X-BYBIT-API-SIGN"] = signature
+    headers["X-BYBIT-API-TIMESTAMP"] = timestamp
+    headers["X-BYBIT-API-RECV-WINDOW"] = "5000"
+
+    try:
+        resp = requests.post(endpoint, headers=headers, data=json.dumps(body))
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_open_positions():
+    endpoint = f"{BYBIT_API_URL}/v5/position/list?category=linear"
+    headers = get_headers()
+    timestamp = str(int(time.time() * 1000))
+    sign_payload = f"{timestamp}{BYBIT_API_KEY}"
+    signature = hmac.new(BYBIT_API_SECRET.encode(), sign_payload.encode(), hashlib.sha256).hexdigest()
+
+    headers["X-BYBIT-API-SIGN"] = signature
+    headers["X-BYBIT-API-TIMESTAMP"] = timestamp
+    headers["X-BYBIT-API-RECV-WINDOW"] = "5000"
+
+    try:
+        resp = requests.get(endpoint, headers=headers)
+        return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
