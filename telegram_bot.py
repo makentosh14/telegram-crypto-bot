@@ -1,81 +1,46 @@
 import requests
-import datetime
-import traceback
+import json
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ASSISTANT_CHAT_ID
 
-# Replace with your real bot token and chat IDs
-BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
-MAIN_CHAT_ID = "1806610681"
-ASSISTANT_CHAT_ID = "YOUR_ASSISTANT_CHAT_ID"  # optional
-
-def send_telegram_message(message, chat_id=None, silent=False):
-    if chat_id is None:
-        chat_id = MAIN_CHAT_ID
-
+def send_telegram_message(message, assistant=False):
+    chat_id = ASSISTANT_CHAT_ID if assistant else TELEGRAM_CHAT_ID
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": message,
-        "parse_mode": "Markdown",
-        "disable_notification": silent
+        "parse_mode": "HTML"
     }
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=payload)
+        response = requests.post(url, json=payload, timeout=5)
+        if not response.ok:
+            print(f"❌ Telegram send failed: {response.status_code} - {response.text}")
     except Exception as e:
-        print(f"Telegram send failed: {e}")
-        traceback.print_exc()
+        print(f"❌ Telegram error: {e}")
 
-def format_signal(symbol, score, type, tf_scores, reason):
-    emoji = "🚀" if score >= 4 else "⚠️" if score >= 2 else "🔍"
-    tf_line = " | ".join([f"{tf}: {s}" for tf, s in tf_scores.items()])
-    return (
-        f"{emoji} *New {type.upper()} Signal* {emoji}\n"
-        f"• Coin: `{symbol}`\n"
-        f"• Score: *{score}*\n"
-        f"• Time: {datetime.datetime.utcnow().strftime('%H:%M:%S')} UTC\n"
-        f"• Timeframe Scores: {tf_line}\n"
-        f"• Reason: _{reason}_"
+def send_trade_alert(symbol, score, tf_scores, entry_price, sl, tp1, tp2):
+    msg = (
+        f"🚨 <b>New Trade Setup</b>\n"
+        f"Symbol: <b>{symbol}</b>\n"
+        f"Score: <b>{score}</b>\n"
+        f"Timeframe Scores: {tf_scores}\n"
+        f"Entry: {entry_price}\n"
+        f"SL: {sl}\n"
+        f"TP1: {tp1}\n"
+        f"TP2: {tp2}"
     )
+    send_telegram_message(msg)
 
-def send_signal_alert(symbol, score, type, tf_scores, reason):
-    message = format_signal(symbol, score, type, tf_scores, reason)
-    send_telegram_message(message)
-
-def send_status_report(scanned, mode, signals_today):
-    now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    message = (
-        f"📊 *Bot Status*\n"
-        f"🕒 Time: {now}\n"
-        f"🔎 Coins Scanned: *{scanned}*\n"
-        f"📡 Mode: *{mode.upper()}*\n"
-        f"📈 Signals Today: *{signals_today}*"
+def send_status_report(scan_count, mode, signals_today, memory_signals):
+    msg = (
+        f"📊 <b>Bot Status</b>\n"
+        f"🕒 Time: <code>{get_utc_timestamp()}</code>\n"
+        f"🔎 Coins Scanned: <b>{scan_count}</b>\n"
+        f"📡 Mode: <b>{mode.upper()}</b>\n"
+        f"📈 Signals Today: <b>{signals_today}</b>\n"
+        f"💾 Signal Memory: {len(memory_signals)}"
     )
-    send_telegram_message(message)
+    send_telegram_message(msg, assistant=True)
 
-def send_error_report(context, err):
-    message = (
-        f"❗ *ERROR ALERT*\n"
-        f"📍 Context: `{context}`\n"
-        f"⚠️ Error: `{str(err)}`"
-    )
-    send_telegram_message(message, chat_id=ASSISTANT_CHAT_ID)
-
-def send_trade_execution(symbol, side, amount, entry, stop, tp1, tp2):
-    emoji = "📈" if side.lower() == "long" else "📉"
-    message = (
-        f"{emoji} *Trade Executed*\n"
-        f"• Symbol: `{symbol}`\n"
-        f"• Side: *{side.upper()}*\n"
-        f"• Amount: `{amount}`\n"
-        f"• Entry: `{entry}`\n"
-        f"• SL: `{stop}` | TP1: `{tp1}` | TP2: `{tp2}`"
-    )
-    send_telegram_message(message)
-
-def send_trade_result(symbol, result, pnl):
-    emoji = "✅" if result == "win" else "❌"
-    message = (
-        f"{emoji} *Trade Closed*\n"
-        f"• Symbol: `{symbol}`\n"
-        f"• Result: *{result.upper()}*\n"
-        f"• PnL: `{pnl:.2f} USDT`"
-    )
-    send_telegram_message(message)
+def get_utc_timestamp():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
