@@ -23,6 +23,8 @@ def score_symbol(symbol, candles_by_timeframe):
             continue
 
         close_prices = [float(c['close']) for c in candles]
+        high_prices = [float(c['high']) for c in candles]
+        low_prices = [float(c['low']) for c in candles]
 
         # RSI
         rsi = calculate_rsi(close_prices)
@@ -49,7 +51,7 @@ def score_symbol(symbol, candles_by_timeframe):
         if detect_volume_spike(candles):
             tf_score += 1
 
-        # Candle Pattern Score
+        # Candle Patterns
         pattern_score = detect_bullish_patterns(candles)
         tf_score += pattern_score
 
