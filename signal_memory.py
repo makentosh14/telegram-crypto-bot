@@ -1,24 +1,30 @@
-import time
+import json
+import os
+from datetime import datetime, timedelta
 
-# In-memory signal log (can be replaced with persistent DB in future)
-signal_log = {}
+SIGNAL_MEMORY_FILE = "logs/signal_memory.json"
 
-# Time in seconds to remember each signal (e.g., 2 hours)
-SIGNAL_EXPIRY = 2 * 60 * 60
+def load_signal_memory():
+    if not os.path.exists(SIGNAL_MEMORY_FILE):
+        return {}
+    with open(SIGNAL_MEMORY_FILE, "r") as file:
+        return json.load(file)
 
-def log_signal(symbol):
-    now = time.time()
-    signal_log[symbol] = now
+def save_signal_memory(memory):
+    os.makedirs(os.path.dirname(SIGNAL_MEMORY_FILE), exist_ok=True)
+    with open(SIGNAL_MEMORY_FILE, "w") as file:
+        json.dump(memory, file, indent=2)
 
 def is_duplicate_signal(symbol):
-    now = time.time()
-    if symbol in signal_log:
-        if now - signal_log[symbol] < SIGNAL_EXPIRY:
+    memory = load_signal_memory()
+    last_signal_time = memory.get(symbol)
+    if last_signal_time:
+        last_time = datetime.strptime(last_signal_time, "%Y-%m-%d %H:%M:%S")
+        if datetime.utcnow() - last_time < timedelta(minutes=30):
             return True
     return False
 
-def clean_old_signals():
-    now = time.time()
-    expired = [symbol for symbol, timestamp in signal_log.items() if now - timestamp > SIGNAL_EXPIRY]
-    for symbol in expired:
-        del signal_log[symbol]
+def log_signal(symbol):
+    memory = load_signal_memory()
+    memory[symbol] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    save_signal_memory(memory)
