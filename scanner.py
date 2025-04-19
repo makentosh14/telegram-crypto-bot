@@ -2,50 +2,39 @@ import aiohttp
 import asyncio
 from config import BYBIT_API_URL, TIMEFRAMES
 from logger import log
-from trend_filters import detect_breakout
 
 async def fetch_symbols():
     url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                data = await response.json()
-                symbols = [item['symbol'] for item in data['result']['list'] if "USDT" in item['symbol']]
-                return symbols
-    except Exception as e:
-        log(f"❌ Error fetching symbols: {e}")
-        return []
-
-async def fetch_candles_for_symbol(session, symbol, timeframe):
-    url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={timeframe}&limit=100"
-    try:
-        async with session.get(url) as response:
-            data = await response.json()
-            if data['retCode'] == 0:
-                candles = [
-                    {
-                        'timestamp': int(entry[0]),
-                        'open': entry[1],
-                        'high': entry[2],
-                        'low': entry[3],
-                        'close': entry[4],
-                        'volume': entry[5]
-                    }
-                    for entry in data['result']['list']
-                ]
-                return list(reversed(candles))
-    except Exception as e:
-        log(f"❌ Error fetching candles for {symbol}-{timeframe}: {e}")
-    return []
-
-async def fetch_candles(symbol, timeframes=TIMEFRAMES):
-    result = {}
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_candles_for_symbol(session, symbol, tf) for tf in timeframes]
-        responses = await asyncio.gather(*tasks)
-        for i, tf in enumerate(timeframes):
-            result[tf] = responses[i]
-    return result
+        async with session.get(url) as resp:
+            data = await resp.json()
+            symbols = [item["symbol"] for item in data["result"]["list"] if "USDT" in item["symbol"]]
+            log(f"✅ Fetched {len(symbols)} symbols.")
+            return symbols
 
-def run_async(func, *args, **kwargs):
-    return asyncio.get_event_loop().run_until_complete(func(*args, **kwargs))
+async def fetch_candles(symbol, interval="5m", limit=200):
+    url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit={limit}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+            if "result" in data and "list" in data["result"]:
+                candles = data["result"]["list"]
+                parsed = [
+                    {
+                        "timestamp": int(c[0]),
+                        "open": float(c[1]),
+                        "high": float(c[2]),
+                        "low": float(c[3]),
+                        "close": float(c[4]),
+                        "volume": float(c[5])
+                    }
+                    for c in candles
+                ]
+                return parsed
+            return []
+
+def fetch_symbols_sync():
+    return asyncio.run(fetch_symbols())
+
+def fetch_candles_sync(symbol, interval):
+    return asyncio.run(fetch_candles(symbol, interval))
