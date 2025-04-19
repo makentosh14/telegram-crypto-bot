@@ -1,48 +1,29 @@
-def detect_volume_spike(candles, multiplier=2.5):
-    """
-    Detects if the latest candle has a significant volume spike.
-    """
-    if len(candles) < 20:
+import requests
+
+def detect_volume_spike(candles, multiplier=2):
+    if len(candles) < 21:
         return False
-
-    volumes = [float(c['volume']) for c in candles[:-1]]
-    avg_volume = sum(volumes[-20:]) / 20
-    latest_volume = float(candles[-1]['volume'])
-
-    return latest_volume > avg_volume * multiplier
-
-
-def detect_volume_divergence(candles, lookback=15):
-    """
-    Detects when price is going sideways/down but volume is increasing.
-    """
-    if len(candles) < lookback:
-        return False
-
-    closes = [float(c['close']) for c in candles[-lookback:]]
-    volumes = [float(c['volume']) for c in candles[-lookback:]]
-
-    price_change = closes[-1] - closes[0]
-    volume_change = volumes[-1] - volumes[0]
-
-    return price_change <= 0 and volume_change > 0
-
-
-def detect_hidden_accumulation(candles, lookback=20):
-    """
-    Flags stealth accumulation: increasing volume with flat price range.
-    """
-    if len(candles) < lookback:
-        return False
-
-    closes = [float(c['close']) for c in candles[-lookback:]]
-    highs = [float(c['high']) for c in candles[-lookback:]]
-    lows = [float(c['low']) for c in candles[-lookback:]]
-    volumes = [float(c['volume']) for c in candles[-lookback:]]
-
-    price_range = max(highs) - min(lows)
+    volumes = [float(c['volume']) for c in candles[-21:-1]]
     avg_volume = sum(volumes) / len(volumes)
-    recent_volume = sum(volumes[-5:]) / 5
+    current_volume = float(candles[-1]['volume'])
+    return current_volume > avg_volume * multiplier
 
-    # Steady price with increasing volume
-    return price_range < (sum(closes) / len(closes)) * 0.015 and recent_volume > avg_volume * 1.5
+def fetch_btc_eth_dominance():
+    url = "https://api.coingecko.com/api/v3/global"
+    response = requests.get(url)
+    data = response.json()
+    btc_dom = data['data']['market_cap_percentage']['btc']
+    eth_dom = data['data']['market_cap_percentage']['eth']
+    return btc_dom
+
+def fetch_eth_btc_ratio():
+    url = "https://api.coingecko.com/api/v3/simple/price"
+    params = {
+        "ids": "ethereum,bitcoin",
+        "vs_currencies": "usd"
+    }
+    response = requests.get(url, params=params)
+    prices = response.json()
+    eth_price = prices['ethereum']['usd']
+    btc_price = prices['bitcoin']['usd']
+    return eth_price / btc_price if btc_price != 0 else 0
