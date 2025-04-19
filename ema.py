@@ -1,19 +1,15 @@
-# ema.py
-
-def calculate_ema(prices, period):
+def calculate_ema(prices, period=9):
     if len(prices) < period:
         return None
     ema = prices[0]
-    multiplier = 2 / (period + 1)
+    k = 2 / (period + 1)
     for price in prices[1:]:
-        ema = (price - ema) * multiplier + ema
+        ema = price * k + ema * (1 - k)
     return ema
 
-def detect_ema_crossover(prices, short=9, long=21):
-    if len(prices) < long:
+def detect_ema_crossover(close_prices, short=9, long=21):
+    if len(close_prices) < long:
         return False
-
-    short_ema = calculate_ema(prices[-short * 3:], short)
-    long_ema = calculate_ema(prices[-long * 3:], long)
-
+    short_ema = calculate_ema(close_prices[-short:], short)
+    long_ema = calculate_ema(close_prices[-long:], long)
     return short_ema > long_ema
