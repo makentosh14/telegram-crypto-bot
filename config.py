@@ -1,32 +1,42 @@
 import os
 
-# === Bybit API ===
-BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
-BYBIT_API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
+# === API KEYS ===
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY") or "tL7vmTEDT5B8mp4Yer"
+BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET") or "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "1806610681"
+
+# === BYBIT ===
 BYBIT_API_URL = "https://api.bybit.com"
+TRADE_SYMBOL_PREFIX = "USDT"
+USE_TESTNET = False
 
-# === Telegram Bot ===
-TELEGRAM_BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
-TELEGRAM_CHAT_ID = "1806610681"
+# === TIMEFRAMES ===
+TIMEFRAMES = ["5m", "15m", "1h"]
 
-# === Scanning Settings ===
-TIMEFRAMES = ['5m', '15m', '1h']
-SYMBOL_LIMIT = 500  # Limit if needed
+# === SCORING ===
+MINIMUM_SCORE = 3  # required score to trigger signal
+HIGH_CONFIDENCE_SCORE = 5
 
-# === Risk Settings ===
-DEFAULT_RISK = 0.03
-SCALP_RISK = 0.03
-SWING_RISK = 0.015
-MEME_RISK = 0.02
+# === RISK SETTINGS ===
+DEFAULT_RISK_PER_TRADE = 0.03
+MEME_COIN_RISK = 0.02
+SWING_TRADE_RISK = 0.015
+SCALP_TRADE_RISK = 0.03
+ALTSEASON_RISK_BOOST = 0.05
 MAX_DAILY_LOSS = 0.10
 
-# === Trade Settings ===
-TP_RATIO_1 = 1.5
-TP_RATIO_2 = 2.5
-USE_TRAILING_SL = True
-TRAIL_SL_OFFSET = 0.3  # 30% behind high
+# === SIGNAL FILTERS ===
+DUPLICATE_SIGNAL_COOLDOWN = 90 * 60  # 90 minutes
+TOP_SYMBOL_LIMIT = 5
+MIN_VOLUME_USDT = 500000  # Minimum 24h volume for consideration
 
+# === OTHER ===
+SPOT_MODE_ENABLED = True
+FUTURES_MODE_ENABLED = True
+LIVE_TRADE_MODE = True  # Set to False for dry-run
 
-# Leverage
-USE_AUTO_LEVERAGE = True
-DEFAULT_LEVERAGE = 5
+# === DEBUG ===
+DEBUG_PRINT_SCANNED = False
+DEBUG_PRINT_SCORES = False
