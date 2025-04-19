@@ -1,67 +1,24 @@
-import json
-import os
+import time
 
-MEMORY_FILE = "signal_memory.json"
+# In-memory signal log (can be replaced with persistent DB in future)
+signal_log = {}
 
-class SignalMemory:
-    def __init__(self):
-        self.memory = {}
-        self.load_memory()
+# Time in seconds to remember each signal (e.g., 2 hours)
+SIGNAL_EXPIRY = 2 * 60 * 60
 
-    def load_memory(self):
-        if os.path.exists(MEMORY_FILE):
-            with open(MEMORY_FILE, "r") as f:
-                try:
-                    self.memory = json.load(f)
-                except json.JSONDecodeError:
-                    self.memory = {}
-        else:
-            self.memory = {}
+def log_signal(symbol):
+    now = time.time()
+    signal_log[symbol] = now
 
-    def save_memory(self):
-        with open(MEMORY_FILE, "w") as f:
-            json.dump(self.memory, f, indent=2)
+def is_duplicate_signal(symbol):
+    now = time.time()
+    if symbol in signal_log:
+        if now - signal_log[symbol] < SIGNAL_EXPIRY:
+            return True
+    return False
 
-    def update_result(self, symbol, result):
-        """
-        result: 'win' or 'loss'
-        """
-        if symbol not in self.memory:
-            self.memory[symbol] = {"wins": 0, "losses": 0}
-
-        if result == "win":
-            self.memory[symbol]["wins"] += 1
-        elif result == "loss":
-            self.memory[symbol]["losses"] += 1
-
-        self.save_memory()
-
-    def get_win_rate(self, symbol):
-        if symbol not in self.memory:
-            return 0.5  # Neutral default
-
-        wins = self.memory[symbol]["wins"]
-        losses = self.memory[symbol]["losses"]
-        total = wins + losses
-
-        if total == 0:
-            return 0.5
-
-        return wins / total
-
-    def is_trusted_symbol(self, symbol, threshold=0.65, min_trades=5):
-        """
-        Returns True if the symbol has proven to be profitable historically.
-        """
-        if symbol not in self.memory:
-            return False
-
-        wins = self.memory[symbol]["wins"]
-        losses = self.memory[symbol]["losses"]
-        total = wins + losses
-
-        if total < min_trades:
-            return False
-
-        win_rate = wins / total
-        return win_rate >= threshold
+def clean_old_signals():
+    now = time.time()
+    expired = [symbol for symbol, timestamp in signal_log.items() if now - timestamp > SIGNAL_EXPIRY]
+    for symbol in expired:
+        del signal_log[symbol]
