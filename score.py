@@ -1,3 +1,5 @@
+# score.py
+
 from rsi import calculate_rsi
 from macd import calculate_macd
 from supertrend import get_supertrend_signal
@@ -51,11 +53,11 @@ def score_symbol(symbol, candles_by_timeframe):
         if detect_volume_spike(candles):
             tf_score += 1
 
-        # Candle Patterns
+        # Bullish Candle Patterns
         pattern_score = detect_bullish_patterns(candles)
         tf_score += pattern_score
 
-        # Bollinger Breakout
+        # Bollinger Band Breakout
         if detect_bollinger_breakout(close_prices):
             tf_score += 1
 
@@ -63,11 +65,11 @@ def score_symbol(symbol, candles_by_timeframe):
         if detect_ema_crossover(close_prices):
             tf_score += 1
 
-        # Breakout Detection
+        # Resistance Breakout
         if detect_breakout(candles):
             tf_score += 1
 
         scores[tf] = tf_score
-        total_score += tf_score * weighted_scores[tf]
+        total_score += tf_score * weighted_scores.get(tf, 0)
 
     return round(total_score, 2), scores
