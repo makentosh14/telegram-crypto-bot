@@ -6,13 +6,15 @@ from trade_executor import execute_trade_if_valid
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
 
-TRADING_MODE = "auto"  # 'signal' or 'auto'
+# === Global Settings ===
+TRADING_MODE = "auto"  # options: 'signal' or 'auto'
 
 def main():
     print("🚀 Bot starting...")
 
     while True:
         try:
+            # === Get market context ===
             trend_context = get_trend_context()
             btc_trend = trend_context['btc_trend']
             altseason = trend_context['altseason']
@@ -30,6 +32,7 @@ def main():
                 max_risk_per_trade = 0.025
                 scan_interval = 180
 
+            # === Telegram update hourly ===
             current_minute = int(time.time() / 60)
             if current_minute % 60 == 0:
                 send_telegram_message(
@@ -40,9 +43,11 @@ def main():
                     f"Risk: {int(max_risk_per_trade * 100)}%"
                 )
 
+            # === Fetch coins ===
             symbols = fetch_symbols()
             print(f"✅ Fetched {len(symbols)} symbols.")
 
+            # === Scan symbols ===
             top_signals = []
             for symbol in symbols:
                 candles_by_timeframe = {
@@ -50,7 +55,7 @@ def main():
                 }
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
 
-                if score >= 3:
+                if score >= 3:  # You can fine-tune threshold
                     if not is_duplicate_signal(symbol):
                         signal_data = {
                             'symbol': symbol,
@@ -65,7 +70,8 @@ def main():
                             execute_trade_if_valid(signal_data, max_risk=max_risk_per_trade)
                         else:
                             send_telegram_message(
-                                f"🚨 Trade Setup: {symbol}\nScore: {score}\nTF Scores: {tf_scores}"
+                                f"🚨 Trade Setup: {symbol}\nScore: {score}\n"
+                                f"TF Scores: {tf_scores}"
                             )
 
                         top_signals.append(symbol)
