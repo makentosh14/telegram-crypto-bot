@@ -58,38 +58,37 @@ async def fetch_symbols():
 # === Fetch Candles with Fallbacks ===
 async def fetch_candles(symbol, timeframe='5m', limit=100):
     fallback_categories = ['linear', 'inverse', 'spot']
+    supported_intervals = {
+        'linear': ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'],
+        'inverse': ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'],
+        'spot': ['1m', '5m', '15m', '30m', '1h', '4h']
+    }
 
-    async with aiohttp.ClientSession() as session:
-        for category in fallback_categories:
-            try:
-                url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
-                log(f"📦 Fetching candles for {symbol} [{timeframe}] | Trying category: {category}")
+    for category in fallback_categories:
+        if timeframe not in supported_intervals[category]:
+            log(f"⚠️ Skipping {symbol} [{timeframe}] in {category}: Unsupported interval.")
+            continue
 
+        try:
+            url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+            log(f"📦 Fetching candles for {symbol} [{timeframe}] | Trying category: {category}")
+
+            async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
                     raw = await resp.text()
-
-                    if resp.status != 200:
-                        log(f"❌ HTTP {resp.status} for {symbol} in {category} [{timeframe}]")
-                        continue
-
                     try:
                         data = await resp.json()
                     except Exception:
-                        log(f"❌ JSON decode error for {symbol} [{category}]. Raw:\n{raw}")
+                        log(f"❌ Failed to parse candle JSON for {symbol} in {category}. Raw:\n{raw}")
                         continue
 
-                    # Check for retCode
                     if data.get("retCode") != 0:
                         log(f"❌ API Error for {symbol} [{category}] retCode {data.get('retCode')}: {data.get('retMsg')}")
                         continue
 
                     candle_list = data.get("result", {}).get("list", [])
-                    if not candle_list:
+                    if not candle_list or len(candle_list) < 20:
                         log(f"⚠️ No candles returned for {symbol} [{timeframe}] in {category}")
-                        continue
-
-                    if len(candle_list) < 20:
-                        log(f"⚠️ Not enough candles ({len(candle_list)}) for {symbol} [{timeframe}] in {category}")
                         continue
 
                     candles = []
@@ -109,9 +108,9 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                     log(f"✅ {symbol} [{timeframe}] - {category} - {len(candles)} candles fetched")
                     return candles
 
-            except Exception as e:
-                log(f"❌ Exception fetching {symbol} in {category} [{timeframe}]: {e}")
-                continue
+        except Exception as e:
+            log(f"❌ Exception fetching {symbol} in {category} [{timeframe}]: {e}")
+            continue
 
     log(f"⛔ {symbol} [{timeframe}] - All fallback category attempts failed.")
     return []
