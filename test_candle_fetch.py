@@ -7,23 +7,17 @@ import sys
 if sys.platform.startswith('win'):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-load_dotenv()
-
-BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
 BYBIT_API_URL = "https://api.bybit.com"
 
 async def test_fetch_candles(symbol="BTCUSDT", timeframe="5m", limit=100):
     url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={timeframe}&limit={limit}"
-    headers = {
-        "X-BYBIT-API-KEY": "tL7vmTEDT5B8mp4Yer"
-    }
 
-    print(f"📦 Testing candle fetch with API key for {symbol} [{timeframe}]...")
+    print(f"📦 Testing public candle fetch for {symbol} [{timeframe}]...")
     print(f"🔗 URL: {url}")
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as resp:
+            async with session.get(url) as resp:
                 raw = await resp.text()
                 try:
                     data = await resp.json()
