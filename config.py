@@ -20,6 +20,10 @@ USE_AUTO_REENTRY = True
 # === Timeframes ===
 TIMEFRAMES = ["5m", "15m", "1h"]
 
+# === Other Constants ===
+BTC_SYMBOL = "BTCUSDT"
+ETH_SYMBOL = "ETHUSDT"
+
 # === Strategy Thresholds ===
 MIN_SCORE_THRESHOLD = 3.0
 HIGH_CONVICTION_SCORE = 4.5
