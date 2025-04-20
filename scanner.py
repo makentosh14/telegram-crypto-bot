@@ -5,13 +5,14 @@ from logger import log
 from trend_filters import detect_breakout
 
 async def fetch_symbols():
-    symbols = []
+    symbols = set()
     cursor = None
+    base_url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
 
     try:
         async with aiohttp.ClientSession() as session:
             while True:
-                url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
+                url = base_url
                 if cursor:
                     url += f"&cursor={cursor}"
 
@@ -23,16 +24,16 @@ async def fetch_symbols():
 
                     instruments = data["result"].get("list", [])
                     for instrument in instruments:
-                        symbol = instrument["symbol"]
+                        symbol = instrument.get("symbol", "")
                         if symbol.endswith("USDT"):
-                            symbols.append(symbol)
+                            symbols.add(symbol)
 
                     next_cursor = data["result"].get("nextPageCursor")
                     if not next_cursor or next_cursor == cursor:
                         break
                     cursor = next_cursor
 
-        return symbols
+        return list(symbols)
 
     except Exception as e:
         log(f"❌ Exception while fetching symbols: {e}")
