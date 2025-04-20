@@ -7,7 +7,7 @@ from trend_filters import detect_breakout
 CATEGORIES = ['linear', 'inverse', 'spot']
 symbol_category_map = {}  # Global cache to track each symbol's category
 
-
+# === Symbol Fetching ===
 async def fetch_symbols():
     symbols = set()
 
@@ -20,15 +20,14 @@ async def fetch_symbols():
                     if cursor:
                         url += f"&cursor={cursor}"
 
-                    log(f"🌐 Fetching symbols from category: {category} | URL: {url}")
-
+                    log(f"🌐 Fetching symbols from {category} | URL: {url}")
                     try:
                         async with session.get(url) as resp:
                             raw = await resp.text()
                             try:
                                 data = await resp.json()
                             except Exception:
-                                log(f"❌ Failed to parse JSON. Raw response:\n{raw}")
+                                log(f"❌ Failed to parse symbol JSON for {category}. Raw:\n{raw}")
                                 break
 
                             if data.get("retCode") != 0:
@@ -57,16 +56,17 @@ async def fetch_symbols():
         return list(symbols)
 
     except Exception as e:
-        log(f"❌ Exception while fetching symbols: {e}")
+        log(f"❌ Fatal error while fetching symbols: {e}")
         return []
 
-
-async def fetch_candles(symbol, timeframe='5m', limit=100):
+# === Candle Fetching ===
+async def fetch_candles(symbol, timeframe='5m'):
     fallback_categories = ['linear', 'inverse', 'spot']
+    dynamic_limit = {'5m': 100, '15m': 100, '1h': 50}.get(timeframe, 100)
 
     for category in fallback_categories:
         try:
-            url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+            url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={dynamic_limit}"
             log(f"📦 Fetching candles for {symbol} [{timeframe}] | Trying category: {category}")
 
             async with aiohttp.ClientSession() as session:
@@ -80,7 +80,7 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
 
                     candle_list = data.get("result", {}).get("list", [])
 
-                    if not candle_list or len(candle_list) < 50:
+                    if not candle_list or len(candle_list) < 20:
                         log(f"⚠️ {symbol} [{timeframe}] - {category} - Not enough candles ({len(candle_list)})")
                         continue
 
@@ -97,7 +97,7 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                             'volume': item[5]
                         })
 
-                    symbol_category_map[symbol] = category  # Save working category
+                    symbol_category_map[symbol] = category
                     log(f"✅ {symbol} [{timeframe}] - {category} - {len(candles)} candles fetched")
                     return candles
 
@@ -105,5 +105,5 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
             log(f"❌ Exception fetching {symbol} in {category} [{timeframe}]: {e}")
             continue
 
-    log(f"⛔ {symbol} [{timeframe}] - All category attempts failed.")
+    log(f"⛔ {symbol} [{timeframe}] - All fallback category attempts failed.")
     return []
