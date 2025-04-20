@@ -1,3 +1,5 @@
+import random
+
 def detect_whale_heatmap_activity(candles, threshold_ratio=3.0):
     if len(candles) < 30:
         return False
