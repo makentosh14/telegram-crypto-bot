@@ -9,6 +9,16 @@ from signal_memory import log_signal, is_duplicate_signal
 from datetime import datetime
 
 TRADING_MODE = "auto"  # "auto" or "signal"
+TIMEFRAMES = ['5m', '15m', '1h']
+CANDLE_THRESHOLDS = [100, 50, 30]  # fallback levels
+
+async def safe_fetch_candles(symbol, tf):
+    for limit in CANDLE_THRESHOLDS:
+        candles = await fetch_candles(symbol, tf, limit=limit)
+        if candles and len(candles) >= 30:
+            return candles
+    print(f"⛔ {symbol} [{tf}] - All fallback attempts failed.")
+    return []
 
 async def main():
     print("🚀 Bot starting...")
@@ -49,17 +59,14 @@ async def main():
 
             for symbol in symbols:
                 candles_by_timeframe = {
-                    tf: await fetch_candles(symbol, tf) for tf in ['5m', '15m', '1h']
+                    tf: await safe_fetch_candles(symbol, tf) for tf in TIMEFRAMES
                 }
 
-                # Skip if any TF has fewer than 20 candles
-                if any(len(candles) < 20 for candles in candles_by_timeframe.values()):
-                    print(f"⏩ Skipping {symbol}: not enough data in one or more timeframes.")
+                if any(len(candles) < 30 for candles in candles_by_timeframe.values()):
+                    print(f"⏩ Skipping {symbol}: not enough candles even after fallback.")
                     continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
-
-                # Log score
                 print(f"🔍 {symbol} | Score: {score} | TF Scores: {tf_scores}")
 
                 if score >= 3:
