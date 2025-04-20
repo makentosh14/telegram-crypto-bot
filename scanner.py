@@ -4,34 +4,41 @@ from config import BYBIT_API_URL, TIMEFRAMES
 from logger import log
 from trend_filters import detect_breakout
 
+CATEGORIES = ['linear', 'inverse', 'spot']
+symbol_category_map = {}  # Cache to speed up repeated lookups
+
 async def fetch_symbols():
     symbols = set()
-    cursor = None
-    base_url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
 
     try:
         async with aiohttp.ClientSession() as session:
-            while True:
-                url = base_url
-                if cursor:
-                    url += f"&cursor={cursor}"
+            for category in CATEGORIES:
+                cursor = None
+                while True:
+                    url = f"{BYBIT_API_URL}/v5/market/instruments-info?category={category}"
+                    if cursor:
+                        url += f"&cursor={cursor}"
 
-                async with session.get(url) as resp:
-                    data = await resp.json()
-                    if data.get("retCode") != 0:
-                        log(f"❌ Error fetching symbols: {data}")
-                        break
+                    async with session.get(url) as resp:
+                        data = await resp.json()
+                        if data.get("retCode") != 0:
+                            log(f"❌ Error fetching symbols ({category}): {data}")
+                            break
 
-                    instruments = data["result"].get("list", [])
-                    for instrument in instruments:
-                        symbol = instrument.get("symbol", "")
-                        if symbol.endswith("USDT"):
-                            symbols.add(symbol)
+                        instruments = data["result"].get("list", [])
+                        for instrument in instruments:
+                            symbol = instrument.get("symbol", "")
+                            status = instrument.get("status", "")
+                            quote = instrument.get("quoteCoin", "")
 
-                    next_cursor = data["result"].get("nextPageCursor")
-                    if not next_cursor or next_cursor == cursor:
-                        break
-                    cursor = next_cursor
+                            if symbol.endswith("USDT") and status == "Trading":
+                                symbols.add(symbol)
+                                symbol_category_map[symbol] = category  # store which category it belongs to
+
+                        next_cursor = data["result"].get("nextPageCursor")
+                        if not next_cursor or next_cursor == cursor:
+                            break
+                        cursor = next_cursor
 
         return list(symbols)
 
@@ -40,8 +47,11 @@ async def fetch_symbols():
         return []
 
 async def fetch_candles(symbol, timeframe='5m', limit=100):
-    url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={timeframe}&limit={limit}"
     try:
+        # Determine the correct category for the symbol
+        category = symbol_category_map.get(symbol, "linear")  # fallback default
+        url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 data = await resp.json()
