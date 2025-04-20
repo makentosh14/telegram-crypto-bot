@@ -2,6 +2,10 @@ import aiohttp
 import asyncio
 import os
 from dotenv import load_dotenv
+import sys
+
+if sys.platform.startswith('win'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 load_dotenv()
 
