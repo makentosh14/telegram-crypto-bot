@@ -86,3 +86,19 @@ def close_position(symbol):
         "qty": 1
     }
     return make_request("POST", endpoint, order, is_private=True)
+    
+def set_leverage_mode(symbol, mode="ISOLATED"):
+    try:
+        response = session.post(
+            f"{BASE_URL}/v5/position/set-margin-mode",
+            headers={"X-BYBIT-API-KEY": BYBIT_API_KEY},
+            json={
+                "category": "linear",
+                "symbol": symbol,
+                "tradeMode": 1 if mode.upper() == "ISOLATED" else 0
+            }
+        )
+        return response.json()
+    except Exception as e:
+        print(f"[ERROR] Failed to set leverage mode for {symbol}: {e}")
+        return None
