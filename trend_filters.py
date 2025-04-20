@@ -1,35 +1,41 @@
-from volume import fetch_btc_eth_dominance, fetch_eth_btc_ratio
-from scanner import fetch_candles
+import requests
+from config import BTC_SYMBOL
+
+def get_trend_context():
+    btc_candles = fetch_btc_candles()
+
+    btc_trend = detect_btc_trend(btc_candles)
+    altseason = detect_altseason()
+
+    return {
+        "btc_trend": btc_trend,
+        "altseason": altseason
+    }
+
+def fetch_btc_candles():
+    url = f"https://api.bybit.com/v5/market/kline?symbol={BTC_SYMBOL}&interval=60&limit=50"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.json().get("result", {}).get("list", [])
+    except Exception as e:
+        print(f"Error fetching BTC candles: {e}")
+        return []
+
+def detect_btc_trend(candles):
+    if len(candles) < 2:
+        return "unknown"
+    last_close = float(candles[-1][4])
+    prev_close = float(candles[-2][4])
+    return "uptrend" if last_close > prev_close else "downtrend"
+
+def detect_altseason():
+    # Placeholder for real altseason detection logic (e.g. ETH/BTC ratio, meme coin volume)
+    return False
 
 def detect_breakout(candles, lookback=20):
     if len(candles) < lookback:
         return False
     highs = [float(c['high']) for c in candles[-lookback:-1]]
-    current_close = float(candles[-1]['close'])
-    return current_close > max(highs)
-
-def detect_btc_trend():
-    candles = fetch_candles("BTCUSDT", "1h")
-    if len(candles) < 50:
-        return 'unknown'
-    closes = [float(c['close']) for c in candles]
-    return 'uptrend' if closes[-1] > sum(closes[-20:]) / 20 else 'downtrend'
-
-def detect_altseason():
-    try:
-        btc_dominance = fetch_btc_eth_dominance()
-        eth_btc_ratio = fetch_eth_btc_ratio()
-
-        if btc_dominance < 48 and eth_btc_ratio > 0.065:
-            return True
-        return False
-    except:
-        return False
-
-def get_trend_context():
-    btc_trend = detect_btc_trend()
-    altseason = detect_altseason()
-    return {
-        "btc_trend": btc_trend,
-        "altseason": altseason
-    }
+    close = float(candles[-1]['close'])
+    return close > max(highs)
