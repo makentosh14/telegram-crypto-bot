@@ -8,6 +8,7 @@ BYBIT_API_URL = "https://api.bybit.com"
 # === Telegram ===
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "1806610681"
+ASSISTANT_CHAT_ID = "-1000000000000"
 
 # === Bot Behavior Settings ===
 DEFAULT_SCAN_INTERVAL = 180  # in seconds
