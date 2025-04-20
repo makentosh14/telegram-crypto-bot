@@ -60,7 +60,7 @@ async def fetch_symbols():
         return []
 
 # === Candle Fetching ===
-async def fetch_candles(symbol, timeframe='5m'):
+async def fetch_candles(symbol, timeframe='5m', limit=100):
     fallback_categories = ['linear', 'inverse', 'spot']
     dynamic_limit = {'5m': 100, '15m': 100, '1h': 100}.get(timeframe, 100)
 
