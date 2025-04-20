@@ -67,16 +67,29 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
 
                 async with session.get(url) as resp:
                     raw = await resp.text()
+
+                    if resp.status != 200:
+                        log(f"❌ HTTP {resp.status} for {symbol} in {category} [{timeframe}]")
+                        continue
+
                     try:
                         data = await resp.json()
                     except Exception:
-                        log(f"❌ Failed to parse candle JSON for {symbol} ({category}). Raw:\n{raw}")
+                        log(f"❌ JSON decode error for {symbol} [{category}]. Raw:\n{raw}")
+                        continue
+
+                    # Check for retCode
+                    if data.get("retCode") != 0:
+                        log(f"❌ API Error for {symbol} [{category}] retCode {data.get('retCode')}: {data.get('retMsg')}")
                         continue
 
                     candle_list = data.get("result", {}).get("list", [])
-
                     if not candle_list:
                         log(f"⚠️ No candles returned for {symbol} [{timeframe}] in {category}")
+                        continue
+
+                    if len(candle_list) < 20:
+                        log(f"⚠️ Not enough candles ({len(candle_list)}) for {symbol} [{timeframe}] in {category}")
                         continue
 
                     candles = []
@@ -92,8 +105,8 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                             'volume': item[5]
                         })
 
-                    log(f"✅ {symbol} [{timeframe}] - {category} - {len(candles)} candles fetched")
                     symbol_category_map[symbol] = category
+                    log(f"✅ {symbol} [{timeframe}] - {category} - {len(candles)} candles fetched")
                     return candles
 
             except Exception as e:
