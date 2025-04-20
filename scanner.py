@@ -7,6 +7,7 @@ from trend_filters import detect_breakout
 CATEGORIES = ['linear', 'inverse', 'spot']
 symbol_category_map = {}  # Global cache to track each symbol's category
 
+
 # === Symbol Fetching ===
 async def fetch_symbols():
     symbols = set()
@@ -31,7 +32,7 @@ async def fetch_symbols():
                                 break
 
                             if data.get("retCode") != 0:
-                                log(f"❌ Error fetching symbols ({category}): {data}")
+                                log(f"❌ Error fetching symbols ({category}): {data.get('retMsg', '')}")
                                 break
 
                             instruments = data.get("result", {}).get("list", [])
@@ -59,10 +60,11 @@ async def fetch_symbols():
         log(f"❌ Fatal error while fetching symbols: {e}")
         return []
 
+
 # === Candle Fetching ===
 async def fetch_candles(symbol, timeframe='5m', limit=100):
     fallback_categories = ['linear', 'inverse', 'spot']
-    dynamic_limit = {'5m': 100, '15m': 100, '1h': 100}.get(timeframe, 100)
+    dynamic_limit = {'5m': 200, '15m': 150, '1h': 120}.get(timeframe, limit)
 
     for category in fallback_categories:
         try:
@@ -78,10 +80,14 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                         log(f"❌ Failed to parse candle JSON for {symbol} in {category}. Raw:\n{raw}")
                         continue
 
-                    candle_list = data.get("result", {}).get("list", [])
+                    if data.get("retCode") != 0:
+                        log(f"❌ Error fetching candles for {symbol} [{timeframe}] in {category}: {data.get('retMsg', '')}")
+                        continue
 
+                    candle_list = data.get("result", {}).get("list", [])
                     if not candle_list or len(candle_list) < 20:
                         log(f"⚠️ {symbol} [{timeframe}] - {category} - Not enough candles ({len(candle_list)})")
+                        log(f"📤 Raw data: {data}")
                         continue
 
                     candles = []
