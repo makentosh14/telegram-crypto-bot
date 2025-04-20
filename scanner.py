@@ -5,7 +5,7 @@ from logger import log
 from trend_filters import detect_breakout
 
 CATEGORIES = ['linear', 'inverse', 'spot']
-symbol_category_map = {}  # Cache to speed up repeated lookups
+symbol_category_map = {}  # Caches category per symbol
 
 async def fetch_symbols():
     symbols = set()
@@ -25,7 +25,7 @@ async def fetch_symbols():
                             log(f"❌ Error fetching symbols ({category}): {data}")
                             break
 
-                        instruments = data["result"].get("list", [])
+                        instruments = data.get("result", {}).get("list", [])
                         for instrument in instruments:
                             symbol = instrument.get("symbol", "")
                             status = instrument.get("status", "")
@@ -33,12 +33,11 @@ async def fetch_symbols():
 
                             if symbol.endswith("USDT") and status == "Trading":
                                 symbols.add(symbol)
-                                symbol_category_map[symbol] = category  # store which category it belongs to
+                                symbol_category_map[symbol] = category
 
-                        next_cursor = data["result"].get("nextPageCursor")
-                        if not next_cursor or next_cursor == cursor:
+                        cursor = data.get("result", {}).get("nextPageCursor")
+                        if not cursor:
                             break
-                        cursor = next_cursor
 
         return list(symbols)
 
@@ -48,28 +47,32 @@ async def fetch_symbols():
 
 async def fetch_candles(symbol, timeframe='5m', limit=100):
     try:
-        # Determine the correct category for the symbol
-        category = symbol_category_map.get(symbol, "linear")  # fallback default
+        category = symbol_category_map.get(symbol, "linear")
         url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 data = await resp.json()
-                if 'result' in data and 'list' in data['result']:
-                    candles = []
-                    for item in data['result']['list']:
-                        candles.append({
-                            'timestamp': int(item[0]),
-                            'open': item[1],
-                            'high': item[2],
-                            'low': item[3],
-                            'close': item[4],
-                            'volume': item[5]
-                        })
-                    return candles
-                else:
-                    log(f"⚠️ Invalid candle response for {symbol}")
+                candle_list = data.get("result", {}).get("list", [])
+
+                if not candle_list or len(candle_list) < 5:
                     return []
+
+                candles = []
+                for item in candle_list:
+                    if len(item) < 6:
+                        continue
+                    candles.append({
+                        'timestamp': int(item[0]),
+                        'open': item[1],
+                        'high': item[2],
+                        'low': item[3],
+                        'close': item[4],
+                        'volume': item[5]
+                    })
+
+                return candles
+
     except Exception as e:
         log(f"❌ Error fetching candles for {symbol}: {e}")
         return []
