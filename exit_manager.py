@@ -1,32 +1,24 @@
-# exit_manager.py
-
-def generate_tp_sl(entry_price, side, risk_reward_1=1.5, risk_reward_2=3.0, stop_loss_pct=0.02):
-    if side == "buy":
-        stop_loss = entry_price * (1 - stop_loss_pct)
-        take_profit_1 = entry_price * (1 + risk_reward_1 * stop_loss_pct)
-        take_profit_2 = entry_price * (1 + risk_reward_2 * stop_loss_pct)
+def generate_tp_sl(entry_price, direction, atr=0.01):
+    if direction == "long":
+        tp1 = round(entry_price * (1 + 0.015), 6)
+        tp2 = round(entry_price * (1 + 0.03), 6)
+        sl = round(entry_price * (1 - atr), 6)
     else:
-        stop_loss = entry_price * (1 + stop_loss_pct)
-        take_profit_1 = entry_price * (1 - risk_reward_1 * stop_loss_pct)
-        take_profit_2 = entry_price * (1 - risk_reward_2 * stop_loss_pct)
+        tp1 = round(entry_price * (1 - 0.015), 6)
+        tp2 = round(entry_price * (1 - 0.03), 6)
+        sl = round(entry_price * (1 + atr), 6)
 
-    return round(stop_loss, 6), round(take_profit_1, 6), round(take_profit_2, 6)
+    return {
+        "tp1": tp1,
+        "tp2": tp2,
+        "sl": sl,
+    }
 
 
-def should_trail_stop(current_price, entry_price, side, tp1_hit):
-    """
-    Logic to activate trailing stop once TP1 is hit.
-    If trailing logic is triggered, SL will move to breakeven or higher.
-    """
-    if not tp1_hit:
-        return None
-
-    breakeven = entry_price
-    trail_offset = 0.005  # Example: 0.5% below market for long
-
-    if side == "buy":
-        trailing_stop = current_price * (1 - trail_offset)
-        return max(trailing_stop, breakeven)
+def smart_trailing_stop(price, current_sl, direction, buffer=0.005):
+    if direction == "long":
+        new_sl = round(price * (1 - buffer), 6)
+        return new_sl if new_sl > current_sl else current_sl
     else:
-        trailing_stop = current_price * (1 + trail_offset)
-        return min(trailing_stop, breakeven)
+        new_sl = round(price * (1 + buffer), 6)
+        return new_sl if new_sl < current_sl else current_sl
