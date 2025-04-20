@@ -57,7 +57,7 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                 data = await resp.json()
                 candle_list = data.get("result", {}).get("list", [])
 
-                if not candle_list or len(candle_list) < 50:
+                if not candle_list or len(candle_list) < 20:
                     log(f"⚠️ {symbol} [{timeframe}] - Not enough candles ({len(candle_list)})")
                     return []
 
