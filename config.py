@@ -9,8 +9,25 @@ BYBIT_API_URL = "https://api.bybit.com"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "1806610681"
 
-# === Timeframes to scan ===
-TIMEFRAMES = ['5m', '15m', '1h']
+# === Bot Behavior Settings ===
+DEFAULT_SCAN_INTERVAL = 180  # in seconds
+DEFAULT_RISK = 0.03  # 3% default risk
+MAX_DAILY_LOSS = 0.1  # 10% max daily drawdown
+TRADE_MODE = "auto"  # "signal" or "auto"
+USE_SMART_EXIT = True
+USE_AUTO_REENTRY = True
+
+# === Timeframes ===
+TIMEFRAMES = ["5m", "15m", "1h"]
+
+# === Strategy Thresholds ===
+MIN_SCORE_THRESHOLD = 3.0
+HIGH_CONVICTION_SCORE = 4.5
+
+# === Altseason Scan Adaptation ===
+ALTSEASON_SCAN_INTERVAL = 120
+NORMAL_SCAN_INTERVAL = 180
+HIGH_VOL_SCAN_INTERVAL = 60
 
 # === Risk & Strategy Settings ===
 DEFAULT_RISK = 0.03
