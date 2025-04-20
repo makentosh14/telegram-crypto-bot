@@ -20,26 +20,38 @@ async def fetch_symbols():
                     if cursor:
                         url += f"&cursor={cursor}"
 
-                    async with session.get(url) as resp:
-                        data = await resp.json()
-                        if data.get("retCode") != 0:
-                            log(f"❌ Error fetching symbols ({category}): {data}")
-                            break
+                    log(f"🌐 Fetching symbols from category: {category} | URL: {url}")
 
-                        instruments = data.get("result", {}).get("list", [])
-                        for instrument in instruments:
-                            symbol = instrument.get("symbol", "")
-                            status = instrument.get("status", "")
-                            quote = instrument.get("quoteCoin", "")
+                    try:
+                        async with session.get(url) as resp:
+                            raw = await resp.text()
+                            try:
+                                data = await resp.json()
+                            except Exception:
+                                log(f"❌ Failed to parse JSON. Raw response:\n{raw}")
+                                break
 
-                            if symbol.endswith("USDT") and status == "Trading":
-                                symbols.add(symbol)
-                                symbol_category_map[symbol] = category
+                            if data.get("retCode") != 0:
+                                log(f"❌ Error fetching symbols ({category}): {data}")
+                                break
 
-                        next_cursor = data.get("result", {}).get("nextPageCursor")
-                        if not next_cursor or next_cursor == cursor:
-                            break
-                        cursor = next_cursor
+                            instruments = data.get("result", {}).get("list", [])
+                            for instrument in instruments:
+                                symbol = instrument.get("symbol", "")
+                                status = instrument.get("status", "")
+                                quote = instrument.get("quoteCoin", "")
+
+                                if symbol.endswith("USDT") and status == "Trading":
+                                    symbols.add(symbol)
+                                    symbol_category_map[symbol] = category
+
+                            next_cursor = data.get("result", {}).get("nextPageCursor")
+                            if not next_cursor or next_cursor == cursor:
+                                break
+                            cursor = next_cursor
+
+                    except Exception as e:
+                        log(f"❌ Exception during symbol fetch ({category}): {e}")
 
         log(f"✅ Total tradable symbols fetched: {len(symbols)}")
         return list(symbols)
@@ -55,9 +67,17 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
     for category in fallback_categories:
         try:
             url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+            log(f"📦 Fetching candles for {symbol} [{timeframe}] | Trying category: {category}")
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as resp:
-                    data = await resp.json()
+                    raw = await resp.text()
+                    try:
+                        data = await resp.json()
+                    except Exception:
+                        log(f"❌ Failed to parse candle JSON for {symbol} in {category}. Raw:\n{raw}")
+                        continue
+
                     candle_list = data.get("result", {}).get("list", [])
 
                     if not candle_list or len(candle_list) < 50:
