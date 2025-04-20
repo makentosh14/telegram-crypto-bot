@@ -4,10 +4,10 @@ import aiohttp
 import asyncio
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
-BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
 async def send_telegram_message(message: str, chat_id: str = TELEGRAM_CHAT_ID):
-    if not TELEGRAM_TOKEN or not chat_id:
+    if not TELEGRAM_BOT_TOKEN or not chat_id:
         print("❌ Telegram config missing.")
         return
 
