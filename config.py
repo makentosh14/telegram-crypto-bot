@@ -25,6 +25,7 @@ TIMEFRAMES = ["5m", "15m", "1h"]
 # === Other Constants ===
 BTC_SYMBOL = "BTCUSDT"
 ETH_SYMBOL = "ETHUSDT"
+QUOTE_ASSET = "USDT"
 
 # === Strategy Thresholds ===
 MIN_SCORE_THRESHOLD = 3.0
