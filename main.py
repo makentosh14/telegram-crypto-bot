@@ -1,3 +1,4 @@
+import asyncio
 import time
 from scanner import fetch_symbols, fetch_candles
 from score import score_symbol
@@ -6,14 +7,15 @@ from trade_executor import execute_trade_if_valid
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
 
-TRADING_MODE = "auto"  # or "signal"
+# === Global Settings ===
+TRADING_MODE = "auto"  # options: 'signal' or 'auto'
 
-def main():
+async def main():
     print("🚀 Bot starting...")
 
     while True:
         try:
-            # === Market Context ===
+            # === Get market context ===
             trend_context = get_trend_context()
             btc_trend = trend_context['btc_trend']
             altseason = trend_context['altseason']
@@ -31,10 +33,10 @@ def main():
                 max_risk_per_trade = 0.025
                 scan_interval = 180
 
-            # === Telegram Market Summary Every Hour ===
+            # === Telegram update hourly ===
             current_minute = int(time.time() / 60)
             if current_minute % 60 == 0:
-                send_telegram_message(
+                await send_telegram_message(
                     f"📊 Market Context:\n"
                     f"BTC Trend: {'📈 Uptrend' if btc_trend == 'uptrend' else '📉 Downtrend'}\n"
                     f"Altseason: {'✅ Yes' if altseason else '❌ No'}\n"
@@ -42,14 +44,15 @@ def main():
                     f"Risk: {int(max_risk_per_trade * 100)}%"
                 )
 
-            # === Fetch & Score Symbols ===
-            symbols = fetch_symbols()
+            # === Fetch coins ===
+            symbols = await fetch_symbols()
             print(f"✅ Fetched {len(symbols)} symbols.")
 
+            # === Scan symbols ===
             top_signals = []
             for symbol in symbols:
                 candles_by_timeframe = {
-                    tf: fetch_candles(symbol, tf) for tf in ['5m', '15m', '1h']
+                    tf: await fetch_candles(symbol, tf) for tf in ['5m', '15m', '1h']
                 }
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
 
@@ -65,22 +68,23 @@ def main():
                         log_signal(symbol)
 
                         if TRADING_MODE == "auto":
-                            execute_trade_if_valid(signal_data, max_risk=max_risk_per_trade)
+                            await execute_trade_if_valid(signal_data, max_risk=max_risk_per_trade)
                         else:
-                            send_telegram_message(
+                            await send_telegram_message(
                                 f"🚨 Trade Setup: {symbol}\nScore: {score}\n"
                                 f"TF Scores: {tf_scores}"
                             )
+
                         top_signals.append(symbol)
 
             if not top_signals:
                 print("⚠️ No high-quality signals this round.")
 
         except Exception as e:
-            send_telegram_message(f"❌ Error in main loop: {str(e)}")
-            time.sleep(10)
+            await send_telegram_message(f"❌ Error in main loop: {str(e)}")
+            await asyncio.sleep(10)
 
-        time.sleep(scan_interval)
+        await asyncio.sleep(scan_interval)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
