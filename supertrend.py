@@ -1,61 +1,29 @@
-def calculate_supertrend(candles, period=10, multiplier=3):
-    if len(candles) < period:
-        return []
+def calculate_atr(highs, lows, closes, period=10):
+    trs = []
+    for i in range(1, len(highs)):
+        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        trs.append(tr)
+    return sum(trs[-period:]) / period if len(trs) >= period else 0
 
-    tr_values = []
-    atr_values = []
-    hl2_values = []
-    supertrend = []
-    final_upperband = []
-    final_lowerband = []
+def get_supertrend_signal(candles, period=10, multiplier=3):
+    if len(candles) < period + 1:
+        return 'neutral'
 
-    for i in range(len(candles)):
-        high = float(candles[i]['high'])
-        low = float(candles[i]['low'])
-        close = float(candles[i]['close'])
-        hl2 = (high + low) / 2
-        hl2_values.append(hl2)
+    highs = [float(c['high']) for c in candles]
+    lows = [float(c['low']) for c in candles]
+    closes = [float(c['close']) for c in candles]
 
-        if i == 0:
-            tr = high - low
-        else:
-            prev_close = float(candles[i - 1]['close'])
-            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-        tr_values.append(tr)
+    atr = calculate_atr(highs, lows, closes, period)
+    hl2 = [(h + l) / 2 for h, l in zip(highs, lows)]
+    upper_band = hl2[-1] + multiplier * atr
+    lower_band = hl2[-1] - multiplier * atr
 
-        if i < period:
-            atr_values.append(0)  # Placeholder
-            final_upperband.append(0)
-            final_lowerband.append(0)
-            supertrend.append(None)
-            continue
+    previous_close = closes[-2]
+    current_close = closes[-1]
 
-        atr = sum(tr_values[i - period + 1:i + 1]) / period
-        atr_values.append(atr)
-
-        upper_band = hl2 - (multiplier * atr)
-        lower_band = hl2 + (multiplier * atr)
-        final_upperband.append(upper_band)
-        final_lowerband.append(lower_band)
-
-        if i == period:
-            supertrend.append(True)  # Start with bullish
-        else:
-            if supertrend[i - 1] is True:
-                if close > final_upperband[i]:
-                    supertrend.append(True)
-                else:
-                    supertrend.append(False)
-            else:
-                if close < final_lowerband[i]:
-                    supertrend.append(False)
-                else:
-                    supertrend.append(True)
-
-    return supertrend
-
-def get_supertrend_signal(candles):
-    st = calculate_supertrend(candles)
-    if not st or len(st) < 2:
-        return None
-    return "buy" if st[-1] else "sell"
+    if current_close > upper_band and previous_close <= upper_band:
+        return 'buy'
+    elif current_close < lower_band and previous_close >= lower_band:
+        return 'sell'
+    else:
+        return 'neutral'
