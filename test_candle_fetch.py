@@ -11,7 +11,7 @@ BYBIT_API_URL = "https://api.bybit.com"
 async def test_fetch_candles(symbol="BTCUSDT", timeframe="5m", limit=100):
     url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={timeframe}&limit={limit}"
     headers = {
-        "X-BYBIT-API-KEY": tL7vmTEDT5B8mp4Yer
+        "X-BYBIT-API-KEY": "tL7vmTEDT5B8mp4Yer"
     }
 
     print(f"📦 Testing candle fetch with API key for {symbol} [{timeframe}]...")
