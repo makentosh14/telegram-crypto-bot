@@ -20,6 +20,15 @@ async def safe_fetch_candles(symbol, tf):
     print(f"⛔ {symbol} [{tf}] - All fallback attempts failed.")
     return []
 
+async def safe_send_telegram_message(message):
+    if message and isinstance(message, str) and message.strip():
+        try:
+            await send_telegram_message(message)
+        except Exception as e:
+            print(f"❌ Telegram message failed: {e}")
+    else:
+        print("⚠️ Skipping empty message to avoid Telegram 400 error.")
+
 async def main():
     print("🚀 Bot starting...")
 
@@ -49,7 +58,7 @@ async def main():
             top_signals = []
 
             timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-            await send_telegram_message(
+            await safe_send_telegram_message(
                 f"📊 Bot Status\n"
                 f"🕒 Time: {timestamp}\n"
                 f"🔎 Coins Scanned: {len(symbols)}\n"
@@ -83,7 +92,7 @@ async def main():
                         if TRADING_MODE == "auto":
                             await execute_trade_if_valid(signal_data, max_risk=max_risk_per_trade)
                         else:
-                            await send_telegram_message(
+                            await safe_send_telegram_message(
                                 f"🚨 Trade Setup: {symbol}\nScore: {score}\n"
                                 f"TF Scores: {tf_scores}"
                             )
@@ -92,10 +101,10 @@ async def main():
 
             if not top_signals:
                 print("⚠️ No high-quality signals this round.")
-                await send_telegram_message("⚠️ No high-quality signals this round.")
+                await safe_send_telegram_message("⚠️ No high-quality signals this round.")
 
         except Exception as e:
-            await send_telegram_message(f"❌ Error in main loop: {str(e)}")
+            await safe_send_telegram_message(f"❌ Error in main loop: {str(e)}")
             await asyncio.sleep(10)
 
         await asyncio.sleep(scan_interval)
