@@ -1,5 +1,3 @@
-Import random
-
 def detect_volume_spike(candles, multiplier=2.0):
     if len(candles) < 20:
         return False
