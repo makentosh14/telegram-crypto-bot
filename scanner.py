@@ -1,9 +1,58 @@
-import aiohttp
 import asyncio
-from config import BYBIT_API_URL
+import json
+import websockets
+import sys
 from logger import log
 
+if sys.platform.startswith('win'):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+URL = "wss://stream.bybit.com/v5/public/linear"
 symbol_category_map = {}  # Only linear used now
+live_candles = {}  # Stores live candles per symbol
+
+# This replaces the REST-based fetch_candles
+async def stream_candles(symbols, interval='1'):
+    async with websockets.connect(URL) as ws:
+        args = [f"kline.{interval}.{symbol}" for symbol in symbols]
+        subscribe_msg = {"op": "subscribe", "args": args}
+        await ws.send(json.dumps(subscribe_msg))
+        log(f"✅ Subscribed to {len(symbols)} symbols on {interval}m candles")
+
+        while True:
+            try:
+                message = await ws.recv()
+                data = json.loads(message)
+
+                if "data" in data:
+                    candles = data["data"]
+                    if isinstance(candles, list):
+                        for candle in candles:
+                            update_candle(candle)
+                    elif isinstance(candles, dict):
+                        update_candle(candles)
+
+            except Exception as e:
+                log(f"❌ WebSocket error: {e}")
+                break
+
+def update_candle(candle):
+    symbol = candle.get("symbol")
+    if not symbol:
+        return
+    live_candles[symbol] = {
+        'timestamp': int(candle['start']),
+        'open': candle['open'],
+        'high': candle['high'],
+        'low': candle['low'],
+        'close': candle['close'],
+        'volume': candle['volume']
+    }
+    log(f"📊 Updated candle for {symbol}: {live_candles[symbol]}")
+
+# Reuse your existing fetch_symbols function to get tradable pairs
+import aiohttp
+from config import BYBIT_API_URL
 
 async def fetch_symbols():
     symbols = set()
@@ -47,53 +96,12 @@ async def fetch_symbols():
         log(f"❌ Exception while fetching linear symbols: {e}")
         return []
 
-async def fetch_candles(symbol, timeframe='5m', limit=100):
-    url = f"{BYBIT_API_URL}/v5/market/kline?category=linear&symbol={symbol}&interval={timeframe}&limit={limit}"
-    log(f"📦 Fetching candles for {symbol} [{timeframe}] (linear)")
+# Entry point to start everything
+if __name__ == "__main__":
+    async def main():
+        symbols = await fetch_symbols()
+        top_symbols = symbols[:5]  # Limit for testing, adjust as needed
+        await stream_candles(top_symbols, interval='1')
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                raw = await resp.text()
-                try:
-                    data = await resp.json()
-                except Exception:
-                    log(f"❌ Failed to parse candle JSON for {symbol}. Raw:\n{raw}")
-                    return []
+    asyncio.run(main())
 
-                candle_list = data.get("result", {}).get("list", [])
-                if not candle_list:
-                    log(f"⚠️ {symbol} [{timeframe}] - Empty candle list. Full response:\n{data}")
-                    return []
-
-                if len(candle_list) < 30:
-                    log(f"⚠️ {symbol} [{timeframe}] - Not enough candles ({len(candle_list)})")
-                    return []
-
-                candles = []
-                for item in candle_list:
-                    if len(item) < 6:
-                        continue
-                    candles.append({
-                        'timestamp': int(item[0]),
-                        'open': item[1],
-                        'high': item[2],
-                        'low': item[3],
-                        'close': item[4],
-                        'volume': item[5]
-                    })
-
-                log(f"✅ {symbol} [{timeframe}] - {len(candles)} candles fetched")
-                return candles
-
-    except Exception as e:
-        log(f"❌ Error fetching candles for {symbol}: {e}")
-        return []
-
-async def fetch_candles_with_fallback(symbol, timeframes=['5m', '15m', '1h']):
-    for tf in timeframes:
-        candles = await fetch_candles(symbol, tf)
-        if candles:
-            return candles
-    log(f"⛔ {symbol} - All fallback timeframes failed")
-    return []
