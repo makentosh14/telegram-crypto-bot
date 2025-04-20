@@ -14,7 +14,7 @@ CANDLE_THRESHOLDS = [100, 50, 30]  # fallback levels
 
 async def safe_fetch_candles(symbol, tf):
     for limit in CANDLE_THRESHOLDS:
-        candles = await fetch_candles(symbol, tf, limit=limit)
+        candles = await fetch_candles(symbol, tf, limit=100)
         if candles and len(candles) >= 30:
             return candles
     print(f"⛔ {symbol} [{tf}] - All fallback attempts failed.")
