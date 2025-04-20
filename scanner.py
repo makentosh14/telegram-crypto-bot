@@ -5,7 +5,7 @@ from logger import log
 from trend_filters import detect_breakout
 
 CATEGORIES = ['linear', 'inverse', 'spot']
-symbol_category_map = {}  # Caches category per symbol
+symbol_category_map = {}  # Global cache to track each symbol's category
 
 async def fetch_symbols():
     symbols = set()
@@ -39,11 +39,13 @@ async def fetch_symbols():
                         if not cursor:
                             break
 
+        log(f"✅ Total tradable symbols fetched: {len(symbols)}")
         return list(symbols)
 
     except Exception as e:
         log(f"❌ Exception while fetching symbols: {e}")
         return []
+
 
 async def fetch_candles(symbol, timeframe='5m', limit=100):
     try:
@@ -55,7 +57,8 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                 data = await resp.json()
                 candle_list = data.get("result", {}).get("list", [])
 
-                if not candle_list or len(candle_list) < 5:
+                if not candle_list or len(candle_list) < 50:
+                    log(f"⚠️ {symbol} [{timeframe}] - Not enough candles ({len(candle_list)})")
                     return []
 
                 candles = []
@@ -71,8 +74,9 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                         'volume': item[5]
                     })
 
+                log(f"✅ {symbol} [{timeframe}] - {len(candles)} candles fetched")
                 return candles
 
     except Exception as e:
-        log(f"❌ Error fetching candles for {symbol}: {e}")
+        log(f"❌ Error fetching candles for {symbol} [{timeframe}]: {e}")
         return []
