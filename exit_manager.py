@@ -1,24 +1,26 @@
-def generate_tp_sl(entry_price, direction, atr=0.01):
-    if direction == "long":
-        tp1 = round(entry_price * (1 + 0.015), 6)
-        tp2 = round(entry_price * (1 + 0.03), 6)
-        sl = round(entry_price * (1 - atr), 6)
+def generate_tp_sl(entry_price, direction='long'):
+    tp1 = round(entry_price * 1.02, 4) if direction == 'long' else round(entry_price * 0.98, 4)
+    tp2 = round(entry_price * 1.04, 4) if direction == 'long' else round(entry_price * 0.96, 4)
+    sl = round(entry_price * 0.985, 4) if direction == 'long' else round(entry_price * 1.015, 4)
+    return tp1, tp2, sl
+
+def adjust_stop_to_breakeven(entry_price, current_price, sl, direction='long'):
+    if direction == 'long' and current_price >= entry_price * 1.02:
+        return max(sl, entry_price)
+    elif direction == 'short' and current_price <= entry_price * 0.98:
+        return min(sl, entry_price)
+    return sl
+
+def apply_trailing_stop(entry_price, current_price, sl, direction='long'):
+    # Simple trailing logic: move SL up as price moves up
+    if direction == 'long':
+        gain = current_price - entry_price
+        if gain > 0:
+            new_sl = entry_price + gain * 0.5
+            return max(sl, round(new_sl, 4))
     else:
-        tp1 = round(entry_price * (1 - 0.015), 6)
-        tp2 = round(entry_price * (1 - 0.03), 6)
-        sl = round(entry_price * (1 + atr), 6)
-
-    return {
-        "tp1": tp1,
-        "tp2": tp2,
-        "sl": sl,
-    }
-
-
-def smart_trailing_stop(price, current_sl, direction, buffer=0.005):
-    if direction == "long":
-        new_sl = round(price * (1 - buffer), 6)
-        return new_sl if new_sl > current_sl else current_sl
-    else:
-        new_sl = round(price * (1 + buffer), 6)
-        return new_sl if new_sl < current_sl else current_sl
+        gain = entry_price - current_price
+        if gain > 0:
+            new_sl = entry_price - gain * 0.5
+            return min(sl, round(new_sl, 4))
+    return sl
