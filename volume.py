@@ -1,29 +1,24 @@
-import requests
-
-def detect_volume_spike(candles, multiplier=2):
-    if len(candles) < 21:
+def detect_volume_spike(candles, multiplier=2.0):
+    if len(candles) < 20:
         return False
-    volumes = [float(c['volume']) for c in candles[-21:-1]]
+
+    volumes = [float(c['volume']) for c in candles[-20:-1]]
     avg_volume = sum(volumes) / len(volumes)
     current_volume = float(candles[-1]['volume'])
+
     return current_volume > avg_volume * multiplier
 
-def fetch_btc_eth_dominance():
-    url = "https://api.coingecko.com/api/v3/global"
-    response = requests.get(url)
-    data = response.json()
-    btc_dom = data['data']['market_cap_percentage']['btc']
-    eth_dom = data['data']['market_cap_percentage']['eth']
-    return btc_dom
+def detect_volume_divergence(candles):
+    if len(candles) < 5:
+        return False
 
-def fetch_eth_btc_ratio():
-    url = "https://api.coingecko.com/api/v3/simple/price"
-    params = {
-        "ids": "ethereum,bitcoin",
-        "vs_currencies": "usd"
-    }
-    response = requests.get(url, params=params)
-    prices = response.json()
-    eth_price = prices['ethereum']['usd']
-    btc_price = prices['bitcoin']['usd']
-    return eth_price / btc_price if btc_price != 0 else 0
+    prev_price = float(candles[-2]['close'])
+    current_price = float(candles[-1]['close'])
+
+    prev_volume = float(candles[-2]['volume'])
+    current_volume = float(candles[-1]['volume'])
+
+    price_rising = current_price > prev_price
+    volume_falling = current_volume < prev_volume
+
+    return price_rising and volume_falling
