@@ -1,6 +1,11 @@
 aiohttp
-python-dotenv
 requests
 websockets
-python-telegram-bot==13.15
+python-dotenv
+pytz
 ccxt
+ta
+pandas
+numpy
+scipy
+python-telegram-bot==13.15
