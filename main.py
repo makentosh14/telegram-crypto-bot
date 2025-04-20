@@ -21,14 +21,14 @@ async def safe_fetch_candles(symbol, tf):
     return []
 
 async def safe_send_telegram_message(message):
-    from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
+    from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
     import aiohttp
 
     if not message or not isinstance(message, str) or not message.strip():
         print("⚠️ Skipping empty Telegram message to avoid 400 error.")
         return
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
