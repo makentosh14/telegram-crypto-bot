@@ -35,9 +35,10 @@ async def fetch_symbols():
                                 symbols.add(symbol)
                                 symbol_category_map[symbol] = category
 
-                        cursor = data.get("result", {}).get("nextPageCursor")
-                        if not cursor:
+                        next_cursor = data.get("result", {}).get("nextPageCursor")
+                        if not next_cursor or next_cursor == cursor:
                             break
+                        cursor = next_cursor
 
         log(f"✅ Total tradable symbols fetched: {len(symbols)}")
         return list(symbols)
