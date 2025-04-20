@@ -1,21 +1,20 @@
-import requests
-import json
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ASSISTANT_CHAT_ID
+import aiohttp
+import asyncio
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 
-def send_telegram_message(message, assistant=False):
-    chat_id = ASSISTANT_CHAT_ID if assistant else TELEGRAM_CHAT_ID
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+async def send_telegram_message(message: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
-        "chat_id": chat_id,
+        "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
         "parse_mode": "HTML"
     }
-    try:
-        response = requests.post(url, json=payload, timeout=5)
-        if not response.ok:
-            print(f"❌ Telegram send failed: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"❌ Telegram error: {e}")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, data=payload) as resp:
+            if resp.status != 200:
+                print(f"Telegram error: {await resp.text()}")
+                
 
 def send_trade_alert(symbol, score, tf_scores, entry_price, sl, tp1, tp2):
     msg = (
