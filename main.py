@@ -33,9 +33,19 @@ async def main():
 
             symbols = await fetch_symbols()
             print(f"✅ Fetched {len(symbols)} symbols.")
-            await send_telegram_message(f"✅ Live fetched: {len(symbols)} symbols.")
 
+            signals_this_round = 0
             top_signals = []
+
+            # Telegram status update
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            await send_telegram_message(
+                f"📊 Bot Status\n"
+                f"🕒 Time: {timestamp}\n"
+                f"🔎 Coins Scanned: {len(symbols)}\n"
+                f"📡 Mode: {'AUTO' if TRADING_MODE == 'auto' else 'SIGNAL'}\n"
+                f"📈 Signals This Round: calculating..."
+            )
 
             for symbol in symbols:
                 candles_by_timeframe = {
