@@ -1,8 +1,6 @@
-# rsi.py
-
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
-        return 50  # Neutral default
+        return 50  # Neutral if not enough data
 
     gains = []
     losses = []
@@ -11,17 +9,18 @@ def calculate_rsi(prices, period=14):
         delta = prices[-i] - prices[-i - 1]
         if delta >= 0:
             gains.append(delta)
-            losses.append(0)
         else:
-            gains.append(0)
             losses.append(abs(delta))
 
-    average_gain = sum(gains) / period
-    average_loss = sum(losses) / period
+    avg_gain = sum(gains) / period if gains else 0
+    avg_loss = sum(losses) / period if losses else 0
 
-    if average_loss == 0:
+    if avg_loss == 0:
         return 100
-    rs = average_gain / average_loss
+    if avg_gain == 0:
+        return 0
+
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
 
     return round(rsi, 2)
