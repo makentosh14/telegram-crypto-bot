@@ -62,7 +62,11 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
                     return []
 
                 candle_list = data.get("result", {}).get("list", [])
-                if not candle_list or len(candle_list) < 30:
+                if not candle_list:
+                    log(f"⚠️ {symbol} [{timeframe}] - Empty candle list. Full response:\n{data}")
+                    return []
+
+                if len(candle_list) < 30:
                     log(f"⚠️ {symbol} [{timeframe}] - Not enough candles ({len(candle_list)})")
                     return []
 
@@ -85,3 +89,11 @@ async def fetch_candles(symbol, timeframe='5m', limit=100):
     except Exception as e:
         log(f"❌ Error fetching candles for {symbol}: {e}")
         return []
+
+async def fetch_candles_with_fallback(symbol, timeframes=['5m', '15m', '1h']):
+    for tf in timeframes:
+        candles = await fetch_candles(symbol, tf)
+        if candles:
+            return candles
+    log(f"⛔ {symbol} - All fallback timeframes failed")
+    return []
