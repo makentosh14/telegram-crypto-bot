@@ -23,7 +23,7 @@ def score_symbol(symbol, candles_by_timeframe):
         tf_score = 0
         if not candles or len(candles) < 50:
             scores[tf] = 0
-            print(f"⚠️ {symbol} [{tf}]: Not enough candles.")
+            print(f"⚠️ {symbol} [{tf}]: Not enough candles ({len(candles) if candles else 0}).")
             continue
 
         close_prices = [float(c['close']) for c in candles]
