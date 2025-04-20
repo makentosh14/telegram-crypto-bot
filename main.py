@@ -38,7 +38,6 @@ async def main():
             signals_this_round = 0
             top_signals = []
 
-            # Telegram status update
             timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             await send_telegram_message(
                 f"📊 Bot Status\n"
@@ -53,9 +52,14 @@ async def main():
                     tf: await fetch_candles(symbol, tf) for tf in ['5m', '15m', '1h']
                 }
 
+                # Skip if any TF has fewer than 20 candles
+                if any(len(candles) < 20 for candles in candles_by_timeframe.values()):
+                    print(f"⏩ Skipping {symbol}: not enough data in one or more timeframes.")
+                    continue
+
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
 
-                # 🔍 Log score for every symbol
+                # Log score
                 print(f"🔍 {symbol} | Score: {score} | TF Scores: {tf_scores}")
 
                 if score >= 3:
