@@ -1,24 +1,16 @@
 import asyncio
 import time
-from scanner import fetch_symbols, fetch_candles
+from scanner import fetch_symbols  # fetch_candles removed
 from score import score_symbol
 from telegram_bot import send_telegram_message
 from trade_executor import execute_trade_if_valid
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
 from datetime import datetime
+from websocket_candles import live_candles, stream_candles  # <-- NEW IMPORT
 
 TRADING_MODE = "auto"  # "auto" or "signal"
-TIMEFRAMES = ['5m', '15m', '1h']
-CANDLE_THRESHOLDS = [100, 50, 30]  # fallback levels
-
-async def safe_fetch_candles(symbol, tf):
-    for limit in CANDLE_THRESHOLDS:
-        candles = await fetch_candles(symbol, tf, limit=100)
-        if candles and len(candles) >= 30:
-            return candles
-    print(f"⛔ {symbol} [{tf}] - All fallback attempts failed.")
-    return []
+TIMEFRAMES = ['1']  # WebSocket supports live 1m updates
 
 async def safe_send_telegram_message(message):
     from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
@@ -48,6 +40,14 @@ async def safe_send_telegram_message(message):
 async def main():
     print("🚀 Bot starting...")
 
+    symbols = await fetch_symbols()
+    print(f"✅ Fetched {len(symbols)} symbols.")
+    top_symbols = symbols[:10]  # Limit active symbols for now
+
+    # Start WebSocket candle feed
+    asyncio.create_task(stream_candles(top_symbols, interval='1'))
+    await asyncio.sleep(5)  # Wait for initial candle data
+
     while True:
         try:
             trend_context = get_trend_context()
@@ -67,9 +67,6 @@ async def main():
                 max_risk_per_trade = 0.025
                 scan_interval = 180
 
-            symbols = await fetch_symbols()
-            print(f"✅ Fetched {len(symbols)} symbols.")
-
             signals_this_round = 0
             top_signals = []
 
@@ -77,18 +74,23 @@ async def main():
             await safe_send_telegram_message(
                 f"📊 Bot Status\n"
                 f"🕒 Time: {timestamp}\n"
-                f"🔎 Coins Scanned: {len(symbols)}\n"
+                f"🔎 Coins Scanned: {len(top_symbols)}\n"
                 f"📡 Mode: {'AUTO' if TRADING_MODE == 'auto' else 'SIGNAL'}\n"
                 f"📈 Signals This Round: calculating..."
             )
 
-            for symbol in symbols:
-                candles_by_timeframe = {
-                    tf: await safe_fetch_candles(symbol, tf) for tf in TIMEFRAMES
-                }
+            for symbol in top_symbols:
+                candles_by_timeframe = {}
+                for tf in TIMEFRAMES:
+                    if symbol in live_candles:
+                        # Build pseudo-history with repeated live data (basic example)
+                        candles_by_timeframe[tf] = [live_candles[symbol]] * 50
+                    else:
+                        print(f"⏩ Skipping {symbol}: no live candle data yet.")
+                        continue
 
                 if any(len(candles) < 30 for candles in candles_by_timeframe.values()):
-                    print(f"⏩ Skipping {symbol}: not enough candles even after fallback.")
+                    print(f"⏩ Skipping {symbol}: not enough candles.")
                     continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
@@ -125,5 +127,7 @@ async def main():
 
         await asyncio.sleep(scan_interval)
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
