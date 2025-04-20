@@ -21,13 +21,29 @@ async def safe_fetch_candles(symbol, tf):
     return []
 
 async def safe_send_telegram_message(message):
-    if message and isinstance(message, str) and message.strip():
-        try:
-            await send_telegram_message(message)
-        except Exception as e:
-            print(f"❌ Telegram message failed: {e}")
-    else:
-        print("⚠️ Skipping empty message to avoid Telegram 400 error.")
+    from config import TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
+    import aiohttp
+
+    if not message or not isinstance(message, str) or not message.strip():
+        print("⚠️ Skipping empty Telegram message to avoid 400 error.")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=payload) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    print(f"❌ Telegram error [{response.status}]: {error_text}")
+    except Exception as e:
+        print(f"❌ Exception sending Telegram message: {e}")
 
 async def main():
     print("🚀 Bot starting...")
