@@ -7,6 +7,7 @@ from trend_filters import detect_breakout
 CATEGORIES = ['linear', 'inverse', 'spot']
 symbol_category_map = {}  # Global cache to track each symbol's category
 
+
 async def fetch_symbols():
     symbols = set()
 
@@ -49,35 +50,40 @@ async def fetch_symbols():
 
 
 async def fetch_candles(symbol, timeframe='5m', limit=100):
-    try:
-        category = symbol_category_map.get(symbol, "linear")
-        url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+    fallback_categories = ['linear', 'inverse', 'spot']
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                candle_list = data.get("result", {}).get("list", [])
+    for category in fallback_categories:
+        try:
+            url = f"{BYBIT_API_URL}/v5/market/kline?category={category}&symbol={symbol}&interval={timeframe}&limit={limit}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    candle_list = data.get("result", {}).get("list", [])
 
-                if not candle_list or len(candle_list) < 50:
-                    log(f"⚠️ {symbol} [{timeframe}] - Not enough candles ({len(candle_list)})")
-                    return []
-
-                candles = []
-                for item in candle_list:
-                    if len(item) < 6:
+                    if not candle_list or len(candle_list) < 50:
+                        log(f"⚠️ {symbol} [{timeframe}] - {category} - Not enough candles ({len(candle_list)})")
                         continue
-                    candles.append({
-                        'timestamp': int(item[0]),
-                        'open': item[1],
-                        'high': item[2],
-                        'low': item[3],
-                        'close': item[4],
-                        'volume': item[5]
-                    })
 
-                log(f"✅ {symbol} [{timeframe}] - {len(candles)} candles fetched")
-                return candles
+                    candles = []
+                    for item in candle_list:
+                        if len(item) < 6:
+                            continue
+                        candles.append({
+                            'timestamp': int(item[0]),
+                            'open': item[1],
+                            'high': item[2],
+                            'low': item[3],
+                            'close': item[4],
+                            'volume': item[5]
+                        })
 
-    except Exception as e:
-        log(f"❌ Error fetching candles for {symbol} [{timeframe}]: {e}")
-        return []
+                    symbol_category_map[symbol] = category  # Save working category
+                    log(f"✅ {symbol} [{timeframe}] - {category} - {len(candles)} candles fetched")
+                    return candles
+
+        except Exception as e:
+            log(f"❌ Exception fetching {symbol} in {category} [{timeframe}]: {e}")
+            continue
+
+    log(f"⛔ {symbol} [{timeframe}] - All category attempts failed.")
+    return []
