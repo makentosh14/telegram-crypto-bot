@@ -55,6 +55,9 @@ async def main():
 
                 score, tf_scores = score_symbol(symbol, candles_by_timeframe)
 
+                # 🔍 Log score for every symbol
+                print(f"🔍 {symbol} | Score: {score} | TF Scores: {tf_scores}")
+
                 if score >= 3:
                     if not is_duplicate_signal(symbol):
                         signal_data = {
