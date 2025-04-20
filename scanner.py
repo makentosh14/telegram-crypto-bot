@@ -5,19 +5,37 @@ from logger import log
 from trend_filters import detect_breakout
 
 async def fetch_symbols():
-    url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
+    symbols = []
+    cursor = None
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                data = await resp.json()
-                if 'result' in data and 'list' in data['result']:
-                    symbols = [item['symbol'] for item in data['result']['list']]
-                    return symbols
-                else:
-                    log("⚠️ Unexpected response structure.")
-                    return []
+            while True:
+                url = f"{BYBIT_API_URL}/v5/market/instruments-info?category=linear"
+                if cursor:
+                    url += f"&cursor={cursor}"
+
+                async with session.get(url) as resp:
+                    data = await resp.json()
+                    if data.get("retCode") != 0:
+                        log(f"❌ Error fetching symbols: {data}")
+                        break
+
+                    instruments = data["result"].get("list", [])
+                    for instrument in instruments:
+                        symbol = instrument["symbol"]
+                        if symbol.endswith("USDT"):
+                            symbols.append(symbol)
+
+                    next_cursor = data["result"].get("nextPageCursor")
+                    if not next_cursor or next_cursor == cursor:
+                        break
+                    cursor = next_cursor
+
+        return symbols
+
     except Exception as e:
-        log(f"❌ Error fetching symbols: {e}")
+        log(f"❌ Exception while fetching symbols: {e}")
         return []
 
 async def fetch_candles(symbol, timeframe='5m', limit=100):
