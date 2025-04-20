@@ -1,17 +1,26 @@
-def calculate_ema(prices, period):
-    if len(prices) < period:
-        return None
-    k = 2 / (period + 1)
-    ema = prices[0]
-    for price in prices[1:]:
-        ema = price * k + ema * (1 - k)
-    return ema
+def generate_tp_sl(entry_price, direction='long'):
+    tp1 = round(entry_price * 1.02, 4) if direction == 'long' else round(entry_price * 0.98, 4)
+    tp2 = round(entry_price * 1.04, 4) if direction == 'long' else round(entry_price * 0.96, 4)
+    sl = round(entry_price * 0.985, 4) if direction == 'long' else round(entry_price * 1.015, 4)
+    return tp1, tp2, sl
 
-def detect_ema_crossover(close_prices, short=9, long=21):
-    if len(close_prices) < long + 1:
-        return False
-    short_ema_prev = calculate_ema(close_prices[-(short+2):-1], short)
-    long_ema_prev = calculate_ema(close_prices[-(long+2):-1], long)
-    short_ema_now = calculate_ema(close_prices[-(short+1):], short)
-    long_ema_now = calculate_ema(close_prices[-(long+1):], long)
-    return short_ema_prev < long_ema_prev and short_ema_now > long_ema_now
+def adjust_stop_to_breakeven(entry_price, current_price, sl, direction='long'):
+    if direction == 'long' and current_price >= entry_price * 1.02:
+        return max(sl, entry_price)
+    elif direction == 'short' and current_price <= entry_price * 0.98:
+        return min(sl, entry_price)
+    return sl
+
+def apply_trailing_stop(entry_price, current_price, sl, direction='long'):
+    # Simple trailing logic: move SL up as price moves up
+    if direction == 'long':
+        gain = current_price - entry_price
+        if gain > 0:
+            new_sl = entry_price + gain * 0.5
+            return max(sl, round(new_sl, 4))
+    else:
+        gain = entry_price - current_price
+        if gain > 0:
+            new_sl = entry_price - gain * 0.5
+            return min(sl, round(new_sl, 4))
+    return sl
