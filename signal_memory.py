@@ -1,21 +1,40 @@
-import time
+import json
+import os
+from datetime import datetime, timedelta
 
-# In-memory cache for recent signals
-recent_signals = {}
+SIGNAL_LOG_FILE = "signal_log.json"
+DUPLICATE_WINDOW_MINUTES = 60  # Don't repeat trades for the same coin within this time
 
-# Time window in seconds to prevent duplicate signals (e.g., 30 minutes)
-DUPLICATE_SIGNAL_WINDOW = 1800
+def load_signal_log():
+    if not os.path.exists(SIGNAL_LOG_FILE):
+        return {}
+    with open(SIGNAL_LOG_FILE, "r") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+
+def save_signal_log(log):
+    with open(SIGNAL_LOG_FILE, "w") as f:
+        json.dump(log, f)
 
 def log_signal(symbol):
-    recent_signals[symbol] = int(time.time())
+    log = load_signal_log()
+    log[symbol] = datetime.utcnow().isoformat()
+    save_signal_log(log)
 
 def is_duplicate_signal(symbol):
-    now = int(time.time())
-    last_time = recent_signals.get(symbol, 0)
-    return (now - last_time) < DUPLICATE_SIGNAL_WINDOW
+    log = load_signal_log()
+    if symbol not in log:
+        return False
+    last_time = datetime.fromisoformat(log[symbol])
+    return datetime.utcnow() - last_time < timedelta(minutes=DUPLICATE_WINDOW_MINUTES)
 
-def cleanup_old_signals():
-    now = int(time.time())
-    to_remove = [symbol for symbol, t in recent_signals.items() if now - t > DUPLICATE_SIGNAL_WINDOW]
-    for symbol in to_remove:
-        del recent_signals[symbol]
+def clean_old_signals():
+    log = load_signal_log()
+    now = datetime.utcnow()
+    updated_log = {
+        symbol: timestamp for symbol, timestamp in log.items()
+        if now - datetime.fromisoformat(timestamp) < timedelta(minutes=DUPLICATE_WINDOW_MINUTES)
+    }
+    save_signal_log(updated_log)
