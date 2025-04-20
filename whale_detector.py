@@ -1,34 +1,26 @@
+# whale_detector.py
+
 import random
 
-def detect_whale_heatmap_activity(candles, threshold_ratio=3.0):
-    if len(candles) < 30:
+def detect_whale_activity(symbol, candles):
+    """
+    Simulate whale detection logic.
+    In production, this would include:
+    - Unusual buy volume
+    - Large wallet inflows
+    - On-chain transfers
+    - Repeated large candle spikes
+    """
+    if not candles or len(candles) < 5:
         return False
-    last_close = float(candles[-1]['close'])
-    last_volume = float(candles[-1]['volume'])
-    avg_volume = sum(float(c['volume']) for c in candles[-30:-1]) / 29
-    return last_volume > avg_volume * threshold_ratio
 
-def detect_volume_divergence(candles):
-    if len(candles) < 10:
-        return False
-    recent_volumes = [float(c['volume']) for c in candles[-10:]]
-    recent_closes = [float(c['close']) for c in candles[-10:]]
+    large_candle_count = 0
+    for c in candles[-5:]:
+        body = abs(float(c['close']) - float(c['open']))
+        high_low = float(c['high']) - float(c['low'])
+        if high_low > 0 and (body / high_low) > 0.6:
+            large_candle_count += 1
 
-    avg_volume = sum(recent_volumes[:-1]) / (len(recent_volumes) - 1)
-    volume_spike = recent_volumes[-1] > avg_volume * 2
-    price_lag = recent_closes[-1] <= recent_closes[-2]
-
-    return volume_spike and price_lag
-
-def detect_liquidity_trap(candles):
-    if len(candles) < 5:
-        return False
-    low_wicks = [float(c['low']) for c in candles[-5:-1]]
-    last_low = float(candles[-1]['low'])
-    last_close = float(candles[-1]['close'])
-    fake_break = last_low < min(low_wicks) and last_close > last_low
-    return fake_break
-
-def scan_telegram_discord_mentions(symbol):
-    # Placeholder - requires integration with actual services or scrapers
-    return False
+    # Simulate whale logic
+    whale_detected = large_candle_count >= 3 or random.random() < 0.05
+    return whale_detected
