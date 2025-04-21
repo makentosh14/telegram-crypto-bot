@@ -1,3 +1,5 @@
+# bybit_api.py
+
 import aiohttp
 import hmac
 import hashlib
@@ -19,6 +21,7 @@ async def signed_request(method: str, endpoint: str, params: dict):
     from config import BYBIT_API_KEY, BYBIT_API_SECRET
 
     timestamp = str(await get_server_time())
+
     base_params = {
         "timestamp": timestamp,
         "recvWindow": "5000",
@@ -26,6 +29,7 @@ async def signed_request(method: str, endpoint: str, params: dict):
     }
 
     signature = sign_request(base_params, BYBIT_API_SECRET)
+
     headers = {
         "X-BYBIT-API-KEY": BYBIT_API_KEY,
         "X-BYBIT-API-TIMESTAMP": timestamp,
