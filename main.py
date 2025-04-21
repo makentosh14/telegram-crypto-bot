@@ -11,7 +11,7 @@ from config import MIN_SCORE_THRESHOLD, BASE_SCAN_INTERVAL
 from performance_tracker import track_signal
 from logger import log
 
-TIMEFRAMES = ['1', '5', '15']  # ✅ Scanning multiple timeframes
+TIMEFRAMES = SUPPORTED_INTERVALS  # ✅ Scanning multiple timeframes
 
 async def run_bot():
     log("🚀 Bot starting...")
