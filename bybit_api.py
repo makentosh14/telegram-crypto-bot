@@ -1,104 +1,120 @@
-import requests
+# bybit_api.py
+
+import aiohttp
 import time
 import hmac
 import hashlib
 import json
+from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
+from logger import log
 
-from config import BYBIT_API_KEY, BYBIT_API_SECRET, BASE_URL
+HEADERS = {
+    "Content-Type": "application/json",
+    "X-BYBIT-API-KEY": BYBIT_API_KEY
+}
 
-def sign_request(params, api_secret):
-    query_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
-    return hmac.new(api_secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+async def get_server_time():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
+            data = await resp.json()
+            return int(data["time"])
 
-def get_server_time():
-    return int(time.time() * 1000)
+def sign_request(params: dict):
+    sorted_params = dict(sorted(params.items()))
+    query_string = "&".join([f"{key}={value}" for key, value in sorted_params.items()])
+    signature = hmac.new(
+        BYBIT_API_SECRET.encode("utf-8"),
+        query_string.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return signature
 
-def make_request(method, endpoint, params=None, is_private=False):
-    url = f"{BASE_URL}{endpoint}"
-    headers = {"Content-Type": "application/json"}
-    if is_private:
-        timestamp = str(get_server_time())
-        signature = sign_request(params or {}, BYBIT_API_SECRET)
-        headers.update({
-            "X-BYBIT-API-KEY": BYBIT_API_KEY,
-            "X-BYBIT-API-SIGN": signature,
-            "X-BYBIT-API-TIMESTAMP": timestamp
-        })
-    try:
-        response = requests.request(method, url, params=params, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"❌ API Error: {str(e)}")
-        return None
+async def signed_request(method: str, endpoint: str, params: dict):
+    timestamp = str(await get_server_time())
+    params["apiKey"] = BYBIT_API_KEY
+    params["timestamp"] = timestamp
+    params["recvWindow"] = "5000"
+    signature = sign_request(params)
+    params["sign"] = signature
 
-def get_balance():
-    endpoint = "/v5/account/wallet-balance"
-    return make_request("GET", endpoint, is_private=True)
+    url = f"{BYBIT_API_URL}{endpoint}"
+    async with aiohttp.ClientSession() as session:
+        if method == "GET":
+            async with session.get(url, params=params, headers=HEADERS) as resp:
+                return await resp.json()
+        elif method == "POST":
+            async with session.post(url, json=params, headers=HEADERS) as resp:
+                return await resp.json()
 
-def place_order(symbol, side, qty, entry_price=None, sl=None, tp=None):
+async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
     endpoint = "/v5/order/create"
-    order = {
-        "category": "linear",
+    params = {
+        "category": market_type,
         "symbol": symbol,
         "side": side,
         "orderType": "Market",
-        "qty": qty,
-        "timeInForce": "GoodTillCancel",
+        "qty": str(qty),
+        "timeInForce": "IOC",
+        "reduceOnly": reduce_only
     }
-    if sl:
-        order["stopLoss"] = str(sl)
-    if tp:
-        order["takeProfit"] = str(tp)
-    return make_request("POST", endpoint, order, is_private=True)
+    result = await signed_request("POST", endpoint, params)
+    log(f"📤 Order Result: {result}")
+    return result
 
-def set_leverage(symbol, buy_leverage, sell_leverage):
-    endpoint = "/v5/position/set-leverage"
-    payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "buyLeverage": buy_leverage,
-        "sellLeverage": sell_leverage
-    }
-    return make_request("POST", endpoint, payload, is_private=True)
-
-def set_margin_mode(symbol, mode="ISOLATED"):
-    endpoint = "/v5/position/set-margin-mode"
-    payload = {
-        "category": "linear",
-        "symbol": symbol,
-        "marginMode": mode,
-    }
-    return make_request("POST", endpoint, payload, is_private=True)
-
-def get_open_positions():
-    endpoint = "/v5/position/list"
-    return make_request("GET", endpoint, {"category": "linear"}, is_private=True)
-
-def close_position(symbol):
-    endpoint = "/v5/order/create"
-    order = {
-        "category": "linear",
-        "symbol": symbol,
-        "side": "Sell",
-        "orderType": "Market",
-        "reduceOnly": True,
-        "qty": 1
-    }
-    return make_request("POST", endpoint, order, is_private=True)
-    
-def set_leverage_mode(symbol, mode="ISOLATED"):
+async def get_balance(asset="USDT", wallet_type="UNIFIED"):
+    endpoint = "/v5/account/wallet-balance"
+    params = {"accountType": wallet_type}
+    result = await signed_request("GET", endpoint, params)
     try:
-        response = session.post(
-            f"{BASE_URL}/v5/position/set-margin-mode",
-            headers={"X-BYBIT-API-KEY": BYBIT_API_KEY},
-            json={
-                "category": "linear",
-                "symbol": symbol,
-                "tradeMode": 1 if mode.upper() == "ISOLATED" else 0
-            }
-        )
-        return response.json()
+        balances = result["result"]["list"][0]["coin"]
+        for coin in balances:
+            if coin["coin"] == asset:
+                return float(coin["availableToWithdraw"])
     except Exception as e:
-        print(f"[ERROR] Failed to set leverage mode for {symbol}: {e}")
-        return None
+        log(f"❌ Failed to parse balance: {e}")
+    return 0
+
+async def set_leverage(symbol, buy_leverage=5, sell_leverage=5):
+    endpoint = "/v5/position/set-leverage"
+    params = {
+        "category": "linear",
+        "symbol": symbol,
+        "buyLeverage": str(buy_leverage),
+        "sellLeverage": str(sell_leverage)
+    }
+    return await signed_request("POST", endpoint, params)
+
+async def set_margin_mode(symbol, mode="ISOLATED"):
+    endpoint = "/v5/position/set-margin-mode"
+    params = {
+        "category": "linear",
+        "symbol": symbol,
+        "tradeMode": 1 if mode == "ISOLATED" else 0
+    }
+    return await signed_request("POST", endpoint, params)
+
+async def get_open_positions():
+    endpoint = "/v5/position/list"
+    params = {"category": "linear"}
+    result = await signed_request("GET", endpoint, params)
+    return result.get("result", {}).get("list", [])
+
+async def cancel_all_orders(symbol, category="linear"):
+    endpoint = "/v5/order/cancel-all"
+    params = {
+        "category": category,
+        "symbol": symbol
+    }
+    return await signed_request("POST", endpoint, params)
+
+async def get_open_orders(symbol, category="linear"):
+    endpoint = "/v5/order/realtime"
+    params = {
+        "category": category,
+        "symbol": symbol
+    }
+    result = await signed_request("GET", endpoint, params)
+    return result.get("result", {}).get("list", [])
+
+def get_category_for_symbol(symbol):
+    return "linear" if symbol.endswith("USDT") else "spot"
