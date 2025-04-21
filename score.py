@@ -1,5 +1,3 @@
-# score.py
-
 from rsi import calculate_rsi
 from macd import detect_macd_cross
 from supertrend import calculate_supertrend_signal
@@ -17,7 +15,7 @@ def score_symbol(symbol, candles_by_timeframe):
 
         # Volume Spike
         if is_volume_spike(candles, multiplier=2.5):
-            score += 1  # reward confirmed breakout volume
+            score += 1
 
         # RSI
         rsi_vals = calculate_rsi(candles)
@@ -69,8 +67,17 @@ def score_symbol(symbol, candles_by_timeframe):
         tf_scores[tf] = score
         total_score += score
 
-    # Determine dominant timeframe type
-    dominant_tf = max(tf_scores, key=lambda k: abs(tf_scores[k])) if tf_scores else "1"
-    trade_type = "scalp" if dominant_tf == "1" else "intraday" if dominant_tf == "5" else "swing"
+    return total_score, tf_scores
 
-    return total_score, tf_scores, trade_type
+# ✅ Determine trade type from active timeframe scores
+def determine_trade_type(tf_scores):
+    top_tf = max(tf_scores, key=tf_scores.get)
+
+    if top_tf == '1':
+        return 'Scalp'
+    elif top_tf in ['3', '5', '15']:
+        return 'Intraday'
+    elif top_tf in ['30', '60', '240']:
+        return 'Swing'
+    else:
+        return 'Mixed'
