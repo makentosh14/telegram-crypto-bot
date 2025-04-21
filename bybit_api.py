@@ -5,7 +5,7 @@ import time
 import hmac
 import hashlib
 import json
-from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
+from config import BYBIT_API_URL
 from logger import log
 
 async def get_server_time():
@@ -14,22 +14,25 @@ async def get_server_time():
             data = await resp.json()
             return int(data["time"])
 
-def sign_request(params: dict):
+def sign_request(params: dict, secret: str):
     sorted_params = dict(sorted(params.items()))
     query_string = "&".join([f"{key}={value}" for key, value in sorted_params.items()])
     signature = hmac.new(
-        BYBIT_API_SECRET.encode("utf-8"),
+        secret.encode("utf-8"),
         query_string.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
     return signature
 
 async def signed_request(method: str, endpoint: str, params: dict):
+    # ✅ Re-import fresh keys each time
+    from config import BYBIT_API_KEY, BYBIT_API_SECRET
+
     timestamp = str(await get_server_time())
     params["apiKey"] = BYBIT_API_KEY
     params["timestamp"] = timestamp
     params["recvWindow"] = "5000"
-    signature = sign_request(params)
+    signature = sign_request(params, BYBIT_API_SECRET)
     params["sign"] = signature
 
     headers = {
@@ -38,6 +41,10 @@ async def signed_request(method: str, endpoint: str, params: dict):
     }
 
     url = f"{BYBIT_API_URL}{endpoint}"
+
+    # Optional debug check
+    log(f"🔐 Using API Key: {BYBIT_API_KEY[:4]}****")
+
     async with aiohttp.ClientSession() as session:
         if method == "GET":
             async with session.get(url, params=params, headers=headers) as resp:
