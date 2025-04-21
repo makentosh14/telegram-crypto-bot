@@ -1,40 +1,19 @@
-import json
-import os
-from datetime import datetime, timedelta
+# signal_memory.py
 
-SIGNAL_LOG_FILE = "signal_log.json"
-DUPLICATE_WINDOW_MINUTES = 60  # Don't repeat trades for the same coin within this time
+import time
 
-def load_signal_log():
-    if not os.path.exists(SIGNAL_LOG_FILE):
-        return {}
-    with open(SIGNAL_LOG_FILE, "r") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return {}
+signal_cache = {}
 
-def save_signal_log(log):
-    with open(SIGNAL_LOG_FILE, "w") as f:
-        json.dump(log, f)
+def is_duplicate_signal(symbol, cooldown=1800):
+    """
+    Prevents sending repeated signals for the same coin.
+    cooldown: seconds to wait before allowing another signal
+    """
+    now = time.time()
+    if symbol in signal_cache:
+        if now - signal_cache[symbol] < cooldown:
+            return True
+    return False
 
 def log_signal(symbol):
-    log = load_signal_log()
-    log[symbol] = datetime.utcnow().isoformat()
-    save_signal_log(log)
-
-def is_duplicate_signal(symbol):
-    log = load_signal_log()
-    if symbol not in log:
-        return False
-    last_time = datetime.fromisoformat(log[symbol])
-    return datetime.utcnow() - last_time < timedelta(minutes=DUPLICATE_WINDOW_MINUTES)
-
-def clean_old_signals():
-    log = load_signal_log()
-    now = datetime.utcnow()
-    updated_log = {
-        symbol: timestamp for symbol, timestamp in log.items()
-        if now - datetime.fromisoformat(timestamp) < timedelta(minutes=DUPLICATE_WINDOW_MINUTES)
-    }
-    save_signal_log(updated_log)
+    signal_cache[symbol] = time.time()
