@@ -1,5 +1,3 @@
-# bybit_api.py
-
 import aiohttp
 import hmac
 import hashlib
@@ -14,36 +12,26 @@ async def get_server_time():
 
 def sign_request(params: dict, secret: str):
     sorted_params = dict(sorted(params.items()))
-    query_string = "&".join([f"{key}={value}" for key, value in sorted_params.items()])
-    return hmac.new(
-        secret.encode("utf-8"),
-        query_string.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    query_string = "&".join([f"{k}={v}" for k, v in sorted_params.items()])
+    return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
 async def signed_request(method: str, endpoint: str, params: dict):
     from config import BYBIT_API_KEY, BYBIT_API_SECRET
 
     timestamp = str(await get_server_time())
-
-    # ✅ Sign ONLY timestamp + recvWindow + user params
-    sign_params = {
+    base_params = {
         "timestamp": timestamp,
         "recvWindow": "5000",
         **params
     }
 
-    signature = sign_request(sign_params, BYBIT_API_SECRET)
-
-    # ✅ Final payload sent in request
-    payload = {
-        **sign_params,
-        "sign": signature
-    }
-
+    signature = sign_request(base_params, BYBIT_API_SECRET)
     headers = {
-        "Content-Type": "application/json",
-        "X-BYBIT-API-KEY": BYBIT_API_KEY  # ✅ API Key is only sent in headers!
+        "X-BYBIT-API-KEY": BYBIT_API_KEY,
+        "X-BYBIT-API-TIMESTAMP": timestamp,
+        "X-BYBIT-API-SIGN": signature,
+        "X-BYBIT-API-RECV-WINDOW": "5000",
+        "Content-Type": "application/json"
     }
 
     url = f"{BYBIT_API_URL}{endpoint}"
@@ -51,12 +39,11 @@ async def signed_request(method: str, endpoint: str, params: dict):
 
     async with aiohttp.ClientSession() as session:
         if method == "GET":
-            async with session.get(url, params=payload, headers=headers) as resp:
+            async with session.get(url, params=params, headers=headers) as resp:
                 return await resp.json()
         elif method == "POST":
-            async with session.post(url, json=payload, headers=headers) as resp:
+            async with session.post(url, json=params, headers=headers) as resp:
                 return await resp.json()
-
 
 # === TRADING FUNCTIONS ===
 
