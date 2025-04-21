@@ -9,7 +9,6 @@ from logger import log
 
 # Store a deque of up to 100 candles per symbol
 live_candles = {}
-
 MAX_CANDLES = 100
 
 async def stream_candles(symbols, interval='1'):
@@ -28,6 +27,8 @@ async def stream_candles(symbols, interval='1'):
                 while True:
                     try:
                         message = await ws.recv()
+                        log(f"🟢 WS [{category.upper()}] message received")
+
                         data = json.loads(message)
 
                         if "data" in data and isinstance(data["data"], dict):
@@ -49,6 +50,9 @@ async def stream_candles(symbols, interval='1'):
                                 live_candles[symbol] = deque(maxlen=MAX_CANDLES)
 
                             live_candles[symbol].append(new_candle)
+
+                            # Debug: show how many candles we now have
+                            log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
 
                     except Exception as e:
                         log(f"❌ WebSocket error in {category}: {e}", level="ERROR")
