@@ -6,6 +6,7 @@ from supertrend import calculate_supertrend_signal
 from ema import detect_ema_crossover
 from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
+from volume import is_volume_spike
 
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
@@ -13,7 +14,9 @@ def score_symbol(symbol, candles_by_timeframe):
 
     for tf, candles in candles_by_timeframe.items():
         score = 0
-
+        
+if is_volume_spike(candles, multiplier=2.5):
+    score += 1  # reward confirmed breakout volume
         # RSI
         rsi_vals = calculate_rsi(candles)
         if rsi_vals:
