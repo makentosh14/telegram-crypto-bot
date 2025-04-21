@@ -3,7 +3,7 @@
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
-from score import score_symbol
+from score import score_symbol, determine_trade_type
 from telegram_bot import send_telegram_message
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
@@ -11,7 +11,7 @@ from config import MIN_SCORE_THRESHOLD, BASE_SCAN_INTERVAL
 from performance_tracker import track_signal
 from logger import log
 
-TIMEFRAMES = SUPPORTED_INTERVALS  # ✅ Scanning multiple timeframes
+TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
     log("🚀 Bot starting...")
@@ -20,7 +20,7 @@ async def run_bot():
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
 
     asyncio.create_task(stream_candles(symbols, interval='1'))
-    await asyncio.sleep(5)  # Wait for initial candles
+    await asyncio.sleep(5)
 
     while True:
         try:
@@ -44,7 +44,9 @@ async def run_bot():
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: insufficient candle history")
                     continue
 
-                score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
+                score, tf_scores = score_symbol(symbol, candles_by_tf)
+                trade_type = determine_trade_type(tf_scores)
+
                 log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
@@ -53,7 +55,14 @@ async def run_bot():
                     high_signals += 1
 
                     await send_telegram_message(
-                        f"🚨 <b>Trade Signal</b> ({trade_type.upper()})\nSymbol: <b>{symbol}</b>\nScore: {score}\nTFs: {tf_scores}\nTrend: BTC={btc_trend}, Altseason={altseason}"
+                        f"🚨 <b>{trade_type} Signal</b>\n"
+                        f"Symbol: <b>{symbol}</b>\n"
+                        f"Score: {score} | TFs: {tf_scores}\n"
+                        f"Trend: BTC={btc_trend}, Altseason={altseason}\n\n"
+                        f"<i>Entry at market price</i>\n"
+                        f"SL: Dynamic based on structure\n"
+                        f"TP1: Based on {trade_type.lower()} target\n"
+                        f"🧠 Smart Trailing SL will activate after TP1."
                     )
 
             log(f"✅ Round complete | Signals sent: {high_signals} / {len(symbols)}")
