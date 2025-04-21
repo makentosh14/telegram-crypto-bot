@@ -82,4 +82,7 @@ async def run_bot():
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
-            await
+            
+           if __name__ == "__main__":
+    asyncio.run(run_bot())
+
