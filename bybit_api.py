@@ -1,10 +1,8 @@
 # bybit_api.py
 
 import aiohttp
-import time
 import hmac
 import hashlib
-import json
 from config import BYBIT_API_URL
 from logger import log
 
@@ -17,46 +15,42 @@ async def get_server_time():
 def sign_request(params: dict, secret: str):
     sorted_params = dict(sorted(params.items()))
     query_string = "&".join([f"{key}={value}" for key, value in sorted_params.items()])
-    signature = hmac.new(
+    return hmac.new(
         secret.encode("utf-8"),
         query_string.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
-    return signature
 
 async def signed_request(method: str, endpoint: str, params: dict):
     from config import BYBIT_API_KEY, BYBIT_API_SECRET
 
     timestamp = str(await get_server_time())
-
-    # ✅ Build the full payload for signing
-    full_params = {
-        "apiKey": BYBIT_API_KEY,
+    base_params = {
         "timestamp": timestamp,
         "recvWindow": "5000",
         **params
     }
 
-    # ✅ Sign all required params (without the signature itself)
-    signature = sign_request(full_params, BYBIT_API_SECRET)
-    full_params["sign"] = signature
+    signature = sign_request(base_params, BYBIT_API_SECRET)
+    base_params["sign"] = signature
 
     headers = {
         "Content-Type": "application/json",
-        "X-BYBIT-API-KEY": BYBIT_API_KEY
+        "X-BYBIT-API-KEY": BYBIT_API_KEY  # ✅ ONLY header contains API key
     }
 
     url = f"{BYBIT_API_URL}{endpoint}"
-
     log(f"🔐 Using API Key: {BYBIT_API_KEY[:4]}****")
 
     async with aiohttp.ClientSession() as session:
         if method == "GET":
-            async with session.get(url, params=full_params, headers=headers) as resp:
+            async with session.get(url, params=base_params, headers=headers) as resp:
                 return await resp.json()
         elif method == "POST":
-            async with session.post(url, json=full_params, headers=headers) as resp:
+            async with session.post(url, json=base_params, headers=headers) as resp:
                 return await resp.json()
+
+# === TRADING FUNCTIONS ===
 
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
     endpoint = "/v5/order/create"
