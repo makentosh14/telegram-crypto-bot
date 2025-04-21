@@ -3,10 +3,14 @@
 import asyncio
 import json
 import websockets
+from collections import deque
 from scanner import symbol_category_map
 from logger import log
 
+# Store a deque of up to 100 candles per symbol
 live_candles = {}
+
+MAX_CANDLES = 100
 
 async def stream_candles(symbols, interval='1'):
     futures_url = "wss://stream.bybit.com/v5/public/linear"
@@ -26,16 +30,13 @@ async def stream_candles(symbols, interval='1'):
                         message = await ws.recv()
                         data = json.loads(message)
 
-                        # Debug: Log raw data format once
-                        if "topic" in data and "data" in data:
-                            log(f"🔍 WS [{category.upper()}] topic: {data['topic']}")
-
                         if "data" in data and isinstance(data["data"], dict):
                             k = data["data"]
                             symbol = k.get("symbol")
                             if not symbol:
                                 continue
-                            live_candles[symbol] = {
+
+                            new_candle = {
                                 "timestamp": int(k["start"]),
                                 "open": k["open"],
                                 "high": k["high"],
@@ -43,6 +44,11 @@ async def stream_candles(symbols, interval='1'):
                                 "close": k["close"],
                                 "volume": k["volume"]
                             }
+
+                            if symbol not in live_candles:
+                                live_candles[symbol] = deque(maxlen=MAX_CANDLES)
+
+                            live_candles[symbol].append(new_candle)
 
                     except Exception as e:
                         log(f"❌ WebSocket error in {category}: {e}", level="ERROR")
@@ -52,7 +58,8 @@ async def stream_candles(symbols, interval='1'):
         except Exception as e:
             log(f"❌ Connection failed for {category} stream: {e}", level="ERROR")
 
-    tasks = []
-    tasks.append(asyncio.create_task(handle_stream(futures_url, symbols, "linear")))
-    tasks.append(asyncio.create_task(handle_stream(spot_url, symbols, "spot")))
+    tasks = [
+        asyncio.create_task(handle_stream(futures_url, symbols, "linear")),
+        asyncio.create_task(handle_stream(spot_url, symbols, "spot"))
+    ]
     await asyncio.gather(*tasks)
