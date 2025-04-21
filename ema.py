@@ -1,17 +1,32 @@
-def calculate_ema(prices, period):
-    if len(prices) < period:
-        return None
-    k = 2 / (period + 1)
-    ema = prices[0]
-    for price in prices[1:]:
-        ema = price * k + ema * (1 - k)
+# ema.py
+
+def calculate_ema(candles, period):
+    closes = [float(c['close']) for c in candles]
+    ema = []
+    multiplier = 2 / (period + 1)
+
+    for i in range(len(closes)):
+        if i == 0:
+            ema.append(closes[0])
+        else:
+            ema.append((closes[i] - ema[i - 1]) * multiplier + ema[i - 1])
+
     return ema
 
-def detect_ema_crossover(close_prices, short=9, long=21):
-    if len(close_prices) < long + 1:
-        return False
-    short_ema_prev = calculate_ema(close_prices[-(short+2):-1], short)
-    long_ema_prev = calculate_ema(close_prices[-(long+2):-1], long)
-    short_ema_now = calculate_ema(close_prices[-(short+1):], short)
-    long_ema_now = calculate_ema(close_prices[-(long+1):], long)
-    return short_ema_prev < long_ema_prev and short_ema_now > long_ema_now
+def detect_ema_crossover(candles, fast_period=9, slow_period=21):
+    """
+    Detects bullish or bearish EMA crossover
+    Returns: 'bullish', 'bearish', or None
+    """
+    fast_ema = calculate_ema(candles, fast_period)
+    slow_ema = calculate_ema(candles, slow_period)
+
+    if len(fast_ema) < 2 or len(slow_ema) < 2:
+        return None
+
+    if fast_ema[-2] < slow_ema[-2] and fast_ema[-1] > slow_ema[-1]:
+        return "bullish"
+    elif fast_ema[-2] > slow_ema[-2] and fast_ema[-1] < slow_ema[-1]:
+        return "bearish"
+    else:
+        return None
