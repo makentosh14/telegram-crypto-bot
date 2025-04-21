@@ -1,49 +1,49 @@
-# test_api_keys.py
-import os
-import time
+import aiohttp
+import asyncio
 import hmac
 import hashlib
-import aiohttp
-from dotenv import load_dotenv
 
-load_dotenv()
-
-BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
-BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
+# === Your actual API credentials (testing only) ===
+BYBIT_API_KEY = "A6ucmdIu9DZCi3ZaDz"
+BYBIT_API_SECRET = "M3Zz9RedjrwrC8CF0K8KlHQeHkf3eCpEQMCi"
 BYBIT_API_URL = "https://api.bybit.com"
 
-async def main():
-    timestamp = str(int(time.time() * 1000))
-    recv_window = "5000"
+async def get_server_time():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
+            data = await resp.json()
+            return str(data["result"]["time"])
 
+def sign(params, secret):
+    sorted_params = dict(sorted(params.items()))
+    query_string = "&".join(f"{k}={v}" for k, v in sorted_params.items())
+    return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+
+async def test_signed_request():
+    print(f"🔐 API KEY: {BYBIT_API_KEY}")
+    print(f"🔐 SECRET (masked): {BYBIT_API_SECRET[:4]}****")
+
+    timestamp = await get_server_time()
     params = {
         "accountType": "UNIFIED",
         "timestamp": timestamp,
-        "recvWindow": recv_window
+        "recvWindow": "5000"
     }
 
-    # Signature
-    query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
-    signature = hmac.new(
-        BYBIT_API_SECRET.encode(),
-        query_string.encode(),
-        hashlib.sha256
-    ).hexdigest()
+    signature = sign(params, BYBIT_API_SECRET)
+    params["sign"] = signature
 
     headers = {
-        "X-BYBIT-API-KEY": BYBIT_API_KEY,
-        "X-BYBIT-API-SIGN": signature,
-        "X-BYBIT-API-TIMESTAMP": timestamp,
-        "X-BYBIT-API-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-BYBIT-API-KEY": BYBIT_API_KEY
     }
 
     url = f"{BYBIT_API_URL}/v5/account/wallet-balance"
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
+        async with session.get(url, params=params, headers=headers) as resp:
             print(f"🔄 Status: {resp.status}")
             print(await resp.text())
 
-import asyncio
-asyncio.run(main())
+# Run the test
+asyncio.run(test_signed_request())
