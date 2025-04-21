@@ -1,36 +1,33 @@
-import os
 import aiohttp
+import asyncio
+import time
 import hmac
 import hashlib
-import asyncio
-from dotenv import load_dotenv
+import os
 
-load_dotenv()
-
-BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
-BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
+# Replace with your working key and secret
+BYBIT_API_KEY = "A6ucmdIu9DZCi3ZaDz"
+BYBIT_API_SECRET = "M3Zz9RedjrwrC8CF0K8KlHQeHkf3eCpEQMCi"
 BYBIT_API_URL = "https://api.bybit.com"
 
-async def get_server_time():
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
-            data = await resp.json()
-            return str(data["result"]["timeSecond"])
-
-def sign(params: dict, secret: str):
+def generate_signature(params, secret):
     sorted_params = dict(sorted(params.items()))
-    query = "&".join([f"{k}={v}" for k, v in sorted_params.items()])
+    query = '&'.join([f"{k}={v}" for k, v in sorted_params.items()])
     return hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
-async def test():
-    timestamp = await get_server_time()
+async def test_auth():
+    timestamp = str(int(time.time() * 1000))
+    recv_window = "5000"
+    endpoint = "/v5/account/wallet-balance"
+    url = f"{BYBIT_API_URL}{endpoint}"
+
     params = {
         "accountType": "UNIFIED",
         "timestamp": timestamp,
-        "recvWindow": "5000"
+        "recvWindow": recv_window
     }
 
-    signature = sign(params, BYBIT_API_SECRET)
+    signature = generate_signature(params, BYBIT_API_SECRET)
     params["sign"] = signature
 
     headers = {
@@ -38,11 +35,13 @@ async def test():
         "Content-Type": "application/json"
     }
 
-    url = f"{BYBIT_API_URL}/v5/account/wallet-balance"
+    print(f"🔐 API Key: {BYBIT_API_KEY}")
+    print(f"🔑 Signature: {signature}")
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url, params=params, headers=headers) as resp:
-            print(f"🔄 Status: {resp.status}")
-            print(await resp.text())
+            print(f"🔄 HTTP Status: {resp.status}")
+            response = await resp.text()
+            print(f"📦 Response: {response}")
 
-asyncio.run(test())
+asyncio.run(test_auth())
