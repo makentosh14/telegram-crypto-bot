@@ -6,8 +6,8 @@ import hashlib
 import os
 
 # Replace with your working key and secret
-BYBIT_API_KEY = "A6ucmdIu9DZCi3ZaDz"
-BYBIT_API_SECRET = "M3Zz9RedjrwrC8CF0K8KlHQeHkf3eCpEQMCi"
+BYBIT_API_KEY = "VFEBK9XrpC6polx31h"
+BYBIT_API_SECRET = "WBFlSemMj1EMihM2CHkiVbyYT3vyRoUNFjYS"
 BYBIT_API_URL = "https://api.bybit.com"
 
 def generate_signature(params, secret):
