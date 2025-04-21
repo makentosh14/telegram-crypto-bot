@@ -6,7 +6,7 @@ from scanner import symbol_category_map
 from logger import log
 
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
-SUPPORTED_INTERVALS = ['1', '5', '15']
+SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
 
 async def stream_candles(symbols):
     futures_url = "wss://stream.bybit.com/v5/public/linear"
