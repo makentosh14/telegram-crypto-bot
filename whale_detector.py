@@ -1,26 +1,15 @@
-# whale_detector.py
+# whale_tracker.py
 
-import random
-
-def detect_whale_activity(symbol, candles):
+def detect_whale_activity(candles, volume_threshold=1000000):
     """
-    Simulate whale detection logic.
-    In production, this would include:
-    - Unusual buy volume
-    - Large wallet inflows
-    - On-chain transfers
-    - Repeated large candle spikes
+    Looks for a large volume spike vs prior average.
+    Use with meme/low-cap coins for stealth entry alerts.
     """
-    if not candles or len(candles) < 5:
+    if len(candles) < 20:
         return False
 
-    large_candle_count = 0
-    for c in candles[-5:]:
-        body = abs(float(c['close']) - float(c['open']))
-        high_low = float(c['high']) - float(c['low'])
-        if high_low > 0 and (body / high_low) > 0.6:
-            large_candle_count += 1
+    volumes = [float(c['volume']) for c in candles[-20:-1]]
+    recent_volume = float(candles[-1]['volume'])
+    avg_volume = sum(volumes) / len(volumes)
 
-    # Simulate whale logic
-    whale_detected = large_candle_count >= 3 or random.random() < 0.05
-    return whale_detected
+    return recent_volume > avg_volume * 3 and recent_volume > volume_threshold
