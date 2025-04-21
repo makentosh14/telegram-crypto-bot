@@ -1,26 +1,23 @@
-def generate_tp_sl(entry_price, direction='long'):
-    tp1 = round(entry_price * 1.02, 4) if direction == 'long' else round(entry_price * 0.98, 4)
-    tp2 = round(entry_price * 1.04, 4) if direction == 'long' else round(entry_price * 0.96, 4)
-    sl = round(entry_price * 0.985, 4) if direction == 'long' else round(entry_price * 1.015, 4)
-    return tp1, tp2, sl
+# exit_manager.py
 
-def adjust_stop_to_breakeven(entry_price, current_price, sl, direction='long'):
-    if direction == 'long' and current_price >= entry_price * 1.02:
-        return max(sl, entry_price)
-    elif direction == 'short' and current_price <= entry_price * 0.98:
-        return min(sl, entry_price)
-    return sl
+def calculate_trailing_stop(entry_price, current_price, direction="long", trigger_pct=0.01, trail_pct=0.005):
+    """
+    Calculates a dynamic stop-loss price based on trailing logic.
+    """
+    if direction == "long":
+        move_up = current_price > entry_price * (1 + trigger_pct)
+        if move_up:
+            sl_price = current_price * (1 - trail_pct)
+            return round(sl_price, 2)
+    elif direction == "short":
+        move_down = current_price < entry_price * (1 - trigger_pct)
+        if move_down:
+            sl_price = current_price * (1 + trail_pct)
+            return round(sl_price, 2)
+    return None
 
-def apply_trailing_stop(entry_price, current_price, sl, direction='long'):
-    # Simple trailing logic: move SL up as price moves up
-    if direction == 'long':
-        gain = current_price - entry_price
-        if gain > 0:
-            new_sl = entry_price + gain * 0.5
-            return max(sl, round(new_sl, 4))
-    else:
-        gain = entry_price - current_price
-        if gain > 0:
-            new_sl = entry_price - gain * 0.5
-            return min(sl, round(new_sl, 4))
-    return sl
+def should_trail_stop(entry_price, current_price, direction="long"):
+    """
+    Determines whether to activate trailing logic.
+    """
+    return calculate_trailing_stop(entry_price, current_price, direction) is not None
