@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
-BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
+BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
+BYBIT_API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
 BYBIT_API_URL = "https://api.bybit.com"
 
 
