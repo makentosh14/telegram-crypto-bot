@@ -1,45 +1,45 @@
 import asyncio
 import json
 import websockets
-from collections import deque
+from collections import defaultdict, deque
 from scanner import symbol_category_map
 from logger import log
 
-live_candles = {}
-MAX_CANDLES = 100
+live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
+SUPPORTED_INTERVALS = ['1', '5', '15']
 
-async def stream_candles(symbols, interval='1'):
+async def stream_candles(symbols):
     futures_url = "wss://stream.bybit.com/v5/public/linear"
     spot_url = "wss://stream.bybit.com/v5/public/spot"
 
-    async def handle_stream(url, symbols, category):
+    async def handle_stream(url, symbols, category, interval):
         try:
             async with websockets.connect(url) as ws:
                 args = [f"kline.{interval}.{symbol}" for symbol in symbols if symbol_category_map.get(symbol) == category]
                 if not args:
                     return
+
                 await ws.send(json.dumps({"op": "subscribe", "args": args}))
-                log(f"📡 Subscribed to {len(args)} {category.upper()} pairs via WebSocket")
+                log(f"📡 Subscribed to {len(args)} {category.upper()} @ {interval}m")
 
                 while True:
                     try:
                         message = await ws.recv()
-                        log(f"🟢 WS [{category.upper()}] message received")
-                        log(f"🧪 RAW MSG [{category.upper()}]: {message[:300]}...")
-
                         data = json.loads(message)
+
                         topic = data.get("topic", "")
                         symbol = topic.split(".")[-1] if topic else None
+                        interval_from_topic = topic.split(".")[1] if topic else None
 
-                        if not symbol or "data" not in data:
+                        if not symbol or "data" not in data or not interval_from_topic:
                             continue
 
                         candles = data["data"]
 
-                        # Handle snapshot or delta format
+                        # If data is a list (snapshot)
                         if isinstance(candles, list):
                             for k in candles:
-                                new_candle = {
+                                candle = {
                                     "timestamp": int(k["start"]),
                                     "open": k["open"],
                                     "high": k["high"],
@@ -47,17 +47,12 @@ async def stream_candles(symbols, interval='1'):
                                     "close": k["close"],
                                     "volume": k["volume"]
                                 }
+                                live_candles[symbol][interval_from_topic].append(candle)
 
-                                if symbol not in live_candles:
-                                    live_candles[symbol] = deque(maxlen=MAX_CANDLES)
-
-                                live_candles[symbol].append(new_candle)
-
-                            log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
-
-                        elif isinstance(candles, dict):  # Single candle update
+                        # If data is a dict (update)
+                        elif isinstance(candles, dict):
                             k = candles
-                            new_candle = {
+                            candle = {
                                 "timestamp": int(k["start"]),
                                 "open": k["open"],
                                 "high": k["high"],
@@ -65,23 +60,21 @@ async def stream_candles(symbols, interval='1'):
                                 "close": k["close"],
                                 "volume": k["volume"]
                             }
+                            live_candles[symbol][interval_from_topic].append(candle)
 
-                            if symbol not in live_candles:
-                                live_candles[symbol] = deque(maxlen=MAX_CANDLES)
-
-                            live_candles[symbol].append(new_candle)
-                            log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
+                        log(f"📈 {symbol} [{category}] @{interval_from_topic} updated | total: {len(live_candles[symbol][interval_from_topic])}")
 
                     except Exception as e:
-                        log(f"❌ WebSocket error in {category}: {e}", level="ERROR")
+                        log(f"❌ WebSocket error in {category} {interval}m: {e}", level="ERROR")
                         await asyncio.sleep(2)
-                        return  # reconnect loop will relaunch
+                        return
 
         except Exception as e:
-            log(f"❌ Connection failed for {category} stream: {e}", level="ERROR")
+            log(f"❌ Connection failed for {category} {interval}m: {e}", level="ERROR")
 
-    tasks = [
-        asyncio.create_task(handle_stream(futures_url, symbols, "linear")),
-        asyncio.create_task(handle_stream(spot_url, symbols, "spot"))
-    ]
+    tasks = []
+    for interval in SUPPORTED_INTERVALS:
+        tasks.append(asyncio.create_task(handle_stream(futures_url, symbols, "linear", interval)))
+        tasks.append(asyncio.create_task(handle_stream(spot_url, symbols, "spot", interval)))
+
     await asyncio.gather(*tasks)
