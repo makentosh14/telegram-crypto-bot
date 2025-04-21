@@ -1,5 +1,11 @@
 import os
-# config.py
+from dotenv import load_dotenv
+
+load_dotenv()
+
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
+BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
+
 
 # === API KEYS ===
 BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
