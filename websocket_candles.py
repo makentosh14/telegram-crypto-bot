@@ -1,5 +1,3 @@
-# websocket_candles.py
-
 import asyncio
 import json
 import websockets
@@ -31,27 +29,26 @@ async def stream_candles(symbols, interval='1'):
 
                         data = json.loads(message)
 
-                        if "data" in data and isinstance(data["data"], dict):
-                            k = data["data"]
-                            symbol = k.get("symbol")
-                            if not symbol:
-                                continue
+                        # Check for new kline data in array format
+                        if "data" in data and isinstance(data["data"], dict) and "data" in data["data"]:
+                            data_block = data["data"]["data"]
+                            symbol = data["data"].get("topic", "").split(".")[-1]
 
-                            new_candle = {
-                                "timestamp": int(k["start"]),
-                                "open": k["open"],
-                                "high": k["high"],
-                                "low": k["low"],
-                                "close": k["close"],
-                                "volume": k["volume"]
-                            }
+                            for k in data_block:
+                                new_candle = {
+                                    "timestamp": int(k["start"]),
+                                    "open": k["open"],
+                                    "high": k["high"],
+                                    "low": k["low"],
+                                    "close": k["close"],
+                                    "volume": k["volume"]
+                                }
 
-                            if symbol not in live_candles:
-                                live_candles[symbol] = deque(maxlen=MAX_CANDLES)
+                                if symbol not in live_candles:
+                                    live_candles[symbol] = deque(maxlen=MAX_CANDLES)
 
-                            live_candles[symbol].append(new_candle)
+                                live_candles[symbol].append(new_candle)
 
-                            # Debug: show how many candles we now have
                             log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
 
                     except Exception as e:
