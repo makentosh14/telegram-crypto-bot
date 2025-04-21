@@ -1,32 +1,35 @@
-def calculate_position_size(balance, entry_price, stop_loss_price, risk_percent, leverage=1):
-    try:
-        risk_amount = balance * risk_percent
-        sl_distance = abs(entry_price - stop_loss_price)
-        if sl_distance == 0:
-            return 0
-        quantity = (risk_amount / sl_distance) * leverage
-        return round(quantity, 3)
-    except Exception as e:
-        print(f"[Risk Manager] Error calculating position size: {e}")
-        return 0
+# risk_manager.py
 
-def adjust_risk_after_losses(trade_history, base_risk_percent, max_daily_loss=0.1):
-    losses_today = sum(t['loss'] for t in trade_history if t['date'] == get_today())
-    if losses_today >= max_daily_loss:
-        return 0  # Bot pauses trading
-    elif get_consecutive_losses(trade_history) >= 3:
-        return base_risk_percent / 2  # Reduce risk after 3 losses
-    return base_risk_percent
+from config import RISK_SPOT, RISK_FUTURES, DAILY_MAX_LOSS
+from logger import log
 
-def get_consecutive_losses(trades):
-    count = 0
-    for trade in reversed(trades):
-        if trade.get("result") == "loss":
-            count += 1
-        else:
-            break
-    return count
+daily_loss_count = 0
+daily_loss_total = 0
+paused_due_to_loss = False
 
-def get_today():
-    from datetime import datetime
-    return datetime.utcnow().strftime('%Y-%m-%d')
+def get_risk(symbol, is_altseason=False):
+    risk = RISK_SPOT if symbol.startswith("SPOT_") else RISK_FUTURES
+
+    if is_altseason:
+        risk *= 1.5  # Boost during altseason
+
+    return round(risk, 4)
+
+def register_loss(symbol, loss_amount, balance):
+    global daily_loss_count, daily_loss_total, paused_due_to_loss
+
+    daily_loss_count += 1
+    daily_loss_total += loss_amount
+
+    if daily_loss_total / balance >= DAILY_MAX_LOSS:
+        paused_due_to_loss = True
+        log("🛑 Trading paused due to hitting daily loss cap!", level="ALERT")
+
+def reset_risk_day():
+    global daily_loss_count, daily_loss_total, paused_due_to_loss
+    daily_loss_count = 0
+    daily_loss_total = 0
+    paused_due_to_loss = False
+
+def is_trading_paused():
+    return paused_due_to_loss
