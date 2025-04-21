@@ -1,4 +1,5 @@
 # exit_manager.py
+from volume import get_average_volume
 
 def calculate_trailing_stop(entry_price, current_price, direction="long", trigger_pct=0.01, trail_pct=0.005):
     """
@@ -25,3 +26,12 @@ def should_trail_stop(entry_price, current_price, direction="long", volume=None,
         if volume < avg_volume * 1.2:
             return False  # Wait for breakout volume
     return calculate_trailing_stop(entry_price, current_price, direction) is not None
+
+def should_trail_stop(entry_price, current_price, direction="long", candles=None):
+    if candles:
+        avg_volume = get_average_volume(candles)
+        current_volume = float(candles[-1]['volume'])
+        if current_volume < avg_volume * 1.2:
+            return False  # Not enough volume to confirm breakout
+    return calculate_trailing_stop(entry_price, current_price, direction) is not None
+    
