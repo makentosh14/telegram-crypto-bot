@@ -1,36 +1,61 @@
-def detect_bullish_patterns(candles):
-    score = 0
-    if len(candles) < 4:
-        return score
+# pattern_detector.py
 
-    def body(c):
-        return abs(float(c['close']) - float(c['open']))
+def is_bullish_engulfing(prev, curr):
+    return (
+        float(prev["close"]) < float(prev["open"]) and
+        float(curr["close"]) > float(curr["open"]) and
+        float(curr["open"]) < float(prev["close"]) and
+        float(curr["close"]) > float(prev["open"])
+    )
 
-    def is_bullish(c):
-        return float(c['close']) > float(c['open'])
+def is_bearish_engulfing(prev, curr):
+    return (
+        float(prev["close"]) > float(prev["open"]) and
+        float(curr["close"]) < float(curr["open"]) and
+        float(curr["open"]) > float(prev["close"]) and
+        float(curr["close"]) < float(prev["open"])
+    )
 
-    def is_bearish(c):
-        return float(c['close']) < float(c['open'])
+def is_hammer(candle):
+    high = float(candle["high"])
+    low = float(candle["low"])
+    open_ = float(candle["open"])
+    close = float(candle["close"])
+    body = abs(close - open_)
+    tail = min(open_, close) - low
+    return body < (high - low) * 0.3 and tail > body * 2
 
-    c1 = candles[-4]
-    c2 = candles[-3]
-    c3 = candles[-2]
-    c4 = candles[-1]
+def is_inverted_hammer(candle):
+    high = float(candle["high"])
+    low = float(candle["low"])
+    open_ = float(candle["open"])
+    close = float(candle["close"])
+    body = abs(close - open_)
+    wick = high - max(open_, close)
+    return body < (high - low) * 0.3 and wick > body * 2
 
-    # Bullish Engulfing
-    if is_bearish(c2) and is_bullish(c3) and float(c3['close']) > float(c2['open']) and float(c3['open']) < float(c2['close']):
-        score += 1
+def is_inside_bar(prev, curr):
+    return (
+        float(curr["high"]) < float(prev["high"]) and
+        float(curr["low"]) > float(prev["low"])
+    )
 
-    # Hammer
-    if is_bullish(c4):
-        body_len = body(c4)
-        lower_shadow = float(c4['open']) - float(c4['low']) if float(c4['open']) > float(c4['low']) else float(c4['close']) - float(c4['low'])
-        if lower_shadow > 2 * body_len:
-            score += 1
+def detect_pattern(candles):
+    if len(candles) < 2:
+        return None
 
-    # Morning Star
-    if is_bearish(c1) and abs(float(c2['open']) - float(c2['close'])) < body(c1) * 0.3 and is_bullish(c3):
-        if float(c3['close']) > ((float(c1['open']) + float(c1['close'])) / 2):
-            score += 1
+    prev = candles[-2]
+    curr = candles[-1]
 
-    return score
+    if is_bullish_engulfing(prev, curr):
+        return "bullish_engulfing"
+    elif is_bearish_engulfing(prev, curr):
+        return "bearish_engulfing"
+    elif is_hammer(curr):
+        return "hammer"
+    elif is_inverted_hammer(curr):
+        return "inverted_hammer"
+    elif is_inside_bar(prev, curr):
+        return "inside_bar"
+    else:
+        return None
