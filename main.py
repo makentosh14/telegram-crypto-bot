@@ -19,7 +19,7 @@ async def run_bot():
     symbols = await fetch_symbols()
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
 
-    asyncio.create_task(stream_candles(symbols, interval='1'))
+    asyncio.create_task(stream_candles(symbols))
     await asyncio.sleep(5)
 
     while True:
