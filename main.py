@@ -18,8 +18,8 @@ async def run_bot():
     log("🚀 Bot starting...")
 
     symbols = await fetch_symbols()
-    top_symbols = symbols[:50]  # You can increase this as needed
-    log(f"✅ Scanning top {len(top_symbols)} symbols...")
+    top_symbols = symbols  # ✅ Now scanning ALL symbols
+    log(f"✅ Scanning ALL {len(top_symbols)} symbols...")
 
     asyncio.create_task(stream_candles(top_symbols, interval='1'))
     await asyncio.sleep(5)
@@ -45,11 +45,11 @@ async def run_bot():
                     tf: [live_candles[symbol]] * 50 for tf in TIMEFRAMES
                 }
 
-                if any(len(c) < 30 for c in candles_by_tf.values()):
-                    continue
-
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 log(f"🔍 [{i}/{len(top_symbols)}] {symbol} | Total Score: {score} | TF Scores: {tf_scores}")
+
+                if any(len(c) < 30 for c in candles_by_tf.values()):
+                    continue  # Still skip if candle data isn't ready
 
                 if score >= MIN_SCORE_THRESHOLD:
                     if not is_duplicate_signal(symbol):
