@@ -69,4 +69,8 @@ def score_symbol(symbol, candles_by_timeframe):
         tf_scores[tf] = score
         total_score += score
 
-    return total_score, tf_scores
+    # Determine dominant timeframe type
+    dominant_tf = max(tf_scores, key=lambda k: abs(tf_scores[k])) if tf_scores else "1"
+    trade_type = "scalp" if dominant_tf == "1" else "intraday" if dominant_tf == "5" else "swing"
+
+    return total_score, tf_scores, trade_type
