@@ -26,9 +26,15 @@ async def stream_candles(symbols, interval='1'):
                         message = await ws.recv()
                         data = json.loads(message)
 
-                        if "data" in data:
+                        # Debug: Log raw data format once
+                        if "topic" in data and "data" in data:
+                            log(f"🔍 WS [{category.upper()}] topic: {data['topic']}")
+
+                        if "data" in data and isinstance(data["data"], dict):
                             k = data["data"]
-                            symbol = k["symbol"]
+                            symbol = k.get("symbol")
+                            if not symbol:
+                                continue
                             live_candles[symbol] = {
                                 "timestamp": int(k["start"]),
                                 "open": k["open"],
