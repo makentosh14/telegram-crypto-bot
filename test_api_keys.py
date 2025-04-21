@@ -1,34 +1,49 @@
-import os, aiohttp, asyncio, time, hmac, hashlib
+# test_api_keys.py
+import os
+import time
+import hmac
+import hashlib
+import aiohttp
 from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.getenv("BYBIT_API_KEY")
-api_secret = os.getenv("BYBIT_API_SECRET")
-url = "https://api.bybit.com/v5/account/wallet-balance"
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
+BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
+BYBIT_API_URL = "https://api.bybit.com"
 
-timestamp = str(int(time.time() * 1000))
-params = {
-    "accountType": "UNIFIED",
-    "timestamp": timestamp,
-    "recvWindow": "5000"
-}
+async def main():
+    timestamp = str(int(time.time() * 1000))
+    recv_window = "5000"
 
-def sign(params, secret):
-    query = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    return hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    params = {
+        "accountType": "UNIFIED",
+        "timestamp": timestamp,
+        "recvWindow": recv_window
+    }
 
-params["sign"] = sign(params, api_secret)
+    # Signature
+    query_string = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+    signature = hmac.new(
+        BYBIT_API_SECRET.encode(),
+        query_string.encode(),
+        hashlib.sha256
+    ).hexdigest()
 
-headers = {
-    "Content-Type": "application/json",
-    "X-BYBIT-API-KEY": api_key
-}
+    headers = {
+        "X-BYBIT-API-KEY": BYBIT_API_KEY,
+        "X-BYBIT-API-SIGN": signature,
+        "X-BYBIT-API-TIMESTAMP": timestamp,
+        "X-BYBIT-API-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
+    }
 
-async def test():
+    url = f"{BYBIT_API_URL}/v5/account/wallet-balance"
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(url, headers=headers) as resp:
             print(f"🔄 Status: {resp.status}")
             print(await resp.text())
 
-asyncio.run(test())
+import asyncio
+asyncio.run(main())
