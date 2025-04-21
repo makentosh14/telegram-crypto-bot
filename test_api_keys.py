@@ -12,7 +12,12 @@ async def get_server_time():
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
             data = await resp.json()
-            return str(data["result"]["time"])
+            print("🕒 Raw time response:", data)  # Debug log
+            if "result" in data and "timeSecond" in data["result"]:
+                return str(int(data["result"]["timeSecond"]) * 1000)  # Convert to ms
+            else:
+                raise Exception("❌ Server time fetch failed.")
+
 
 def sign(params, secret):
     sorted_params = dict(sorted(params.items()))
