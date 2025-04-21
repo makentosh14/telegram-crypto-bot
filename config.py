@@ -1,62 +1,50 @@
 import os
+# config.py
 
-# === Bybit API ===
+# === API KEYS ===
 BYBIT_API_KEY = "tL7vmTEDT5B8mp4Yer"
 BYBIT_API_SECRET = "xH5S3U3dkLeQJ739cl9AZ0MMNQkerD53vAXN"
 BYBIT_API_URL = "https://api.bybit.com"
-BASE_URL = "https://api.bybit.com"
 
-# === Telegram ===
 TELEGRAM_BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
 TELEGRAM_CHAT_ID = "1806610681"
-ASSISTANT_CHAT_ID = "-1000000000000"
+TELEGRAM_ASSISTANT_CHAT_ID = "-1000000000000" # optional
 
-# === Bot Behavior Settings ===
-DEFAULT_SCAN_INTERVAL = 180  # in seconds
-DEFAULT_RISK = 0.03  # 3% default risk
-MAX_DAILY_LOSS = 0.1  # 10% max daily drawdown
-TRADE_MODE = "auto"  # "signal" or "auto"
-USE_SMART_EXIT = True
-USE_AUTO_REENTRY = True
+# === TRADING MODE ===
+TRADING_MODE = "auto"  # "auto" or "signal"
+RISK_SPOT = 0.02       # default 2% per spot trade
+RISK_FUTURES = 0.03    # default 3% per futures trade
+DAILY_MAX_LOSS = 0.1   # max daily loss before auto pause (10%)
 
-# === Timeframes ===
-TIMEFRAMES = ["5m", "15m", "1h"]
+# === LEVERAGE / MARGIN SETTINGS ===
+DEFAULT_LEVERAGE = 5
+MARGIN_MODE = "ISOLATED"  # or "CROSSED"
 
-# === Other Constants ===
-BTC_SYMBOL = "BTCUSDT"
-ETH_SYMBOL = "ETHUSDT"
-QUOTE_ASSET = "USDT"
+# === CANDLE INTERVAL SETTINGS ===
+DEFAULT_INTERVAL = '1'
+SUPPORTED_INTERVALS = ['1', '3', '5', '15']
 
-# === Strategy Thresholds ===
-MIN_SCORE_THRESHOLD = 3.0
-HIGH_CONVICTION_SCORE = 4.5
+# === SIGNAL THRESHOLDS ===
+MIN_SCORE_THRESHOLD = 3
+ALTSEASON_SCORE_BOOST = 0.5
+MEME_SCORE_BOOST = 0.5
 
-# === Altseason Scan Adaptation ===
+# === MEME / ALTSEASON DETECTION ===
+ENABLE_MEME_RADAR = True
+ENABLE_ALTS_SCALING = True
+
+# === SCAN SPEED CONTROL ===
+BASE_SCAN_INTERVAL = 180  # default: 3 minutes
 ALTSEASON_SCAN_INTERVAL = 120
-NORMAL_SCAN_INTERVAL = 180
-HIGH_VOL_SCAN_INTERVAL = 60
+MEME_HYPE_SCAN_INTERVAL = 90
 
-# === Risk & Strategy Settings ===
-DEFAULT_RISK = 0.03
-SWING_RISK = 0.015
-SCALP_RISK = 0.03
-MEME_RISK = 0.02
-MAX_DAILY_LOSS = 0.1
+# === MARKET TYPES ===
+ENABLE_SPOT = True
+ENABLE_FUTURES = True
 
-# === Auto Risk Adjuster ===
-WIN_STREAK_BOOST = 0.005
-LOSS_STREAK_REDUCE = 0.01
-
-# === Market Context Thresholds ===
-ALTSEASON_VOLUME_SPIKE = 1.5
-BTC_DOMINANCE_DROP = 1.0
-ETH_BTC_RATIO_MIN = 0.055
-
-# === Watchlist / Filtering ===
-MIN_VOLUME_USDT = 500000
-TOP_N_CANDIDATES = 5
-MAX_SYMBOLS_TO_SCAN = 500  # safety cap
-
-# === Logging / Debug ===
-LOG_FILE = "logs/bot_log.txt"
-DEBUG = True
+# === SMART SYSTEMS ===
+ENABLE_SMART_EXIT = True
+ENABLE_AI_SIGNAL_MEMORY = True
+ENABLE_LIQUIDITY_TRAP_FILTER = True
+ENABLE_WHALE_WATCH = True
+ENABLE_NEWS_REACTION = True
