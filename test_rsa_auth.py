@@ -2,15 +2,16 @@ import aiohttp
 import asyncio
 import time
 import base64
-from pathlib import Path
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
-BYBIT_API_KEY = "UiYisqj7VuDzDjKQjo"  # your RSA key ID
+# === CONFIG ===
+BYBIT_API_KEY = "UiYisqj7VuDzDjKQjo"  # RSA API key ID from Bybit
 BYBIT_API_URL = "https://api.bybit.com"
-PRIVATE_KEY_PATH = "bybit_private_key.pem"
+PRIVATE_KEY_PATH = "bybit_private_key.pem"  # Make sure this file exists
 
-def load_rsa_private_key(path):
+# === RSA UTILITIES ===
+def load_rsa_private_key(path: str):
     with open(path, "rb") as key_file:
         private_key = serialization.load_pem_private_key(
             key_file.read(),
@@ -26,11 +27,12 @@ def generate_rsa_signature(private_key, message: str) -> str:
     )
     return base64.b64encode(signature).decode()
 
+# === API CALL ===
 async def rsa_signed_request():
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
-
     query = f"timestamp={timestamp}&recvWindow={recv_window}&accountType=UNIFIED"
+
     private_key = load_rsa_private_key(PRIVATE_KEY_PATH)
     signature = generate_rsa_signature(private_key, query)
 
@@ -50,5 +52,6 @@ async def rsa_signed_request():
             print(f"🔐 Status Code: {resp.status}")
             print("📦 Response:", await resp.text())
 
+# === RUN TEST ===
 if __name__ == "__main__":
     asyncio.run(rsa_signed_request())
