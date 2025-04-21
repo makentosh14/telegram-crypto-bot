@@ -8,11 +8,6 @@ import json
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
 from logger import log
 
-headers = {
-    "Content-Type": "application/json",
-    "X-BYBIT-API-KEY": BYBIT_API_KEY
-}
-
 async def get_server_time():
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
@@ -37,13 +32,18 @@ async def signed_request(method: str, endpoint: str, params: dict):
     signature = sign_request(params)
     params["sign"] = signature
 
+    headers = {
+        "Content-Type": "application/json",
+        "X-BYBIT-API-KEY": BYBIT_API_KEY
+    }
+
     url = f"{BYBIT_API_URL}{endpoint}"
     async with aiohttp.ClientSession() as session:
         if method == "GET":
-            async with session.get(url, params=params, headers=HEADERS) as resp:
+            async with session.get(url, params=params, headers=headers) as resp:
                 return await resp.json()
         elif method == "POST":
-            async with session.post(url, json=params, headers=HEADERS) as resp:
+            async with session.post(url, json=params, headers=headers) as resp:
                 return await resp.json()
 
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
