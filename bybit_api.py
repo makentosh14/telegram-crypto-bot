@@ -25,15 +25,21 @@ def sign_request(params: dict, secret: str):
     return signature
 
 async def signed_request(method: str, endpoint: str, params: dict):
-    # ✅ Re-import fresh keys each time
     from config import BYBIT_API_KEY, BYBIT_API_SECRET
 
     timestamp = str(await get_server_time())
-    params["apiKey"] = BYBIT_API_KEY
-    params["timestamp"] = timestamp
-    params["recvWindow"] = "5000"
-    signature = sign_request(params, BYBIT_API_SECRET)
-    params["sign"] = signature
+
+    # ✅ Build the full payload for signing
+    full_params = {
+        "apiKey": BYBIT_API_KEY,
+        "timestamp": timestamp,
+        "recvWindow": "5000",
+        **params
+    }
+
+    # ✅ Sign all required params (without the signature itself)
+    signature = sign_request(full_params, BYBIT_API_SECRET)
+    full_params["sign"] = signature
 
     headers = {
         "Content-Type": "application/json",
@@ -42,15 +48,14 @@ async def signed_request(method: str, endpoint: str, params: dict):
 
     url = f"{BYBIT_API_URL}{endpoint}"
 
-    # Optional debug check
     log(f"🔐 Using API Key: {BYBIT_API_KEY[:4]}****")
 
     async with aiohttp.ClientSession() as session:
         if method == "GET":
-            async with session.get(url, params=params, headers=headers) as resp:
+            async with session.get(url, params=full_params, headers=headers) as resp:
                 return await resp.json()
         elif method == "POST":
-            async with session.post(url, json=params, headers=headers) as resp:
+            async with session.post(url, json=full_params, headers=headers) as resp:
                 return await resp.json()
 
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
