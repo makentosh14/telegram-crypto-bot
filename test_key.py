@@ -1,4 +1,7 @@
-from config import BYBIT_API_KEY, BYBIT_API_SECRET
+import os
+from dotenv import load_dotenv
 
-print(f"🔐 API KEY: {BYBIT_API_KEY}")
-print(f"🔐 SECRET: {BYBIT_API_SECRET}")
+load_dotenv()
+
+print("🔑 BYBIT_API_KEY:", repr(os.getenv("BYBIT_API_KEY")))
+print("🔐 BYBIT_API_SECRET:", repr(os.getenv("BYBIT_API_SECRET")))
