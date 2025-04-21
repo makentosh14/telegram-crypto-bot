@@ -2,7 +2,7 @@
 
 import asyncio
 from scanner import fetch_symbols
-from websocket_candles import live_candles, stream_candles
+from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol
 from telegram_bot import send_telegram_message
 from trend_filters import get_trend_context
