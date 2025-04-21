@@ -8,7 +8,7 @@ import json
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
 from logger import log
 
-HEADERS = {
+headers = {
     "Content-Type": "application/json",
     "X-BYBIT-API-KEY": BYBIT_API_KEY
 }
