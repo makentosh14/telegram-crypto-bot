@@ -1,21 +1,29 @@
-import numpy as np
+# bollinger.py
 
-def detect_bollinger_breakout(close_prices, window=20, num_std=2):
-    if len(close_prices) < window:
-        return False
+def calculate_bollinger_bands(candles, period=20, multiplier=2):
+    """
+    candles: list of dicts with 'close' prices as strings
+    returns: list of dicts with 'middle', 'upper', 'lower'
+    """
+    closes = [float(c['close']) for c in candles]
+    bands = []
 
-    recent_closes = np.array(close_prices[-window:])
-    sma = np.mean(recent_closes)
-    std_dev = np.std(recent_closes)
+    for i in range(len(closes)):
+        if i + 1 < period:
+            bands.append(None)
+            continue
 
-    upper_band = sma + num_std * std_dev
-    lower_band = sma - num_std * std_dev
+        window = closes[i + 1 - period:i + 1]
+        sma = sum(window) / period
+        variance = sum((price - sma) ** 2 for price in window) / period
+        std_dev = variance ** 0.5
+        upper = sma + multiplier * std_dev
+        lower = sma - multiplier * std_dev
 
-    last_price = close_prices[-1]
+        bands.append({
+            'middle': sma,
+            'upper': upper,
+            'lower': lower
+        })
 
-    if last_price > upper_band:
-        return "breakout_up"
-    elif last_price < lower_band:
-        return "breakout_down"
-    else:
-        return None
+    return bands
