@@ -1,52 +1,41 @@
-from bybit_api import place_order, set_leverage_mode, set_leverage, get_balance
-from exit_manager import generate_tp_sl
-from risk_manager import calculate_position_size
-from telegram_bot import send_telegram_message
-from config import QUOTE_ASSET
+# trade_executor.py
 
-def execute_trade_if_valid(signal_data, max_risk=0.03):
+from bybit_api import (
+    place_market_order,
+    get_balance,
+    set_leverage,
+    set_margin_mode,
+    cancel_all_orders
+)
+from symbol_utils import is_spot_symbol, get_symbol_category
+from config import DEFAULT_LEVERAGE, MARGIN_MODE
+from logger import log
+
+async def execute_trade_if_valid(signal_data, max_risk=0.02):
+    symbol = signal_data["symbol"]
+    category = get_symbol_category(symbol)
+    is_spot = category == "spot"
+
+    log(f"⚙️ Executing trade for {symbol} [{category.upper()}]...")
+
     try:
-        symbol = signal_data['symbol']
-        score = signal_data['score']
-        tf_scores = signal_data['tf_scores']
-        btc_trend = signal_data['btc_trend']
-        altseason = signal_data['altseason']
+        balance = await get_balance()
+        risk_amount = balance * max_risk
 
-        balance = get_balance()
-        if not balance:
-            send_telegram_message("❌ Unable to fetch balance.")
-            return
+        price = float(signal_data.get("price", 1.0))  # fallback in case price not attached
+        qty = round(risk_amount / price, 2 if is_spot else 1)
 
-        qty, entry_price = calculate_position_size(symbol, balance, max_risk)
-        if not qty:
-            send_telegram_message(f"⚠️ Skipping {symbol} - unable to calculate size.")
-            return
+        if not is_spot:
+            await set_margin_mode(symbol, MARGIN_MODE)
+            await set_leverage(symbol, buy_leverage=DEFAULT_LEVERAGE, sell_leverage=DEFAULT_LEVERAGE)
 
-        set_leverage_mode(symbol, mode="Cross")
-        set_leverage(symbol, leverage=5)
+        await cancel_all_orders(symbol, category=category)
+        order_result = await place_market_order(symbol, "Buy", qty, market_type=category)
 
-        tp, sl = generate_tp_sl(symbol, entry_price)
-
-        success, order_response = place_order(
-            symbol=symbol,
-            side="Buy",
-            qty=qty,
-            entry_price=entry_price,
-            tp=tp,
-            sl=sl
-        )
-
-        if success:
-            msg = (
-                f"✅ Trade Executed: {symbol}\n"
-                f"🟢 Entry: {entry_price}\n"
-                f"🎯 TP: {tp} | 🛑 SL: {sl}\n"
-                f"📊 Score: {score} | TFs: {tf_scores}\n"
-                f"📈 BTC Trend: {btc_trend}, Altseason: {altseason}\n"
-                f"📉 Risk: {max_risk * 100:.1f}% of balance"
-            )
-            send_telegram_message(msg)
+        if order_result.get("retCode") == 0:
+            log(f"✅ Order placed for {symbol} | Qty: {qty} | Mode: {category.upper()}")
         else:
-            send_telegram_message(f"❌ Order failed for {symbol}: {order_response}")
+            log(f"❌ Order failed for {symbol}: {order_result}", level="ERROR")
+
     except Exception as e:
-        send_telegram_message(f"❌ Trade execution error: {str(e)}")
+        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
