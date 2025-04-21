@@ -39,17 +39,19 @@ async def run_bot():
 
             for i, symbol in enumerate(top_symbols, 1):
                 if symbol not in live_candles:
+                    log(f"⏩ [{i}/{len(top_symbols)}] Skipping {symbol}: no live candles yet")
                     continue
 
                 candles_by_tf = {
-                    tf: [live_candles[symbol]] * 50 for tf in TIMEFRAMES
+                    tf: list(live_candles[symbol]) for tf in TIMEFRAMES
                 }
+
+                if any(len(c) < 30 for c in candles_by_tf.values()):
+                    log(f"⏩ [{i}/{len(top_symbols)}] Skipping {symbol}: not enough candle history")
+                    continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 log(f"🔍 [{i}/{len(top_symbols)}] {symbol} | Total Score: {score} | TF Scores: {tf_scores}")
-
-                if any(len(c) < 30 for c in candles_by_tf.values()):
-                    continue  # Still skip if candle data isn't ready
 
                 if score >= MIN_SCORE_THRESHOLD:
                     if not is_duplicate_signal(symbol):
@@ -80,9 +82,4 @@ async def run_bot():
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
-            await asyncio.sleep(10)
-
-        await asyncio.sleep(BASE_SCAN_INTERVAL)
-
-if __name__ == "__main__":
-    asyncio.run(run_bot())
+            await
