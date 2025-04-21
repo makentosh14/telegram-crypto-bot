@@ -44,8 +44,8 @@ async def run_bot():
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: insufficient candle history")
                     continue
 
-                score, tf_scores = score_symbol(symbol, candles_by_tf)
-                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores}")
+                score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
+                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
@@ -53,7 +53,7 @@ async def run_bot():
                     high_signals += 1
 
                     await send_telegram_message(
-                        f"🚨 <b>Trade Signal</b>\nSymbol: <b>{symbol}</b>\nScore: {score}\nTFs: {tf_scores}\nTrend: BTC={btc_trend}, Altseason={altseason}"
+                        f"🚨 <b>Trade Signal</b> ({trade_type.upper()})\nSymbol: <b>{symbol}</b>\nScore: {score}\nTFs: {tf_scores}\nTrend: BTC={btc_trend}, Altseason={altseason}"
                     )
 
             log(f"✅ Round complete | Signals sent: {high_signals} / {len(symbols)}")
