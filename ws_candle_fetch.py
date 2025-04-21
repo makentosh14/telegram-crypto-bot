@@ -1,53 +1,52 @@
+# websocket_candles.py
+
 import asyncio
 import json
 import websockets
-import sys
+from scanner import symbol_category_map
+from logger import log
 
-if sys.platform.startswith('win'):
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+live_candles = {}
 
-URL = "wss://stream.bybit.com/v5/public/linear"
-SYMBOL = "BTCUSDT"
-INTERVAL = "1"  # 1-minute candles
+async def stream_candles(symbols, interval='1'):
+    futures_url = "wss://stream.bybit.com/v5/public/linear"
+    spot_url = "wss://stream.bybit.com/v5/public/spot"
 
-async def fetch_candles():
-    async with websockets.connect(URL) as ws:
-        # Subscribe to kline stream
-        subscribe_msg = {
-            "op": "subscribe",
-            "args": [f"kline.{INTERVAL}.{SYMBOL}"]
-        }
-        await ws.send(json.dumps(subscribe_msg))
-        print(f"✅ Subscribed to kline.{INTERVAL}.{SYMBOL}")
+    async def handle_stream(url, symbols, category):
+        try:
+            async with websockets.connect(url) as ws:
+                args = [f"kline.{interval}.{symbol}" for symbol in symbols if symbol_category_map.get(symbol) == category]
+                if not args:
+                    return
+                await ws.send(json.dumps({"op": "subscribe", "args": args}))
+                log(f"📡 Subscribed to {len(args)} {category.upper()} pairs via WebSocket")
 
-        while True:
-            try:
-                message = await ws.recv()
-                data = json.loads(message)
+                while True:
+                    try:
+                        message = await ws.recv()
+                        data = json.loads(message)
 
-                if "data" in data:
-                    candles = data["data"]
+                        if "data" in data:
+                            k = data["data"]
+                            symbol = k["symbol"]
+                            live_candles[symbol] = {
+                                "timestamp": int(k["start"]),
+                                "open": k["open"],
+                                "high": k["high"],
+                                "low": k["low"],
+                                "close": k["close"],
+                                "volume": k["volume"]
+                            }
 
-                    # If it's a list of candles (initial push), loop over them
-                    if isinstance(candles, list):
-                        for candle in candles:
-                            print_candle(candle)
-                    # If it's a single candle update (tick)
-                    elif isinstance(candles, dict):
-                        print_candle(candles)
+                    except Exception as e:
+                        log(f"❌ WebSocket error in {category}: {e}", level="ERROR")
+                        await asyncio.sleep(2)
+                        return  # reconnect loop will relaunch
 
-            except Exception as e:
-                print(f"❌ Error receiving candle data: {e}")
-                break
+        except Exception as e:
+            log(f"❌ Connection failed for {category} stream: {e}", level="ERROR")
 
-def print_candle(candle):
-    print(f"\n📊 Candle Update [{SYMBOL}]")
-    print(f" - Time: {candle['start']}")
-    print(f" - Open: {candle['open']}")
-    print(f" - High: {candle['high']}")
-    print(f" - Low: {candle['low']}")
-    print(f" - Close: {candle['close']}")
-    print(f" - Volume: {candle['volume']}")
-
-if __name__ == "__main__":
-    asyncio.run(fetch_candles())
+    tasks = []
+    tasks.append(asyncio.create_task(handle_stream(futures_url, symbols, "linear")))
+    tasks.append(asyncio.create_task(handle_stream(spot_url, symbols, "spot")))
+    await asyncio.gather(*tasks)
