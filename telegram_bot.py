@@ -1,30 +1,30 @@
 # telegram_bot.py
 
+from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ASSISTANT_CHAT_ID
 
-async def send_telegram_message(text, chat_id=None):
-    if not text or not isinstance(text, str) or not text.strip():
-        return
+BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-    chat_id = chat_id or TELEGRAM_CHAT_ID
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+async def send_telegram_message(message):
     payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
     }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(BOT_URL, data=payload) as resp:
+            return await resp.text()
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, data=payload) as resp:
-                if resp.status != 200:
-                    err = await resp.text()
-                    print(f"❌ Telegram error [{resp.status}]: {err}")
-    except Exception as e:
-        print(f"❌ Telegram exception: {e}")
-
-async def send_to_assistant(text):
-    if TELEGRAM_ASSISTANT_CHAT_ID:
-        await send_telegram_message(text, chat_id=TELEGRAM_ASSISTANT_CHAT_ID)
+def format_trade_signal(symbol, score, tf_scores, trend, entry_price, sl, tp1, trade_type):
+    return (
+        f"\n🚨 <b>Trade Signal</b>"
+        f"\nSymbol: <b>{symbol}</b>"
+        f"\nScore: <b>{score}</b>"
+        f"\nTF Scores: <code>{tf_scores}</code>"
+        f"\nType: <b>{trade_type}</b>"
+        f"\nEntry: <code>{entry_price}</code>"
+        f"\nSL: <code>{sl}</code>"
+        f"\nTP1: <code>{tp1}</code>"
+        f"\n📈 Trailing SL active after TP1 hit."
+        f"\n📊 Trend: BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}"
+    )
