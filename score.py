@@ -14,9 +14,11 @@ def score_symbol(symbol, candles_by_timeframe):
 
     for tf, candles in candles_by_timeframe.items():
         score = 0
-        
-if is_volume_spike(candles, multiplier=2.5):
-    score += 1  # reward confirmed breakout volume
+
+        # Volume Spike
+        if is_volume_spike(candles, multiplier=2.5):
+            score += 1  # reward confirmed breakout volume
+
         # RSI
         rsi_vals = calculate_rsi(candles)
         if rsi_vals:
@@ -47,7 +49,7 @@ if is_volume_spike(candles, multiplier=2.5):
         elif ema_cross == "bearish":
             score -= 1
 
-        # Bollinger Squeeze / Breakout
+        # Bollinger Bands
         bb = calculate_bollinger_bands(candles)
         if bb and bb[-1]:
             band = bb[-1]
@@ -57,7 +59,7 @@ if is_volume_spike(candles, multiplier=2.5):
             elif close < band["lower"]:
                 score -= 1
 
-        # Pattern Detection
+        # Candle Pattern
         pattern = detect_pattern(candles)
         if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
             score += 1
