@@ -33,8 +33,11 @@ async def run_bot():
             max_risk = 0.015 if btc_trend == "downtrend" else (0.04 if altseason else 0.025)
 
             top_signals = []
+            signals_this_round = 0
 
-            for symbol in top_symbols:
+            log(f"🔄 Starting scan of {len(top_symbols)} symbols...")
+
+            for i, symbol in enumerate(top_symbols, 1):
                 if symbol not in live_candles:
                     continue
 
@@ -46,11 +49,13 @@ async def run_bot():
                     continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
+                log(f"🔍 [{i}/{len(top_symbols)}] {symbol} | Total Score: {score} | TF Scores: {tf_scores}")
 
                 if score >= MIN_SCORE_THRESHOLD:
                     if not is_duplicate_signal(symbol):
                         log_signal(symbol)
                         track_signal(symbol, score)
+                        signals_this_round += 1
 
                         if TRADING_MODE == "auto":
                             await execute_trade_if_valid({
@@ -66,6 +71,8 @@ async def run_bot():
                             )
 
                         top_signals.append(symbol)
+
+            log(f"✅ Round complete | High-quality signals: {signals_this_round} / {len(top_symbols)}")
 
             if not top_signals:
                 log("⚠️ No high-quality signals this round.")
