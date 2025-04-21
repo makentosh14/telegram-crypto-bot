@@ -5,7 +5,6 @@ from collections import deque
 from scanner import symbol_category_map
 from logger import log
 
-# Store a deque of up to 100 candles per symbol
 live_candles = {}
 MAX_CANDLES = 100
 
@@ -26,15 +25,20 @@ async def stream_candles(symbols, interval='1'):
                     try:
                         message = await ws.recv()
                         log(f"🟢 WS [{category.upper()}] message received")
+                        log(f"🧪 RAW MSG [{category.upper()}]: {message[:300]}...")
 
                         data = json.loads(message)
+                        topic = data.get("topic", "")
+                        symbol = topic.split(".")[-1] if topic else None
 
-                        # Check for new kline data in array format
-                        if "data" in data and isinstance(data["data"], dict) and "data" in data["data"]:
-                            data_block = data["data"]["data"]
-                            symbol = data["data"].get("topic", "").split(".")[-1]
+                        if not symbol or "data" not in data:
+                            continue
 
-                            for k in data_block:
+                        candles = data["data"]
+
+                        # Handle snapshot or delta format
+                        if isinstance(candles, list):
+                            for k in candles:
                                 new_candle = {
                                     "timestamp": int(k["start"]),
                                     "open": k["open"],
@@ -49,6 +53,23 @@ async def stream_candles(symbols, interval='1'):
 
                                 live_candles[symbol].append(new_candle)
 
+                            log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
+
+                        elif isinstance(candles, dict):  # Single candle update
+                            k = candles
+                            new_candle = {
+                                "timestamp": int(k["start"]),
+                                "open": k["open"],
+                                "high": k["high"],
+                                "low": k["low"],
+                                "close": k["close"],
+                                "volume": k["volume"]
+                            }
+
+                            if symbol not in live_candles:
+                                live_candles[symbol] = deque(maxlen=MAX_CANDLES)
+
+                            live_candles[symbol].append(new_candle)
                             log(f"📈 {symbol} [{category}] updated | total: {len(live_candles[symbol])} candles")
 
                     except Exception as e:
