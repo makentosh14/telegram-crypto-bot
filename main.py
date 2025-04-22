@@ -1,3 +1,5 @@
+# main.py — ULTRA DEBUG ENABLED
+
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
@@ -45,12 +47,19 @@ async def run_bot():
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
                     continue
 
-                # ✅ SCORE LOGIC HERE
-                score, tf_scores = score_symbol(symbol, candles_by_tf)
-                trade_type = determine_trade_type(tf_scores)
+                # 🧪 ULTRA DEBUG AROUND SCORE SYMBOL
+                log(f"🧪 {symbol} | Scoring started...")
 
-                # 🔍 Always show full debug score output
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
+                try:
+                    score, tf_scores = score_symbol(symbol, candles_by_tf)
+                except Exception as e:
+                    log(f"❌ Scoring failed for {symbol}: {e}", level="ERROR")
+                    continue
+
+                log(f"🔬 {symbol} | Score result: {score} | TFs: {tf_scores}")
+
+                trade_type = determine_trade_type(tf_scores)
+                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
@@ -80,4 +89,5 @@ async def run_bot():
         await asyncio.sleep(BASE_SCAN_INTERVAL)
 
 if __name__ == "__main__":
+    log("🧪 DEBUG TEST: main.py is running...")
     asyncio.run(run_bot())
