@@ -1,4 +1,4 @@
-# main.py — CLEAN AND DEBUGGED
+# main.py — DEBUG SCORES FOR ALL COINS (even with low candle count)
 
 import asyncio
 from scanner import fetch_symbols
@@ -14,14 +14,13 @@ from logger import log
 TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
-    log("🚀 Bot starting...")
-    log(f"🔁 Using timeframes: {TIMEFRAMES}")
+    log("🚀 DEBUG TEST — main.py is running...")
 
     symbols = await fetch_symbols()
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
 
     asyncio.create_task(stream_candles(symbols))
-    await asyncio.sleep(5)  # allow candles to build
+    await asyncio.sleep(5)
 
     while True:
         try:
@@ -41,37 +40,32 @@ async def run_bot():
                 candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
                 log(f"🕯️ {symbol} Candle counts: {candle_counts}")
 
-                if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
-                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
-                    continue
-
-                # DEBUG: Log score for every coin always
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
 
                 log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
-                if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
-                    log_signal(symbol)
-                    track_signal(symbol, score)
-                    high_signals += 1
+                # Only act on good ones
+                if all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
+                    if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
+                        log_signal(symbol)
+                        track_signal(symbol, score)
+                        high_signals += 1
 
-                    await send_telegram_message(
-                        f"🚨 <b>{trade_type} Signal</b>\n"
-                        f"Symbol: <b>{symbol}</b>\n"
-                        f"Score: {score} | TFs: {tf_scores}\n"
-                        f"Trend: BTC={btc_trend}, Altseason={altseason}\n\n"
-                        f"<i>Entry at market price</i>\n"
-                        f"SL: Dynamic based on structure\n"
-                        f"TP1: Based on {trade_type.lower()} target\n"
-                        f"🧠 Smart Trailing SL will activate after TP1."
-                    )
+                        await send_telegram_message(
+                            f"🚨 <b>{trade_type} Signal</b>\n"
+                            f"Symbol: <b>{symbol}</b>\n"
+                            f"Score: {score} | TFs: {tf_scores}\n"
+                            f"Trend: BTC={btc_trend}, Altseason={altseason}\n\n"
+                            f"<i>Entry at market price</i>\n"
+                            f"SL: Dynamic based on structure\n"
+                            f"TP1: Based on {trade_type.lower()} target\n"
+                            f"🧠 Smart Trailing SL will activate after TP1."
+                        )
 
             log(f"✅ Round complete | Signals sent: {high_signals} / {len(symbols)}")
-
             if high_signals == 0:
                 log("⚠️ No high-quality signals this round.")
-                await send_telegram_message("⚠️ No high-quality signals this round.")
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
