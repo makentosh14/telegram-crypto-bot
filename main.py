@@ -1,3 +1,5 @@
+# main.py — DEBUG LOGGING ALL SCORES
+
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
@@ -12,7 +14,7 @@ from logger import log
 TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
-    log("\U0001F680 Bot starting...")
+    log("🚀 Bot starting...")
 
     symbols = await fetch_symbols()
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
@@ -39,13 +41,13 @@ async def run_bot():
                 }
 
                 candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"\U0001F4AF {symbol} Candle counts: {candle_counts}")
+                log(f"🔧 {symbol} Candle counts: {candle_counts}")
 
                 if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
                     continue
 
-                # Always calculate and log score for debugging
+                # 💥 Always log score (for debug)
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
                 log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
