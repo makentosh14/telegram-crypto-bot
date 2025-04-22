@@ -40,13 +40,12 @@ async def run_bot():
                     tf: list(live_candles[symbol]) for tf in TIMEFRAMES
                 }
 
-             candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-             log(f"🕯️ {symbol} Candle counts: {candle_counts}")
+                candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
+                log(f"🕯️ {symbol} Candle counts: {candle_counts}")
 
-               if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
-                  log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
-                  continue
-  
+                if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
+                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
+                    continue
 
                 # 💥 Always log score (for debug)
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
