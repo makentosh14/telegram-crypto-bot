@@ -40,7 +40,9 @@ async def run_bot():
                     tf: list(live_candles[symbol]) for tf in TIMEFRAMES
                 }
 
-                if any(len(c) < 30 for c in candles_by_tf.values()):
+                log(f"🕯️ Candle counts for {symbol}: {[len(candles_by_tf[tf]) for tf in TIMEFRAMES]}")
+
+                if all(len(c) < 30 for c in candles_by_tf.values()):
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: insufficient candle history")
                     continue
 
