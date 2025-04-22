@@ -37,7 +37,7 @@ async def run_bot():
                     continue
 
            candles_by_tf = {
-           tf: list(live_candles[symbol]) for tf in TIMEFRAMES
+              tf: list(live_candles[symbol]) for tf in TIMEFRAMES
            }
 
            candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
