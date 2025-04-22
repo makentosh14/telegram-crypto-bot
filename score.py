@@ -6,6 +6,11 @@ from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
 
+
+def score_symbol(symbol, candles_by_timeframe):
+    print(f"🔬 Scoring {symbol}")
+
+
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
     tf_scores = {}
