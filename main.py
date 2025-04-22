@@ -1,5 +1,3 @@
-# main.py — ULTRA DEBUG MODE (log every score regardless of candles)
-
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
@@ -14,7 +12,7 @@ from logger import log
 TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
-    log("\U0001F680 Bot starting...")
+    log("🚀 Bot starting...")
 
     symbols = await fetch_symbols()
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
@@ -32,18 +30,27 @@ async def run_bot():
             log(f"🔄 Starting scan of {len(symbols)} symbols...")
 
             for i, symbol in enumerate(symbols, 1):
+                if symbol not in live_candles:
+                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: no live candles yet")
+                    continue
+
                 candles_by_tf = {
-                    tf: list(live_candles.get(symbol, [])) for tf in TIMEFRAMES
+                    tf: list(live_candles[symbol]) for tf in TIMEFRAMES
                 }
 
                 candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"🕗 {symbol} Candle counts: {candle_counts}")
+                log(f"🕯️ {symbol} Candle counts: {candle_counts}")
 
-                # Score no matter how many candles exist
+                if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
+                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
+                    continue
+
+                # ✅ SCORE LOGIC HERE
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
 
-                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
+                # 🔍 Always show full debug score output
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
