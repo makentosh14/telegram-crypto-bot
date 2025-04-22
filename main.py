@@ -1,4 +1,4 @@
-# main.py
+# main.py — DEBUG LOGGING ALL SCORES
 
 import asyncio
 from scanner import fetch_symbols
@@ -41,15 +41,15 @@ async def run_bot():
                 }
 
                 candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"🕯️ {symbol} Candle counts: {candle_counts}")
+                log(f"\n🕯️ {symbol} Candle counts: {candle_counts}")
 
                 if any(len(c) < 30 for c in candles_by_tf.values()):
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: insufficient candle history")
                     continue
 
+                # 💥 Always log score (for debug)
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
-
                 log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
