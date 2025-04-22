@@ -1,4 +1,4 @@
-# main.py — FULL DEBUG VERSION
+# main.py — CLEAN AND DEBUGGED
 
 import asyncio
 from scanner import fetch_symbols
@@ -15,12 +15,13 @@ TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
     log("🚀 Bot starting...")
+    log(f"🔁 Using timeframes: {TIMEFRAMES}")
 
     symbols = await fetch_symbols()
     log(f"✅ Scanning ALL {len(symbols)} symbols...")
 
     asyncio.create_task(stream_candles(symbols))
-    await asyncio.sleep(5)
+    await asyncio.sleep(5)  # allow candles to build
 
     while True:
         try:
@@ -36,24 +37,19 @@ async def run_bot():
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: no live candles yet")
                     continue
 
-                candles_by_tf = {
-                    tf: list(live_candles[symbol]) for tf in TIMEFRAMES
-                }
-
+                candles_by_tf = {tf: list(live_candles[symbol]) for tf in TIMEFRAMES}
                 candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
                 log(f"🕯️ {symbol} Candle counts: {candle_counts}")
 
-                required = {tf: len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES}
-                log(f"🔎 {symbol} Candle length check: {required}")
-
-                if not all(required.values()):
+                if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
                     continue
 
+                # DEBUG: Log score for every coin always
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
 
-                log(f"🧠 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
+                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
@@ -83,5 +79,4 @@ async def run_bot():
         await asyncio.sleep(BASE_SCAN_INTERVAL)
 
 if __name__ == "__main__":
-    log("🧪 DEBUG TEST: main.py is running correctly ✅")
     asyncio.run(run_bot())
