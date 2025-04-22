@@ -36,21 +36,23 @@ async def run_bot():
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: no live candles yet")
                     continue
 
-                candles_by_tf = {
-                    tf: list(live_candles[symbol]) for tf in TIMEFRAMES
-                }
+           candles_by_tf = {
+           tf: list(live_candles[symbol]) for tf in TIMEFRAMES
+           }
 
-                candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"🔧 {symbol} Candle counts: {candle_counts}")
+           candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
+           log(f"🕯️ {symbol} Candle counts: {candle_counts}")
 
-                if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
-                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
-                    continue
+           # 💥 Always score and log, regardless of candles or trade quality
+           score, tf_scores = score_symbol(symbol, candles_by_tf)
+           trade_type = determine_trade_type(tf_scores)
+           log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
-                # 💥 Always log score (for debug)
-                score, tf_scores = score_symbol(symbol, candles_by_tf)
-                trade_type = determine_trade_type(tf_scores)
-                log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
+           # Only skip actual trading if not enough candles
+           if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
+               log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
+               continue
+
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
