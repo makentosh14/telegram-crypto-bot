@@ -60,6 +60,8 @@ async def run_bot():
 
                     sl = round(price * (1 - sl_pct / 100), 4)
                     tp1 = round(price * (1 + tp1_pct / 100), 4)
+                    trailing_pct = 0.3 if trade_type == "Scalp" else (0.6 if trade_type == "Intraday" else 1.0)
+                    direction = "short" if score < 0 else "long"
 
                     msg = format_trade_signal(
                         symbol=symbol,
@@ -70,7 +72,7 @@ async def run_bot():
                         sl=sl,
                         tp1=tp1,
                         trade_type=trade_type,
-                        direction = "short" if score < 0 else "long",
+                        direction = direction,
                         trailing_pct=trailing_pct
                     )
 
