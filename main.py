@@ -10,15 +10,16 @@ from signal_memory import log_signal, is_duplicate_signal
 from config import MIN_SCORE_THRESHOLD, DEFAULT_LEVERAGE
 from performance_tracker import track_signal
 from logger import log
+from monitor_report import log_trade_result, send_daily_report
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
 
 async def run_bot():
-    log("\ud83d\ude80 Bot starting...")
+    log("🚀 Bot starting...")
 
     symbols = await fetch_symbols()
-    log(f"\u2705 Fetched {len(symbols)} symbols.")
+    log(f"✅ Fetched {len(symbols)} symbols.")
 
     asyncio.create_task(stream_candles(symbols))
     await asyncio.sleep(5)
@@ -58,7 +59,7 @@ async def run_bot():
                 sl = round(price * (1 - sl_pct / 100), 4) if direction == "Long" else round(price * (1 + sl_pct / 100), 4)
                 tp1 = round(price * (1 + tp1_pct / 100), 4) if direction == "Long" else round(price * (1 - tp1_pct / 100), 4)
 
-                log(f"\ud83d\udcca [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction}")
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction}")
 
                 # Monitoring logic
                 if symbol in active_signals:
@@ -68,21 +69,24 @@ async def run_bot():
 
                     # Exit logic on score drop
                     if trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:]):
-                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped to {score} on Scalp setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Scalp setup.")
                         del active_signals[symbol]
+                        log_trade_result(False, -1.0)
                         continue
                     if trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:]):
-                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped to {score} on Intraday setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Intraday setup.")
                         del active_signals[symbol]
+                        log_trade_result(False, -2.0)
                         continue
                     if trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]):
-                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped to {score} on Swing setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Swing setup.")
                         del active_signals[symbol]
+                        log_trade_result(False, -3.0)
                         continue
 
                     # Rebound alert
                     if previous_score < 6 and score >= 8:
-                        await send_telegram_message(f"\u267b\ufe0f {symbol} score rebounded from {previous_score} to {score}. Re-entry?")
+                        await send_telegram_message(f"♻️ {symbol} score rebounded from {previous_score} to {score}. Re-entry?")
 
                     continue  # skip sending new alert if it's already active
 
@@ -111,11 +115,13 @@ async def run_bot():
                         'score_history': [score]
                     }
 
+            await send_daily_report()
+
         except Exception as e:
-            log(f"\u274c Error in main loop: {e}", level="ERROR")
+            log(f"❌ Error in main loop: {e}", level="ERROR")
 
         await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
-    log("\ud83d\udd27 DEBUG TEST: main.py is running...")
+    log("🔧 DEBUG TEST: main.py is running...")
     asyncio.run(run_bot())
