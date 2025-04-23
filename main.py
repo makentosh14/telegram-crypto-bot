@@ -1,9 +1,9 @@
-# main.py (Final Version: Full Strategy Logic + Smart Formatting + Per-Coin Live Scan)
+# main.py (Updated with Direction Logic for Long/Short)
 
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
-from score import score_symbol, determine_trade_type
+from score import score_symbol, determine_trade_type, determine_direction
 from telegram_bot import send_telegram_message, format_trade_signal
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
@@ -47,7 +47,9 @@ async def run_bot():
 
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
+                direction = determine_direction(tf_scores)
+
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
@@ -60,11 +62,14 @@ async def run_bot():
                     trailing_pct = 0.3 if trade_type == "Scalp" else (0.6 if trade_type == "Intraday" else 1.0)
                     risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
 
-                    direction = "Long" if score > 0 else "Short"
                     leverage = DEFAULT_LEVERAGE
 
-                    sl = round(price * (1 - sl_pct / 100), 4) if direction == "Long" else round(price * (1 + sl_pct / 100), 4)
-                    tp1 = round(price * (1 + tp1_pct / 100), 4) if direction == "Long" else round(price * (1 - tp1_pct / 100), 4)
+                    if direction == "Long":
+                        sl = round(price * (1 - sl_pct / 100), 4)
+                        tp1 = round(price * (1 + tp1_pct / 100), 4)
+                    else:
+                        sl = round(price * (1 + sl_pct / 100), 4)
+                        tp1 = round(price * (1 - tp1_pct / 100), 4)
 
                     msg = format_trade_signal(
                         symbol=symbol,
