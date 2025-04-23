@@ -8,7 +8,7 @@ from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
-from whale_tracker import detect_whale_activity
+from whale_detector import detect_whale_activity
 
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
