@@ -70,6 +70,8 @@ async def run_bot():
                         sl=sl,
                         tp1=tp1,
                         trade_type=trade_type
+                        direction=direction,
+                        trailing_pct=trailing_pct
                     )
 
                     await send_telegram_message(msg)
