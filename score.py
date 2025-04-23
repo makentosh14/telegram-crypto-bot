@@ -1,4 +1,4 @@
-# score.py (Updated with Smart Short Signal Logic)
+# score.py (Optimized for Trade Type + Direction + Weighted Indicators)
 
 from rsi import calculate_rsi
 from macd import detect_macd_cross
@@ -10,85 +10,69 @@ from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 
+# Weighted scoring function
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
     tf_scores = {}
 
     for tf, candles in candles_by_timeframe.items():
         score = 0
+        tf_int = int(tf)
 
-        # Volume Spike
-        if is_volume_spike(candles, multiplier=2.5):
-            score += 1
+        # --- SCALP STRATEGY: 1m, 3m ---
+        if tf_int in [1, 3]:
+            if is_volume_spike(candles, 2.5): score += 1
+            if detect_macd_cross(candles) == "bullish": score += 1
+            if detect_macd_cross(candles) == "bearish": score -= 1
+            if detect_ema_crossover(candles) == "bullish": score += 1
+            if detect_ema_crossover(candles) == "bearish": score -= 1
+            if detect_pattern(candles) in ["bullish_engulfing", "hammer", "inside_bar"]: score += 1
+            if detect_pattern(candles) in ["bearish_engulfing", "inverted_hammer"]: score -= 2
+            if detect_volume_divergence(candles): score += 0.5
 
-        # RSI
-        rsi_vals = calculate_rsi(candles)
-        if rsi_vals:
-            latest_rsi = rsi_vals[-1]
-            if latest_rsi < 30:
-                score += 1
-            elif latest_rsi > 70:
-                score -= 1
+        # --- INTRADAY STRATEGY: 5m, 15m ---
+        elif tf_int in [5, 15]:
+            if is_volume_spike(candles, 2.5): score += 1
+            if detect_macd_cross(candles) == "bullish": score += 1
+            if detect_macd_cross(candles) == "bearish": score -= 1
+            if calculate_supertrend_signal(candles) == "bullish": score += 1
+            if calculate_supertrend_signal(candles) == "bearish": score -= 1
+            if detect_ema_crossover(candles) == "bullish": score += 1
+            if detect_ema_crossover(candles) == "bearish": score -= 1
+            if detect_pattern(candles) in ["bullish_engulfing", "hammer", "inside_bar"]: score += 1
+            if detect_pattern(candles) in ["bearish_engulfing", "inverted_hammer"]: score -= 2
+            if detect_volume_divergence(candles): score += 0.5
+            if detect_slow_breakout(candles): score += 0.5
+            if detect_whale_activity(candles): score += 1
 
-        # MACD
-        macd_cross = detect_macd_cross(candles)
-        if macd_cross == "bullish":
-            score += 1
-        elif macd_cross == "bearish":
-            score -= 1
-
-        # Supertrend
-        supertrend_signal = calculate_supertrend_signal(candles)
-        if supertrend_signal == "bullish":
-            score += 1
-        elif supertrend_signal == "bearish":
-            score -= 1
-
-        # EMA Crossover
-        ema_cross = detect_ema_crossover(candles)
-        if ema_cross == "bullish":
-            score += 1
-        elif ema_cross == "bearish":
-            score -= 1
-
-        # Bollinger Bands
-        bb = calculate_bollinger_bands(candles)
-        if bb and bb[-1]:
-            band = bb[-1]
-            close = float(candles[-1]["close"])
-            if close > band["upper"]:
-                score += 1
-            elif close < band["lower"]:
-                score -= 1
-
-        # Candle Pattern
-        pattern = detect_pattern(candles)
-        if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
-            score += 1
-        elif pattern in ["bearish_engulfing"]:
-            score -= 2  # Stronger penalty
-        elif pattern in ["inverted_hammer"]:
-            score -= 2
-
-        # Stealth Signals
-        if detect_volume_divergence(candles):
-            score += 0.5
-
-        if detect_slow_breakout(candles):
-            score += 0.5
-
-        # Whale Spike
-        if detect_whale_activity(candles):
-            score += 1
+        # --- SWING STRATEGY: 30m, 1h, 4h ---
+        elif tf_int in [30, 60, 240]:
+            rsi_vals = calculate_rsi(candles)
+            if rsi_vals:
+                latest_rsi = rsi_vals[-1]
+                if latest_rsi < 30: score += 1
+                elif latest_rsi > 70: score -= 1
+            if calculate_supertrend_signal(candles) == "bullish": score += 1
+            if calculate_supertrend_signal(candles) == "bearish": score -= 1
+            if detect_ema_crossover(candles) == "bullish": score += 1
+            if detect_ema_crossover(candles) == "bearish": score -= 1
+            bb = calculate_bollinger_bands(candles)
+            if bb and bb[-1]:
+                close = float(candles[-1]["close"])
+                if close > bb[-1]["upper"]: score += 1
+                elif close < bb[-1]["lower"]: score -= 1
+            if detect_pattern(candles) in ["bullish_engulfing", "hammer", "inside_bar"]: score += 1
+            if detect_pattern(candles) in ["bearish_engulfing", "inverted_hammer"]: score -= 2
+            if detect_whale_activity(candles): score += 1
 
         tf_scores[tf] = score
         total_score += score
 
     return total_score, tf_scores
 
+# Trade type logic
 def determine_trade_type(tf_scores):
     tf_score = {int(k): v for k, v in tf_scores.items()}
-
     short = sum(v for k, v in tf_score.items() if k in [1, 3])
     mid = sum(v for k, v in tf_score.items() if k in [5, 15])
     long = sum(v for k, v in tf_score.items() if k in [30, 60, 240])
@@ -100,11 +84,11 @@ def determine_trade_type(tf_scores):
     else:
         return "Swing"
 
+# Direction logic
 def determine_direction(tf_scores):
     values = list(tf_scores.values())
     negative_count = sum(1 for v in values if v < 0)
     total = sum(values)
-
     if negative_count >= len(tf_scores) // 2 and total < 0:
         return "Short"
     return "Long"
