@@ -24,7 +24,7 @@ async def run_bot():
 
     while True:
         try:
-            trend_context = get_trend_context()
+            trend_context = await get_trend_context()
             btc_trend = trend_context['btc_trend']
             altseason = trend_context['altseason']
 
