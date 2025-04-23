@@ -16,9 +16,9 @@ recent_exits = {}
 EXIT_COOLDOWN = 10
 
 # Thresholds per trade type
-MIN_SCALP_SCORE = 6
-MIN_INTRADAY_SCORE = 7
-MIN_SWING_SCORE = 8
+MIN_SCALP_SCORE = 5
+MIN_INTRADAY_SCORE = 6
+MIN_SWING_SCORE = 7
 
 async def run_bot():
     log("\U0001F680 Bot starting...")
