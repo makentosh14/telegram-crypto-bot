@@ -70,7 +70,7 @@ async def run_bot():
                         sl=sl,
                         tp1=tp1,
                         trade_type=trade_type,
-                        direction=direction,
+                        direction = "short" if score < 0 else "long",
                         trailing_pct=trailing_pct
                     )
 
