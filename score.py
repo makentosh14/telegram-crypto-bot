@@ -1,4 +1,4 @@
-# score.py (Final Version with Multi-Timeframe Classification + Stealth Pump + Whale Detection)
+# score.py (Updated with Smart Short Signal Logic)
 
 from rsi import calculate_rsi
 from macd import detect_macd_cross
@@ -65,19 +65,21 @@ def score_symbol(symbol, candles_by_timeframe):
         pattern = detect_pattern(candles)
         if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
             score += 1
-        elif pattern in ["bearish_engulfing", "inverted_hammer"]:
-            score -= 1
+        elif pattern in ["bearish_engulfing"]:
+            score -= 2  # Stronger penalty
+        elif pattern in ["inverted_hammer"]:
+            score -= 2
 
-        # Stealth Signals (Bonus Layer)
+        # Stealth Signals
         if detect_volume_divergence(candles):
-            score += 0.5  # stealth accumulation
+            score += 0.5
 
         if detect_slow_breakout(candles):
-            score += 0.5  # slow creep breakout
+            score += 0.5
 
         # Whale Spike
         if detect_whale_activity(candles):
-            score += 1  # optional: tune this weight
+            score += 1
 
         tf_scores[tf] = score
         total_score += score
@@ -97,3 +99,12 @@ def determine_trade_type(tf_scores):
         return "Intraday"
     else:
         return "Swing"
+
+def determine_direction(tf_scores):
+    values = list(tf_scores.values())
+    negative_count = sum(1 for v in values if v < 0)
+    total = sum(values)
+
+    if negative_count >= len(tf_scores) // 2 and total < 0:
+        return "Short"
+    return "Long"
