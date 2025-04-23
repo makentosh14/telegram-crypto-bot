@@ -1,5 +1,3 @@
-# monitor_report.py (Full Auto Tracking + Telegram Alerts)
-
 import datetime
 import pytz
 from telegram_bot import send_telegram_message
@@ -28,7 +26,8 @@ def track_trade(symbol, trade_type, score, direction, price, sl, tp1):
         "direction": direction,
         "entry_price": price,
         "sl": sl,
-        "tp1": tp1
+        "tp1": tp1,
+        "cooldown": 0
     }
     log(f"📌 Tracking {symbol} {direction} | Score: {score} | Type: {trade_type}")
 
