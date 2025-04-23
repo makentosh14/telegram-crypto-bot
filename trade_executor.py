@@ -1,5 +1,3 @@
-# trade_executor.py (Final Version)
-
 from bybit_api import (
     place_market_order,
     get_balance,
@@ -72,7 +70,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.02):
                 "qty": qty,
                 "type": trade_type,
                 "direction": direction,
-                "symbol": symbol
+                "symbol": symbol,
+                "sl_pct": sl_pct,
+                "tp1_pct": tp1_pct
             }
         else:
             log(f"❌ Order failed for {symbol}: {order_result}", level="ERROR")
