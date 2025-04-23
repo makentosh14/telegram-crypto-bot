@@ -1,4 +1,4 @@
-# main.py (Final Version: Per-coin live scan + full trade details + Smart Exit alerts)
+# main.py (Final Version: Full Strategy Logic + Smart Formatting + Per-Coin Live Scan)
 
 import asyncio
 from scanner import fetch_symbols
@@ -7,7 +7,7 @@ from score import score_symbol, determine_trade_type
 from telegram_bot import send_telegram_message, format_trade_signal
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
-from config import MIN_SCORE_THRESHOLD
+from config import MIN_SCORE_THRESHOLD, DEFAULT_LEVERAGE
 from performance_tracker import track_signal
 from logger import log
 
@@ -53,15 +53,18 @@ async def run_bot():
                     log_signal(symbol)
                     track_signal(symbol, score)
 
-                    # Estimate price from last 1m close
                     price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
+
                     sl_pct = 0.7 if trade_type == "Scalp" else (1.5 if trade_type == "Intraday" else 2.5)
                     tp1_pct = 1.5 if trade_type == "Scalp" else (3.0 if trade_type == "Intraday" else 6.0)
-
-                    sl = round(price * (1 - sl_pct / 100), 4)
-                    tp1 = round(price * (1 + tp1_pct / 100), 4)
                     trailing_pct = 0.3 if trade_type == "Scalp" else (0.6 if trade_type == "Intraday" else 1.0)
-                    direction = "short" if score < 0 else "long"
+                    risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
+
+                    direction = "Long" if score > 0 else "Short"
+                    leverage = DEFAULT_LEVERAGE
+
+                    sl = round(price * (1 - sl_pct / 100), 4) if direction == "Long" else round(price * (1 + sl_pct / 100), 4)
+                    tp1 = round(price * (1 + tp1_pct / 100), 4) if direction == "Long" else round(price * (1 - tp1_pct / 100), 4)
 
                     msg = format_trade_signal(
                         symbol=symbol,
@@ -72,8 +75,10 @@ async def run_bot():
                         sl=sl,
                         tp1=tp1,
                         trade_type=trade_type,
-                        direction = direction,
-                        trailing_pct=trailing_pct
+                        direction=direction,
+                        trailing_pct=trailing_pct,
+                        leverage=leverage,
+                        risk_pct=risk_pct
                     )
 
                     await send_telegram_message(msg)
@@ -81,7 +86,7 @@ async def run_bot():
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
 
-        await asyncio.sleep(0.5)  # fast single-symbol scan
+        await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
     log("🔧 DEBUG TEST: main.py is running...")
