@@ -19,8 +19,7 @@ RISK_FUTURES = 0.03    # default 3% per futures trade
 DAILY_MAX_LOSS = 0.1   # max daily loss before auto pause (10%)
 
 # === LEVERAGE / MARGIN SETTINGS ===
-DEFAULT_LEVERAGE = 5
-MARGIN_MODE = "ISOLATED"  # or "CROSSED"
+MARGIN_MODE = "CROSSED"  # or "CROSSED"
 
 # === CANDLE INTERVAL SETTINGS ===
 DEFAULT_INTERVAL = '1'
