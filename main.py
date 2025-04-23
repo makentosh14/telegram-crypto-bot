@@ -1,4 +1,4 @@
-# main.py — DEBUG SCORES FOR ALL COINS (even with low candle count)
+# main.py — Final Upgraded Version ✅
 
 import asyncio
 from scanner import fetch_symbols
@@ -14,10 +14,10 @@ from logger import log
 TIMEFRAMES = SUPPORTED_INTERVALS
 
 async def run_bot():
-    log("🚀 DEBUG TEST — main.py is running...")
+    log("\n🚀 Bot starting...")
 
     symbols = await fetch_symbols()
-    log(f"✅ Scanning ALL {len(symbols)} symbols...")
+    log(f"✅ Loaded {len(symbols)} tradable symbols from Bybit")
 
     asyncio.create_task(stream_candles(symbols))
     await asyncio.sleep(5)
@@ -29,43 +29,47 @@ async def run_bot():
             altseason = trend_context['altseason']
 
             high_signals = 0
-            log(f"🔄 Starting scan of {len(symbols)} symbols...")
+            log(f"\n🔄 Starting scan of {len(symbols)} symbols...")
 
             for i, symbol in enumerate(symbols, 1):
                 if symbol not in live_candles:
-                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: no live candles yet")
                     continue
 
                 candles_by_tf = {tf: list(live_candles[symbol]) for tf in TIMEFRAMES}
-                candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"🕯️ {symbol} Candle counts: {candle_counts}")
+                if any(len(candles) < 30 for candles in candles_by_tf.values()):
+                    continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
 
                 log(f"🔍 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
-                # Only act on good ones
-                if all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
-                    if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
-                        log_signal(symbol)
-                        track_signal(symbol, score)
-                        high_signals += 1
+                if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
+                    log_signal(symbol)
+                    track_signal(symbol, score)
+                    high_signals += 1
 
-                        await send_telegram_message(
-                            f"🚨 <b>{trade_type} Signal</b>\n"
-                            f"Symbol: <b>{symbol}</b>\n"
-                            f"Score: {score} | TFs: {tf_scores}\n"
-                            f"Trend: BTC={btc_trend}, Altseason={altseason}\n\n"
-                            f"<i>Entry at market price</i>\n"
-                            f"SL: Dynamic based on structure\n"
-                            f"TP1: Based on {trade_type.lower()} target\n"
-                            f"🧠 Smart Trailing SL will activate after TP1."
-                        )
+                    entry_price = float(candles_by_tf['1'][-1]['close'])
+                    sl_buffer = 0.01 if trade_type == "Scalp" else 0.015 if trade_type == "Intraday" else 0.025
+                    tp1_buffer = 0.015 if trade_type == "Scalp" else 0.03 if trade_type == "Intraday" else 0.06
+                    tp2_buffer = tp1_buffer * 1.5
+                    trailing_sl_pct = 0.5 if trade_type == "Scalp" else 1.0 if trade_type == "Intraday" else 1.5
 
-            log(f"✅ Round complete | Signals sent: {high_signals} / {len(symbols)}")
-            if high_signals == 0:
-                log("⚠️ No high-quality signals this round.")
+                    sl_price = round(entry_price * (1 - sl_buffer), 4)
+                    tp1_price = round(entry_price * (1 + tp1_buffer), 4)
+                    tp2_price = round(entry_price * (1 + tp2_buffer), 4)
+
+                    await send_telegram_message(
+                        f"🚨 <b>{trade_type} Signal</b>\n"
+                        f"Symbol: <b>{symbol}</b>\n"
+                        f"Entry: <code>{entry_price}</code>\n"
+                        f"SL: <code>{sl_price}</code>\n"
+                        f"TP1: <code>{tp1_price}</code>\n"
+                        f"TP2: <code>{tp2_price}</code>\n"
+                        f"Trailing SL: {trailing_sl_pct}%\n\n"
+                        f"TF Scores: {tf_scores} | Total Score: {score}\n"
+                        f"Trend: BTC={btc_trend} | Altseason={altseason}"
+                    )
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
