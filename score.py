@@ -1,4 +1,4 @@
-# score.py (Final Version with Multi-Timeframe Classification)
+# score.py (Final Version with Trade Type Detection)
 
 from rsi import calculate_rsi
 from macd import detect_macd_cross
@@ -7,7 +7,6 @@ from ema import detect_ema_crossover
 from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
-
 
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
@@ -72,10 +71,9 @@ def score_symbol(symbol, candles_by_timeframe):
 
     return total_score, tf_scores
 
-
 def determine_trade_type(tf_scores):
     tf_score = {int(k): v for k, v in tf_scores.items()}
-    
+
     short = sum(v for k, v in tf_score.items() if k in [1, 3])
     mid = sum(v for k, v in tf_score.items() if k in [5, 15])
     long = sum(v for k, v in tf_score.items() if k in [30, 60, 240])
