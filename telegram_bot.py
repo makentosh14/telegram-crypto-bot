@@ -16,17 +16,28 @@ async def send_telegram_message(message):
             return await resp.text()
 
 def format_trade_signal(symbol, score, tf_scores, trend, entry_price, sl, tp1, trade_type, direction, trailing_pct, leverage, risk_pct):
+    # Filter TF Breakdown to match trade type
+    relevant_tfs = {
+        "Scalp": [1, 3],
+        "Intraday": [5, 15],
+        "Swing": [30, 60, 240]
+    }[trade_type]
+
+    filtered_tf_scores = {k: v for k, v in tf_scores.items() if int(k) in relevant_tfs}
+
     emoji = "🟢" if direction == "Long" else "🔴"
-    return (
+
+    message = (
         f"{emoji} <b>{direction} {trade_type} Signal</b>\n"
         f"<b>Symbol:</b> {symbol}\n"
         f"<b>Score:</b> {score}\n"
-        f"<b>TF Breakdown:</b> <code>{tf_scores}</code>\n"
-        f"<b>Entry:</b> <code>{entry_price}</code>\n"
-        f"<b>SL:</b> <code>{sl}</code>\n"
-        f"<b>TP1:</b> <code>{tp1}</code>\n"
-        f"⚖️ <b>Risk:</b> {risk_pct}% of balance\n"
-        f"📉 <b>Leverage:</b> {leverage}x\n"
-        f"📈 <b>Trailing SL:</b> {trailing_pct}% after TP1\n"
-        f"📊 <b>Trend:</b> BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}"
+        f"<b>TF Breakdown:</b> {filtered_tf_scores}\n\n"
+        f"<b>Entry:</b> {entry_price}\n"
+        f"<b>SL:</b> {sl}\n"
+        f"<b>TP1:</b> {tp1}\n\n"
+        f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
+        f"📈 <b>Leverage:</b> {leverage}x\n"
+        f"📉 <b>Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
+        f"📊 <b>Trend:</b> BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}\n"
     )
+    return message
