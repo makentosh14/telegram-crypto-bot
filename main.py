@@ -69,7 +69,7 @@ async def run_bot():
                         entry_price=price,
                         sl=sl,
                         tp1=tp1,
-                        trade_type=trade_type
+                        trade_type=trade_type,
                         direction=direction,
                         trailing_pct=trailing_pct
                     )
