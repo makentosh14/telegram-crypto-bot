@@ -1,20 +1,24 @@
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
-from score import score_symbol, determine_trade_type, determine_direction, calculate_confidence
+from score import score_symbol, determine_direction, calculate_confidence
 from telegram_bot import send_telegram_message, format_trade_signal
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
-from config import MIN_SCORE_THRESHOLD, DEFAULT_LEVERAGE
+from config import DEFAULT_LEVERAGE
 from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
-import time
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
 recent_exits = {}
-EXIT_COOLDOWN = 10  # number of cycles to wait before re-allowing same coin
+EXIT_COOLDOWN = 10
+
+# Thresholds per trade type
+MIN_SCALP_SCORE = 6
+MIN_INTRADAY_SCORE = 7
+MIN_SWING_SCORE = 8
 
 async def run_bot():
     log("\U0001F680 Bot starting...")
@@ -49,8 +53,7 @@ async def run_bot():
                 if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
                     continue
 
-                score, tf_scores = score_symbol(symbol, candles_by_tf)
-                trade_type = determine_trade_type(tf_scores)
+                score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
                 direction = determine_direction(tf_scores)
                 confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
 
@@ -68,7 +71,14 @@ async def run_bot():
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
                 if trade_type == "Swing" and btc_trend != "strong":
-                    continue  # skip swing trades when BTC not trending
+                    continue
+
+                if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
+                    continue
+                if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
+                    continue
+                if trade_type == "Swing" and score < MIN_SWING_SCORE:
+                    continue
 
                 if symbol in active_signals:
                     data = active_signals[symbol]
@@ -100,14 +110,12 @@ async def run_bot():
 
                     continue
 
-                if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
+                if not is_duplicate_signal(symbol):
                     await asyncio.sleep(2)  # recheck
-                    re_score, re_tf_scores = score_symbol(symbol, candles_by_tf)
-                    re_type = determine_trade_type(re_tf_scores)
+                    re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
                     re_direction = determine_direction(re_tf_scores)
-
-                    if re_score < MIN_SCORE_THRESHOLD or re_type != trade_type or re_direction != direction:
-                        continue  # false spike or changed setup
+                    if re_score < score or re_type != trade_type or re_direction != direction:
+                        continue
 
                     log_signal(symbol)
                     track_signal(symbol, score)
