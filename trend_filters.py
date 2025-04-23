@@ -1,36 +1,33 @@
-from websocket_candles import live_candles
-import numpy as np
+# trend_filters.py (Real Market Trend Detection)
 
-def detect_simple_trend(prices):
-    if len(prices) < 30:
+import aiohttp
+
+async def fetch_kline(symbol, interval='60', limit=3, category='linear'):
+    url = f"https://api.bybit.com/v5/market/kline?category={category}&symbol={symbol}&interval={interval}&limit={limit}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+            return data['result']['list'] if data['retCode'] == 0 else []
+
+async def get_btc_trend():
+    candles = await fetch_kline("BTCUSDT")
+    if len(candles) < 2:
         return "ranging"
-    short_ma = np.mean(prices[-10:])
-    long_ma = np.mean(prices[-30:])
-    if short_ma > long_ma * 1.01:
-        return "uptrend"
-    elif short_ma < long_ma * 0.99:
-        return "downtrend"
-    else:
+    prev = float(candles[-2][4])  # previous close
+    curr = float(candles[-1][4])  # current close
+    if abs(curr - prev) < 0.001 * curr:
         return "ranging"
+    return "uptrend" if curr > prev else "downtrend"
 
-def get_btc_trend():
-    btc_candles = live_candles.get("BTCUSDT", {}).get("15", [])
-    closes = [float(c['close']) for c in btc_candles]
-    return detect_simple_trend(closes)
-
-def is_altseason():
-    ethbtc_candles = live_candles.get("ETHBTC", {}).get("15", [])
-    if not ethbtc_candles or len(ethbtc_candles) < 30:
+async def is_altseason():
+    candles = await fetch_kline("ETHBTC", category="spot")
+    if len(candles) < 2:
         return False
+    prev = float(candles[-2][4])
+    curr = float(candles[-1][4])
+    return curr > prev  # ETHBTC rising implies altseason
 
-    closes = [float(c["close"]) for c in ethbtc_candles]
-    short_ma = np.mean(closes[-10:])
-    long_ma = np.mean(closes[-30:])
-
-    return short_ma > long_ma * 1.01  # ETH gaining vs BTC = altseason-like
-
-def get_trend_context():
-    return {
-        "btc_trend": get_btc_trend(),
-        "altseason": is_altseason()
-    }
+async def get_trend_context():
+    btc = await get_btc_trend()
+    alt = await is_altseason()
+    return {"btc_trend": btc, "altseason": alt}
