@@ -1,13 +1,13 @@
-# main.py
+# main.py (Final Version: Per-coin live scan + full trade details + Smart Exit alerts)
 
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_trade_type
-from telegram_bot import send_telegram_message
+from telegram_bot import send_telegram_message, format_trade_signal
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
-from config import MIN_SCORE_THRESHOLD, BASE_SCAN_INTERVAL
+from config import MIN_SCORE_THRESHOLD
 from performance_tracker import track_signal
 from logger import log
 
@@ -28,9 +28,6 @@ async def run_bot():
             btc_trend = trend_context['btc_trend']
             altseason = trend_context['altseason']
 
-            high_signals = 0
-            log(f"🔄 Starting scan of {len(symbols)} symbols...")
-
             for i, symbol in enumerate(symbols, 1):
                 if symbol not in live_candles:
                     log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: no live candles yet")
@@ -44,45 +41,43 @@ async def run_bot():
                     log(f"❌ [{i}/{len(symbols)}] Error fetching candles for {symbol}: {e}", level="ERROR")
                     continue
 
-                candle_counts = {tf: len(candles_by_tf[tf]) for tf in TIMEFRAMES}
-                log(f"🕯️ {symbol} Candle counts: {candle_counts}")
-
                 if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
-                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not all timeframes have enough candles")
+                    log(f"⏩ [{i}/{len(symbols)}] Skipping {symbol}: not enough candles")
                     continue
 
                 score, tf_scores = score_symbol(symbol, candles_by_tf)
                 trade_type = determine_trade_type(tf_scores)
-
-                # ✅ DEBUG: Always print score for every coin
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type}")
 
                 if score >= MIN_SCORE_THRESHOLD and not is_duplicate_signal(symbol):
                     log_signal(symbol)
                     track_signal(symbol, score)
-                    high_signals += 1
 
-                    await send_telegram_message(
-                        f"🚨 <b>{trade_type} Signal</b>\n"
-                        f"Symbol: <b>{symbol}</b>\n"
-                        f"Score: {score} | TFs: {tf_scores}\n"
-                        f"Trend: BTC={btc_trend}, Altseason={altseason}\n\n"
-                        f"<i>Entry at market price</i>\n"
-                        f"SL: Dynamic based on structure\n"
-                        f"TP1: Based on {trade_type.lower()} target\n"
-                        f"🧠 Smart Trailing SL will activate after TP1."
+                    # Estimate price from last 1m close
+                    price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
+                    sl_pct = 0.7 if trade_type == "Scalp" else (1.5 if trade_type == "Intraday" else 2.5)
+                    tp1_pct = 1.5 if trade_type == "Scalp" else (3.0 if trade_type == "Intraday" else 6.0)
+
+                    sl = round(price * (1 - sl_pct / 100), 4)
+                    tp1 = round(price * (1 + tp1_pct / 100), 4)
+
+                    msg = format_trade_signal(
+                        symbol=symbol,
+                        score=score,
+                        tf_scores=tf_scores,
+                        trend=trend_context,
+                        entry_price=price,
+                        sl=sl,
+                        tp1=tp1,
+                        trade_type=trade_type
                     )
 
-            log(f"✅ Round complete | Signals sent: {high_signals} / {len(symbols)}")
-
-            if high_signals == 0:
-                log("⚠️ No high-quality signals this round.")
+                    await send_telegram_message(msg)
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
 
-        await asyncio.sleep(BASE_SCAN_INTERVAL)
-
+        await asyncio.sleep(0.5)  # fast single-symbol scan
 
 if __name__ == "__main__":
     log("🔧 DEBUG TEST: main.py is running...")
