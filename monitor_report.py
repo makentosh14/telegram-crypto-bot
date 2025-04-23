@@ -53,9 +53,10 @@ async def monitor_trades(score_data):
             if all(s < SCORE_EXIT_THRESHOLDS[trade_type]["min_score"] for s in recent):
                 log(f"⚠️ Score dropped below threshold for {symbol} → Exit suggestion.")
                 await send_telegram_message(
-                    f"⚠️ <b>Exit Alert</b>
-<b>{symbol}</b> ({direction}) {trade_type}
-Score dropped: {recent}\nConsider exiting early."
+                    f"⚠️ <b>Exit Alert</b>\n"
+                    f"<b>{symbol}</b> ({direction}) {trade_type}\n"
+                    f"Score dropped: {recent}\n"
+                    f"Consider exiting early."
                 )
                 active_trades.pop(symbol)
                 continue
@@ -64,9 +65,9 @@ Score dropped: {recent}\nConsider exiting early."
         if len(data["score_history"]) >= 3:
             if data["score_history"][-3] < 6 and current_score > 8:
                 await send_telegram_message(
-                    f"🔄 <b>Rebound Alert</b>
-<b>{symbol}</b> Score dropped then recovered to {current_score}.
-Potential re-entry?"
+                    f"🔄 <b>Rebound Alert</b>\n"
+                    f"<b>{symbol}</b> score dropped then recovered to {current_score}.\n"
+                    f"Potential re-entry?"
                 )
 
 # Track wins/losses after trade closes
