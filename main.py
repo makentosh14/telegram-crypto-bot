@@ -125,3 +125,5 @@ async def run_bot():
 if __name__ == "__main__":
     log("🔧 DEBUG TEST: main.py is running...")
     asyncio.run(run_bot())
+
+aaa
