@@ -1,5 +1,3 @@
-# main.py (Updated with Direction Logic for Long/Short)
-
 import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
@@ -7,11 +5,12 @@ from score import score_symbol, determine_trade_type, determine_direction
 from telegram_bot import send_telegram_message, format_trade_signal
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
-from config import MIN_SCORE_THRESHOLD, DEFAULT_LEVERAGE
+from config import MIN_SCORE_THRESHOLD
 from performance_tracker import track_signal
 from logger import log
 
 TIMEFRAMES = SUPPORTED_INTERVALS
+MAX_LEVERAGE = 10
 
 async def run_bot():
     log("🚀 Bot starting...")
@@ -62,7 +61,13 @@ async def run_bot():
                     trailing_pct = 0.3 if trade_type == "Scalp" else (0.6 if trade_type == "Intraday" else 1.0)
                     risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
 
-                    leverage = DEFAULT_LEVERAGE
+                    # 🔥 Dynamic leverage logic
+                    if score >= 11:
+                        leverage = min(10 if trade_type == "Scalp" else 7, MAX_LEVERAGE)
+                    elif score >= 9:
+                        leverage = min(5, MAX_LEVERAGE)
+                    else:
+                        leverage = min(3, MAX_LEVERAGE)
 
                     if direction == "Long":
                         sl = round(price * (1 - sl_pct / 100), 4)
