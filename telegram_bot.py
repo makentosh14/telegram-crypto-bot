@@ -1,5 +1,3 @@
-# telegram_bot.py
-
 from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 
@@ -15,7 +13,21 @@ async def send_telegram_message(message):
         async with session.post(BOT_URL, data=payload) as resp:
             return await resp.text()
 
-def format_trade_signal(symbol, score, tf_scores, trend, entry_price, sl, tp1, trade_type, direction, trailing_pct, leverage, risk_pct):
+def format_trade_signal(
+    symbol,
+    score,
+    tf_scores,
+    trend,
+    entry_price,
+    sl,
+    tp1,
+    trade_type,
+    direction,
+    trailing_pct,
+    leverage,
+    risk_pct,
+    confidence=None  # ✅ New optional parameter
+):
     # Filter TF Breakdown to match trade type
     relevant_tfs = {
         "Scalp": [1, 3],
@@ -24,7 +36,6 @@ def format_trade_signal(symbol, score, tf_scores, trend, entry_price, sl, tp1, t
     }[trade_type]
 
     filtered_tf_scores = {k: v for k, v in tf_scores.items() if int(k) in relevant_tfs}
-
     emoji = "🟢" if direction == "Long" else "🔴"
 
     message = (
@@ -40,4 +51,9 @@ def format_trade_signal(symbol, score, tf_scores, trend, entry_price, sl, tp1, t
         f"📉 <b>Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
         f"📊 <b>Trend:</b> BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}\n"
     )
+
+    # ✅ Append confidence if available
+    if confidence is not None:
+        message += f"\n🔍 <b>Confidence:</b> {confidence:.1f}%"
+
     return message
