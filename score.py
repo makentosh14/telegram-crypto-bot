@@ -1,4 +1,4 @@
-# score.py (Final Version with Trade Type Detection)
+# score.py (Final Version with Multi-Timeframe Classification + Stealth Pump Logic)
 
 from rsi import calculate_rsi
 from macd import detect_macd_cross
@@ -7,6 +7,7 @@ from ema import detect_ema_crossover
 from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
+from stealth_detector import detect_volume_divergence, detect_slow_breakout
 
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
@@ -66,6 +67,13 @@ def score_symbol(symbol, candles_by_timeframe):
         elif pattern in ["bearish_engulfing", "inverted_hammer"]:
             score -= 1
 
+        # Stealth Signals (Bonus Layer)
+        if detect_volume_divergence(candles):
+            score += 0.5  # stealth accumulation
+
+        if detect_slow_breakout(candles):
+            score += 0.5  # slow creep breakout
+
         tf_scores[tf] = score
         total_score += score
 
@@ -73,7 +81,7 @@ def score_symbol(symbol, candles_by_timeframe):
 
 def determine_trade_type(tf_scores):
     tf_score = {int(k): v for k, v in tf_scores.items()}
-
+    
     short = sum(v for k, v in tf_score.items() if k in [1, 3])
     mid = sum(v for k, v in tf_score.items() if k in [5, 15])
     long = sum(v for k, v in tf_score.items() if k in [30, 60, 240])
