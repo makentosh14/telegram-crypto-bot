@@ -2,7 +2,7 @@ import datetime
 import pytz
 from telegram_bot import send_telegram_message
 from logger import log
-
+last_report_date = None
 # In-memory trade tracking structure
 active_trades = {}
 daily_stats = {
@@ -82,18 +82,23 @@ async def log_trade_result(symbol, result: str, profit: float):
 
 # Send daily summary
 async def send_daily_report():
+    global last_report_date
     now = datetime.datetime.now(pytz.timezone("Europe/Amsterdam"))
-    if now.hour == 23:
-        message = (
-            f"📊 <b>Daily Trade Report</b> ({now.strftime('%Y-%m-%d')})\n"
-            f"Wins: <b>{daily_stats['wins']}</b>\n"
-            f"Losses: <b>{daily_stats['losses']}</b>\n"
-            f"Net Profit: <b>{daily_stats['profit']:.2f} USDT</b>\n"
-        )
-        await send_telegram_message(message)
-        log("✉️ Daily trade report sent.")
 
-        # Reset
-        daily_stats["wins"] = 0
-        daily_stats["losses"] = 0
-        daily_stats["profit"] = 0.0
+    if now.hour == 23:
+        today = now.date()
+        if last_report_date != today:
+            message = (
+                f"📊 <b>Daily Trade Report</b> ({now.strftime('%Y-%m-%d')})\n"
+                f"Wins: <b>{daily_stats['wins']}</b>\n"
+                f"Losses: <b>{daily_stats['losses']}</b>\n"
+                f"Net Profit: <b>{daily_stats['profit']:.2f} USDT</b>\n"
+            )
+            await send_telegram_message(message)
+            log("✉️ Daily trade report sent.")
+            last_report_date = today
+
+            # Reset daily stats
+            daily_stats["wins"] = 0
+            daily_stats["losses"] = 0
+            daily_stats["profit"] = 0.0
