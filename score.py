@@ -1,4 +1,4 @@
-# score.py (Final Version with Multi-Timeframe Classification + Stealth Pump Logic)
+# score.py (Final Version with Multi-Timeframe Classification + Stealth Pump + Whale Detection)
 
 from rsi import calculate_rsi
 from macd import detect_macd_cross
@@ -8,6 +8,7 @@ from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
+from whale_tracker import detect_whale_activity
 
 def score_symbol(symbol, candles_by_timeframe):
     total_score = 0
@@ -74,6 +75,10 @@ def score_symbol(symbol, candles_by_timeframe):
         if detect_slow_breakout(candles):
             score += 0.5  # slow creep breakout
 
+        # Whale Spike
+        if detect_whale_activity(candles):
+            score += 1  # optional: tune this weight
+
         tf_scores[tf] = score
         total_score += score
 
@@ -81,7 +86,7 @@ def score_symbol(symbol, candles_by_timeframe):
 
 def determine_trade_type(tf_scores):
     tf_score = {int(k): v for k, v in tf_scores.items()}
-    
+
     short = sum(v for k, v in tf_score.items() if k in [1, 3])
     mid = sum(v for k, v in tf_score.items() if k in [5, 15])
     long = sum(v for k, v in tf_score.items() if k in [30, 60, 240])
