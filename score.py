@@ -1,5 +1,3 @@
-# score.py (Optimized for Trade Type + Direction + Weighted Indicators)
-
 from rsi import calculate_rsi
 from macd import detect_macd_cross
 from supertrend import calculate_supertrend_signal
@@ -92,3 +90,11 @@ def determine_direction(tf_scores):
     if negative_count >= len(tf_scores) // 2 and total < 0:
         return "Short"
     return "Long"
+
+# Confidence Score Logic
+def calculate_confidence(score, tf_scores, trend_context, trade_type):
+    max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
+    trend_boost = 2 if trend_context['btc_trend'] == "strong" or trend_context['altseason'] else 0
+    tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
+    confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
+    return round(min(confidence, 100), 1)
