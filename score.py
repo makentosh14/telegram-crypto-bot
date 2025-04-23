@@ -8,16 +8,21 @@ from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 
-# Weighted scoring function (optimized per trade type)
+# Minimum score requirements per trade type
+MIN_SCALP_SCORE = 5
+MIN_INTRADAY_SCORE = 6
+MIN_SWING_SCORE = 7
+
+# Weighted scoring function (trade-type only logic)
 def score_symbol(symbol, candles_by_timeframe):
-    total_score = 0
     tf_scores = {}
+    short_score, mid_score, long_score = 0, 0, 0
 
     for tf, candles in candles_by_timeframe.items():
         score = 0
         tf_int = int(tf)
 
-        # --- SCALP STRATEGY: 1m, 3m ---
+        # --- SCALP: 1m, 3m ---
         if tf_int in [1, 3]:
             if is_volume_spike(candles, 2.5): score += 1.0
             if detect_macd_cross(candles) == "bullish": score += 1.5
@@ -28,8 +33,9 @@ def score_symbol(symbol, candles_by_timeframe):
             if pattern in ["bullish_engulfing", "hammer", "inside_bar"]: score += 0.5
             if pattern in ["bearish_engulfing", "inverted_hammer"]: score -= 0.5
             if detect_volume_divergence(candles): score += 0.5
+            short_score += score
 
-        # --- INTRADAY STRATEGY: 5m, 15m ---
+        # --- INTRADAY: 5m, 15m ---
         elif tf_int in [5, 15]:
             if is_volume_spike(candles, 2.5): score += 1.0
             if detect_macd_cross(candles) == "bullish": score += 1.5
@@ -44,8 +50,9 @@ def score_symbol(symbol, candles_by_timeframe):
             pattern = detect_pattern(candles)
             if pattern in ["bullish_engulfing", "hammer", "inside_bar"]: score += 0.5
             if pattern in ["bearish_engulfing", "inverted_hammer"]: score -= 0.5
+            mid_score += score
 
-        # --- SWING STRATEGY: 30m, 1h, 4h ---
+        # --- SWING: 30m, 1h, 4h ---
         elif tf_int in [30, 60, 240]:
             rsi_vals = calculate_rsi(candles)
             if rsi_vals:
@@ -65,25 +72,22 @@ def score_symbol(symbol, candles_by_timeframe):
             pattern = detect_pattern(candles)
             if pattern in ["bullish_engulfing", "hammer", "inside_bar"]: score += 0.5
             if pattern in ["bearish_engulfing", "inverted_hammer"]: score -= 0.5
+            long_score += score
 
         tf_scores[tf] = score
-        total_score += score
 
-    return total_score, tf_scores
-
-# Trade type logic
-def determine_trade_type(tf_scores):
-    tf_score = {int(k): v for k, v in tf_scores.items()}
-    short = sum(v for k, v in tf_score.items() if k in [1, 3])
-    mid = sum(v for k, v in tf_score.items() if k in [5, 15])
-    long = sum(v for k, v in tf_score.items() if k in [30, 60, 240])
-
-    if short >= mid and short >= long:
-        return "Scalp"
-    elif mid >= short and mid >= long:
-        return "Intraday"
+    # Determine trade type
+    if short_score >= mid_score and short_score >= long_score:
+        trade_type = "Scalp"
+        total_score = short_score
+    elif mid_score >= short_score and mid_score >= long_score:
+        trade_type = "Intraday"
+        total_score = mid_score
     else:
-        return "Swing"
+        trade_type = "Swing"
+        total_score = long_score
+
+    return total_score, tf_scores, trade_type
 
 # Direction logic
 def determine_direction(tf_scores):
@@ -94,7 +98,7 @@ def determine_direction(tf_scores):
         return "Short"
     return "Long"
 
-# Confidence Score Logic
+# Confidence score logic
 def calculate_confidence(score, tf_scores, trend_context, trade_type):
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
     trend_boost = 2 if trend_context['btc_trend'] == "strong" or trend_context['altseason'] else 0
