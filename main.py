@@ -10,7 +10,7 @@ from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp
-from pump_detector import is_early_pump_candidate
+from pump_detector import detect_early_pump
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
@@ -65,9 +65,15 @@ async def run_bot():
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
                 # Check for early pump detection
-                if is_early_pump_candidate(candles_by_tf):
-                    await send_telegram_message(f"🚀 Potential early pump detected: <b>{symbol}</b>")
-
+                pump_data = await detect_early_pump(candles_by_tf, symbol)
+                if pump_data["trigger_count"] >= 3:
+                    pump_details = ', '.join([k for k, v in pump_data.items() if v is True and k != "trigger_count"])
+                    await send_telegram_message(
+                        f"🚀 <b>Early Pump Signal Detected!</b>\n"
+                        f"<b>Symbol:</b> {symbol}\n"
+                        f"Triggers: {pump_details} ({pump_data['trigger_count']}/4)"
+                    )
+  
                 if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
                     continue
                 if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
