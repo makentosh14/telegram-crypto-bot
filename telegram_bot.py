@@ -13,7 +13,6 @@ async def send_telegram_message(message):
         async with session.post(BOT_URL, data=payload) as resp:
             return await resp.text()
 
-
 def format_trade_signal(
     symbol,
     score,
@@ -27,7 +26,8 @@ def format_trade_signal(
     trailing_pct,
     leverage,
     risk_pct,
-    confidence=None
+    confidence=None,
+    sl_pct=None  # ✅ Added support for SL percentage display
 ):
     relevant_tfs = {
         "Scalp": [1, 3],
@@ -44,7 +44,7 @@ def format_trade_signal(
         f"<b>Score:</b> {score}\n"
         f"<b>TF Breakdown:</b> {filtered_tf_scores}\n\n"
         f"<b>Entry:</b> {entry_price}\n"
-        f"<b>SL:</b> {sl}\n"
+        f"<b>SL:</b> {sl}" + (f" ({sl_pct:.2f}%)" if sl_pct is not None else "") + "\n"
         f"<b>TP1:</b> {tp1}\n\n"
         f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
         f"📈 <b>Leverage:</b> {leverage}x\n"
