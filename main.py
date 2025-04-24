@@ -9,6 +9,7 @@ from config import DEFAULT_LEVERAGE
 from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
+from trade_executor import calculate_dynamic_sl_tp
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
@@ -16,12 +17,12 @@ recent_exits = {}
 EXIT_COOLDOWN = 10
 
 # Thresholds per trade type
-MIN_SCALP_SCORE = 5
-MIN_INTRADAY_SCORE = 6
-MIN_SWING_SCORE = 7
+MIN_SCALP_SCORE = 6.5
+MIN_INTRADAY_SCORE = 7.5
+MIN_SWING_SCORE = 8.0
 
 async def run_bot():
-    log("\U0001F680 Bot starting...")
+    log("🚀 Bot starting...")
 
     symbols = await fetch_symbols()
     log(f"✅ Fetched {len(symbols)} symbols.")
@@ -56,23 +57,18 @@ async def run_bot():
                 score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
                 direction = determine_direction(tf_scores)
                 confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
-
                 price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
-
-                sl_pct = 0.7 if trade_type == "Scalp" else (1.5 if trade_type == "Intraday" else 2.5)
-                tp1_pct = 1.5 if trade_type == "Scalp" else (3.0 if trade_type == "Intraday" else 6.0)
-                trailing_pct = 0.3 if trade_type == "Scalp" else (0.6 if trade_type == "Intraday" else 1.0)
-                risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
                 leverage = DEFAULT_LEVERAGE
+                risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
 
-                sl = round(price * (1 - sl_pct / 100), 4) if direction == "Long" else round(price * (1 + sl_pct / 100), 4)
-                tp1 = round(price * (1 + tp1_pct / 100), 4) if direction == "Long" else round(price * (1 - tp1_pct / 100), 4)
+                sl, tp1, sl_pct, trailing_pct = calculate_dynamic_sl_tp(
+                    candles_by_tf, price, trade_type, direction, score, confidence
+                )
 
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
                 if trade_type == "Swing" and btc_trend != "strong":
                     continue
-
                 if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
                     continue
                 if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
@@ -111,7 +107,7 @@ async def run_bot():
                     continue
 
                 if not is_duplicate_signal(symbol):
-                    await asyncio.sleep(2)  # recheck
+                    await asyncio.sleep(2)  # confirm recheck
                     re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
                     re_direction = determine_direction(re_tf_scores)
                     if re_score < score or re_type != trade_type or re_direction != direction:
@@ -133,7 +129,8 @@ async def run_bot():
                         trailing_pct=trailing_pct,
                         leverage=leverage,
                         risk_pct=risk_pct,
-                        confidence=confidence
+                        confidence=confidence,
+                        sl_pct=sl_pct
                     )
 
                     await send_telegram_message(msg)
