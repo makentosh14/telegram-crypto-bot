@@ -63,8 +63,7 @@ async def run_bot():
 
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
-                if trade_type == "Swing" and btc_trend != "strong":
-                    continue
+            
                 if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
                     continue
                 if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
