@@ -27,7 +27,7 @@ def format_trade_signal(
     leverage,
     risk_pct,
     confidence=None,
-    sl_pct=None  # ✅ Added support for SL percentage display
+    sl_pct=None
 ):
     relevant_tfs = {
         "Scalp": [1, 3],
@@ -56,3 +56,16 @@ def format_trade_signal(
         message += f"\n🔍 <b>Confidence:</b> {confidence:.1f}%"
 
     return message
+
+# 🚀 Early Pump Alert Function
+async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct, reason):
+    message = (
+        f"🚀 <b>Early Pump Detected</b>\n"
+        f"<b>Symbol:</b> {symbol}\n"
+        f"<b>Pump Score:</b> {pump_score:.2f}\n"
+        f"<b>Volume Spike:</b> +{volume_spike_pct:.1f}%\n"
+        f"<b>Price Change:</b> +{price_change_pct:.2f}%\n"
+        f"<b>Reason:</b> {reason}\n"
+        f"⚡ Monitoring for breakout momentum and entry"
+    )
+    await send_telegram_message(message)
