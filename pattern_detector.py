@@ -40,22 +40,41 @@ def is_inside_bar(prev, curr):
         float(curr["low"]) > float(prev["low"])
     )
 
+def is_morning_star(c1, c2, c3):
+    return (
+        float(c1["close"]) < float(c1["open"]) and
+        abs(float(c2["close"]) - float(c2["open"])) < (float(c1["open"]) - float(c1["close"])) * 0.5 and
+        float(c3["close"]) > float(c3["open"]) and
+        float(c3["close"]) > float(c1["open"])
+    )
+
+def is_evening_star(c1, c2, c3):
+    return (
+        float(c1["close"]) > float(c1["open"]) and
+        abs(float(c2["close"]) - float(c2["open"])) < (float(c1["close"]) - float(c1["open"])) * 0.5 and
+        float(c3["close"]) < float(c3["open"]) and
+        float(c3["close"]) < float(c1["open"])
+    )
+
 def detect_pattern(candles):
-    if len(candles) < 2:
+    if len(candles) < 3:
         return None
 
-    prev = candles[-2]
-    curr = candles[-1]
+    c1, c2, c3 = candles[-3], candles[-2], candles[-1]
 
-    if is_bullish_engulfing(prev, curr):
+    if is_morning_star(c1, c2, c3):
+        return "morning_star"
+    if is_evening_star(c1, c2, c3):
+        return "evening_star"
+    if is_bullish_engulfing(c2, c3):
         return "bullish_engulfing"
-    elif is_bearish_engulfing(prev, curr):
+    if is_bearish_engulfing(c2, c3):
         return "bearish_engulfing"
-    elif is_hammer(curr):
+    if is_hammer(c3):
         return "hammer"
-    elif is_inverted_hammer(curr):
+    if is_inverted_hammer(c3):
         return "inverted_hammer"
-    elif is_inside_bar(prev, curr):
+    if is_inside_bar(c2, c3):
         return "inside_bar"
-    else:
-        return None
+    
+    return None
