@@ -1,15 +1,17 @@
-# whale_tracker.py
-
-def detect_whale_activity(candles, volume_threshold=1000000):
-    """
-    Looks for a large volume spike vs prior average.
-    Use with meme/low-cap coins for stealth entry alerts.
-    """
-    if len(candles) < 20:
+def detect_whale_activity(candles, threshold_ratio=1.8):
+    if len(candles) < 6:
         return False
 
-    volumes = [float(c['volume']) for c in candles[-20:-1]]
-    recent_volume = float(candles[-1]['volume'])
-    avg_volume = sum(volumes) / len(volumes)
+    recent = candles[-3:]
+    earlier = candles[-6:-3]
 
-    return recent_volume > avg_volume * 3 and recent_volume > volume_threshold
+    avg_early_volume = sum(float(c['volume']) for c in earlier) / len(earlier)
+    avg_recent_volume = sum(float(c['volume']) for c in recent) / len(recent)
+
+    # Candle body size increase (whale-style candle)
+    body_sizes = [abs(float(c['close']) - float(c['open'])) for c in recent]
+    avg_body = sum(body_sizes) / len(body_sizes)
+
+    whale_detected = avg_recent_volume > avg_early_volume * threshold_ratio and avg_body > 0.5
+
+    return whale_detected
