@@ -1,62 +1,77 @@
+# sentiment_detector.py
+
 import aiohttp
 import re
-import time
 
-# Define keywords and sources that suggest early meme pump activity
-KEYWORDS = [
-    "100x", "moon", "next pepe", "buy now", "pump soon", "exploding",
-    "gem", "undervalued", "sending", "new listing", "coinbase", "binance",
-    "kucoin", "huge volume", "whale buying", "viral", "telegram call", "twitter trending"
+REDDIT_KEYWORDS = [
+    "next pepe", "next 100x", "hidden gem", "new coin", "moonshot", "undervalued",
+    "just launched", "low cap gem", "pump incoming", "sending soon"
 ]
 
-EXCHANGES = ["binance", "bybit", "kucoin", "okx"]
+TWITTER_KEYWORDS = [
+    "100x", "buy now", "next pepe", "listing", "pump soon", "whale buying",
+    "exploding", "going parabolic", "new gem"
+]
 
-# === Social Score Cache ===
-MENTION_CACHE = {}
-MENTION_EXPIRY = 300  # seconds
+COINGECKO_TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending"
+REDDIT_URL = "https://api.pushshift.io/reddit/search/submission/?subreddit=cryptomoonshots&size=30"
 
-async def fetch_mentions(coin):
-    now = time.time()
-    if coin in MENTION_CACHE and now - MENTION_CACHE[coin]["timestamp"] < MENTION_EXPIRY:
-        return MENTION_CACHE[coin]["count"], MENTION_CACHE[coin]["top_mentions"]
-
-    query = f"{coin} ({' OR '.join(KEYWORDS)}) lang:en -is:retweet"
-    url = f"https://api.mempulse.io/search?q={query}"  # Placeholder for a real API
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    count = data.get("count", 0)
-                    top_mentions = data.get("top_mentions", [])
-                    MENTION_CACHE[coin] = {
-                        "count": count,
-                        "top_mentions": top_mentions,
-                        "timestamp": now
-                    }
-                    return count, top_mentions
-    except Exception as e:
-        print(f"Sentiment fetch error for {coin}: {e}")
-    return 0, []
-
-def score_mentions(mentions):
+async def fetch_twitter_mentions(coin):
+    # Simulate sentiment score based on keyword matching (stubbed for free version)
     score = 0
-    for text in mentions:
-        text_lower = text.lower()
-        for kw in KEYWORDS:
-            if kw in text_lower:
-                score += 1
-        for ex in EXCHANGES:
-            if ex in text_lower:
-                score += 2
+    try:
+        mentions = [
+            f"This coin {coin} is going to 100x!",  # simulated data
+            f"{coin} is a new hidden gem, buy now"
+        ]
+        for text in mentions:
+            for kw in TWITTER_KEYWORDS:
+                if kw in text.lower():
+                    score += 1
+    except:
+        pass
     return score
 
+async def fetch_reddit_mentions():
+    score_map = {}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(REDDIT_URL) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    posts = data.get("data", [])
+                    for post in posts:
+                        title = post.get("title", "").lower()
+                        for kw in REDDIT_KEYWORDS:
+                            if kw in title:
+                                for word in title.split():
+                                    if word.isupper() and len(word) <= 6:
+                                        score_map[word] = score_map.get(word, 0) + 1
+    except:
+        pass
+    return score_map
+
+async def fetch_coingecko_trending():
+    trending = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(COINGECKO_TRENDING_URL) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for item in data.get("coins", []):
+                        trending.append(item["item"]["symbol"].upper())
+    except:
+        pass
+    return trending
+
 async def check_social_sentiment(coin):
-    count, mentions = await fetch_mentions(coin)
-    social_score = score_mentions(mentions)
-    return {
-        "mention_count": count,
-        "score": social_score,
-        "mentions": mentions[:3]  # preview top 3
-    }
+    coin = coin.replace("USDT", "").upper()
+    reddit_scores = await fetch_reddit_mentions()
+    twitter_score = await fetch_twitter_mentions(coin)
+    trending = await fetch_coingecko_trending()
+
+    reddit_score = reddit_scores.get(coin, 0)
+    trending_hit = coin in trending
+
+    total_score = reddit_score + twitter_score + (2 if trending_hit else 0)
+    return total_score >= 3  # can adjust threshold
