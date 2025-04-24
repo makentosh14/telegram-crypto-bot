@@ -1,12 +1,12 @@
 # pump_detector.py
 
-import time
+import asyncio
 from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from stealth_detector import detect_slow_breakout
 from social_sentiment import check_social_sentiment
 
-def detect_early_pump(candles_by_tf, symbol):
+async def detect_early_pump(candles_by_tf, symbol):
     results = {
         "volume_spike": False,
         "whale_activity": False,
@@ -15,7 +15,6 @@ def detect_early_pump(candles_by_tf, symbol):
         "trigger_count": 0
     }
 
-    # Use 1m and 3m for most signals
     tf1 = candles_by_tf.get("1", [])
     tf3 = candles_by_tf.get("3", [])
 
@@ -31,7 +30,8 @@ def detect_early_pump(candles_by_tf, symbol):
         results["base_breakout"] = True
         results["trigger_count"] += 1
 
-    if check_social_sentiment(symbol):
+    social_result = await check_social_sentiment(symbol)
+    if social_result and social_result.get("score", 0) >= 4:
         results["social_hype"] = True
         results["trigger_count"] += 1
 
