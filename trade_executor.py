@@ -52,7 +52,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl_distance = atr * factor
         sl_pct = (sl_distance / price) * 100
     else:
-        # Confidence-based fallback SL %
+        # Fallback SL % if ATR unavailable
         if confidence >= 85 and score >= 7.5:
             sl_pct = 1.5
         elif confidence < 60 or score < 6:
