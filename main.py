@@ -16,7 +16,6 @@ active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
 
-# Thresholds per trade type
 MIN_SCALP_SCORE = 6.5
 MIN_INTRADAY_SCORE = 7.5
 MIN_SWING_SCORE = 8.0
@@ -26,7 +25,6 @@ async def run_bot():
 
     symbols = await fetch_symbols()
     log(f"✅ Fetched {len(symbols)} symbols.")
-
     asyncio.create_task(stream_candles(symbols))
     await asyncio.sleep(5)
 
@@ -34,12 +32,10 @@ async def run_bot():
         try:
             trend_context = await get_trend_context()
             btc_trend = trend_context['btc_trend']
-            altseason = trend_context['altseason']
 
             for i, symbol in enumerate(symbols, 1):
                 if symbol not in live_candles:
                     continue
-
                 if recent_exits.get(symbol, 0) > 0:
                     recent_exits[symbol] -= 1
                     continue
@@ -78,36 +74,29 @@ async def run_bot():
 
                 if symbol in active_signals:
                     data = active_signals[symbol]
-                    previous_score = data['score']
                     data['score_history'].append(score)
-
                     if trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Scalp setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Scalp.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(False, -1.0)
+                        log_trade_result(symbol, "loss", -1.0)
                         continue
                     if trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Intraday setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Intraday.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(False, -2.0)
+                        log_trade_result(symbol, "loss", -2.0)
                         continue
                     if trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped to {score} on Swing setup.")
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Swing.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(False, -3.0)
+                        log_trade_result(symbol, "loss", -3.0)
                         continue
-
-                    if previous_score < 6 and score >= 8:
-                        if recent_exits.get(symbol, 0) == 0:
-                            await send_telegram_message(f"♻️ {symbol} score rebounded from {previous_score} to {score}. Re-entry?")
-
                     continue
 
                 if not is_duplicate_signal(symbol):
-                    await asyncio.sleep(2)  # confirm recheck
+                    await asyncio.sleep(2)
                     re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
                     re_direction = determine_direction(re_tf_scores)
                     if re_score < score or re_type != trade_type or re_direction != direction:
