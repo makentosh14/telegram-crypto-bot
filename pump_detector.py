@@ -30,8 +30,7 @@ async def detect_early_pump(candles_by_tf, symbol):
         results["base_breakout"] = True
         results["trigger_count"] += 1
 
-    social_result = await check_social_sentiment(symbol)
-    if social_result and social_result.get("score", 0) >= 4:
+    if await check_social_sentiment(symbol):
         results["social_hype"] = True
         results["trigger_count"] += 1
 
