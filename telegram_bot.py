@@ -66,6 +66,6 @@ async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct
         f"<b>Volume Spike:</b> +{volume_spike_pct:.1f}%\n"
         f"<b>Price Change:</b> +{price_change_pct:.2f}%\n"
         f"<b>Reason:</b> {reason}\n"
-        f"⚡ Monitoring for breakout momentum and entry"
+        f"⚡ <i>Monitoring for breakout momentum and SL/TP targets</i>"
     )
     await send_telegram_message(message)
