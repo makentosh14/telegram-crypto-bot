@@ -64,16 +64,17 @@ async def run_bot():
 
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
-                # Check for early pump detection
+                # Early pump detection
                 pump_data = await detect_early_pump(candles_by_tf, symbol)
                 if pump_data["trigger_count"] >= 3:
-                    pump_details = ', '.join([k for k, v in pump_data.items() if v is True and k != "trigger_count"])
+                    pump_reasons = ', '.join([k for k, v in pump_data.items() if v is True and k != "trigger_count"])
                     await send_telegram_message(
                         f"🚀 <b>Early Pump Signal Detected!</b>\n"
                         f"<b>Symbol:</b> {symbol}\n"
-                        f"Triggers: {pump_details} ({pump_data['trigger_count']}/4)"
+                        f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
                     )
-  
+
+                # Skip weak setups
                 if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
                     continue
                 if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
@@ -81,6 +82,7 @@ async def run_bot():
                 if trade_type == "Swing" and score < MIN_SWING_SCORE:
                     continue
 
+                # Active signal tracking
                 if symbol in active_signals:
                     data = active_signals[symbol]
                     data['score_history'].append(score)
@@ -104,6 +106,7 @@ async def run_bot():
                         continue
                     continue
 
+                # Final confirmation before signal
                 if not is_duplicate_signal(symbol):
                     await asyncio.sleep(2)
                     re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
