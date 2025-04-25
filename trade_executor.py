@@ -11,6 +11,7 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 
+
 def calculate_sl_tp(price, trade_type, direction):
     if trade_type == "Scalp":
         sl_pct = 0.7
@@ -30,6 +31,7 @@ def calculate_sl_tp(price, trade_type, direction):
         tp1 = round(price * (1 - tp1_pct / 100), 4)
 
     return sl, tp1, sl_pct, tp1_pct
+
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {
@@ -71,6 +73,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct
+
 
 async def execute_trade_if_valid(signal_data, max_risk=0.02):
     symbol = signal_data["symbol"]
