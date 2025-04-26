@@ -1,8 +1,6 @@
-# stealth_detector.py
-
-def detect_volume_divergence(candles):
+def detect_volume_divergence(candles, min_growth_ratio=1.2):
     """
-    Detects stealth accumulation where volume rises while price is flat or declining.
+    Detects stealth accumulation where volume rises while price stays flat or declines.
     Returns True if detected, False otherwise.
     """
     if len(candles) < 20:
@@ -12,23 +10,27 @@ def detect_volume_divergence(candles):
     prices = [float(c['close']) for c in recent]
     volumes = [float(c['volume']) for c in recent]
 
-    price_change = prices[-1] - prices[0]
-    volume_change = volumes[-1] - volumes[0]
+    price_change = (prices[-1] - prices[0]) / prices[0] if prices[0] != 0 else 0
+    volume_growth = (volumes[-1] - volumes[0]) / volumes[0] if volumes[0] != 0 else 0
 
-    if price_change <= 0 and volume_change > 0:
+    if price_change <= 0 and volume_growth >= (min_growth_ratio - 1):
         return True
     return False
 
 def detect_slow_breakout(candles, window=15):
     """
-    Detects slow, creeping breakout — not a sudden spike.
-    Useful for meme coin stealth pumps.
+    Detects slow, creeping breakout — useful for early meme pumps.
     """
     if len(candles) < window:
         return False
 
     closes = [float(c['close']) for c in candles[-window:]]
     avg = sum(closes) / len(closes)
-    recent = closes[-1]
+    last_close = closes[-1]
 
-    return recent > avg * 1.01  # >1% slow climb
+    # Stronger breakout detection: recent 3 closes must stay above moving average
+    recent_3 = closes[-3:]
+    if all(c > avg for c in recent_3) and last_close > avg * 1.01:
+        return True
+
+    return False
