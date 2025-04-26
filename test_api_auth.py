@@ -1,47 +1,33 @@
-import aiohttp
-import asyncio
 import time
 import hmac
 import hashlib
-import os
+import aiohttp
 
-# Replace with your working key and secret
-BYBIT_API_KEY = "VFEBK9XrpC6polx31h"
-BYBIT_API_SECRET = "WBFlSemMj1EMihM2CHkiVbyYT3vyRoUNFjYS"
-BYBIT_API_URL = "wss://stream.bybit.com/v5/public/spread"
+API_KEY = "VFEBK9XrpC6polx31h"
+API_SECRET = "WBFlSemMj1EMihM2CHkiVbyYT3vyRoUNFjYS"
 
-def generate_signature(params, secret):
-    sorted_params = dict(sorted(params.items()))
-    query = '&'.join([f"{k}={v}" for k, v in sorted_params.items()])
-    return hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+async def signed_request(method, endpoint, params=None):
+    if params is None:
+        params = {}
 
-async def test_auth():
-    timestamp = str(int(time.time() * 1000))
-    recv_window = "5000"
-    endpoint = "/v5/account/wallet-balance"
-    url = f"{BYBIT_API_URL}{endpoint}"
+    params["api_key"] = API_KEY
+    params["timestamp"] = str(int(time.time() * 1000))
+    params["recvWindow"] = "5000"
 
-    params = {
-        "accountType": "UNIFIED",
-        "timestamp": timestamp,
-        "recvWindow": recv_window
-    }
-
-    signature = generate_signature(params, BYBIT_API_SECRET)
+    query = "&".join([f"{k}={v}" for k, v in sorted(params.items())])
+    signature = hmac.new(API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
     params["sign"] = signature
 
+    url = "https://api.bybit.com" + endpoint
+
     headers = {
-        "X-BYBIT-API-KEY": BYBIT_API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/x-www-form-urlencoded"
     }
 
-    print(f"🔐 API Key: {BYBIT_API_KEY}")
-    print(f"🔑 Signature: {signature}")
-
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, headers=headers) as resp:
-            print(f"🔄 HTTP Status: {resp.status}")
-            response = await resp.text()
-            print(f"📦 Response: {response}")
-
-asyncio.run(test_auth())
+        if method == "GET":
+            async with session.get(url, params=params, headers=headers) as response:
+                return await response.json()
+        elif method == "POST":
+            async with session.post(url, data=params, headers=headers) as response:
+                return await response.json()
