@@ -6,14 +6,15 @@ signal_cache = {}
 
 def is_duplicate_signal(symbol, cooldown=1800):
     """
-    Prevents sending repeated signals for the same coin.
-    cooldown: seconds to wait before allowing another signal
+    Prevents sending repeated signals for the same symbol.
+    cooldown: seconds to wait before allowing another signal (default 30 min)
     """
     now = time.time()
-    if symbol in signal_cache:
-        if now - signal_cache[symbol] < cooldown:
-            return True
+    last_signal_time = signal_cache.get(symbol)
+    if last_signal_time and (now - last_signal_time) < cooldown:
+        return True
     return False
 
 def log_signal(symbol):
+    """Logs the signal time for a symbol."""
     signal_cache[symbol] = time.time()
