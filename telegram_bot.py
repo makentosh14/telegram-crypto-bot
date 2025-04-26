@@ -48,7 +48,7 @@ def format_trade_signal(
         f"<b>TP1:</b> {tp1}\n\n"
         f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
         f"📈 <b>Leverage:</b> {leverage}x\n"
-        f"📉 <b>Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
+        f"📉 <b>Smart Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
         f"📊 <b>Trend:</b> BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}\n"
     )
 
@@ -60,12 +60,12 @@ def format_trade_signal(
 # 🚀 Early Pump Alert Function
 async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct, reason):
     message = (
-        f"🚀 <b>Early Pump Detected</b>\n"
+        f"🚀 <b>Early Pump Signal Detected</b>\n"
         f"<b>Symbol:</b> {symbol}\n"
         f"<b>Pump Score:</b> {pump_score:.2f}\n"
         f"<b>Volume Spike:</b> +{volume_spike_pct:.1f}%\n"
         f"<b>Price Change:</b> +{price_change_pct:.2f}%\n"
         f"<b>Reason:</b> {reason}\n"
-        f"⚡ <i>Monitoring for breakout momentum and SL/TP targets</i>"
+        f"⚡ <i>Monitoring for breakout, Smart SL/TP activation on momentum</i>"
     )
     await send_telegram_message(message)
