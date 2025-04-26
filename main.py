@@ -144,6 +144,10 @@ async def run_bot():
                         "score": score,
                         "confidence": confidence,
                         "candles": candles_by_tf
+                        trade = await execute_trade_if_valid({...})
+                   if trade:
+                        log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
+
                     })
 
             await send_daily_report()
