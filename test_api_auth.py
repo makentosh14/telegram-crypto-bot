@@ -8,7 +8,7 @@ import os
 # Replace with your working key and secret
 BYBIT_API_KEY = "VFEBK9XrpC6polx31h"
 BYBIT_API_SECRET = "WBFlSemMj1EMihM2CHkiVbyYT3vyRoUNFjYS"
-BYBIT_API_URL = "wss://stream.bybit.com"
+BYBIT_API_URL = "wss://stream.bybit.com/v5/public/spread"
 
 def generate_signature(params, secret):
     sorted_params = dict(sorted(params.items()))
