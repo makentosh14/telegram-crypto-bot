@@ -56,7 +56,7 @@ async def run_bot():
                 confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
                 price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
                 leverage = DEFAULT_LEVERAGE
-                risk_pct = 3.0 if trade_type == "Scalp" else (2.0 if trade_type == "Intraday" else 1.0)
+                risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
                 sl, tp1, sl_pct, trailing_pct = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
@@ -90,23 +90,23 @@ async def run_bot():
                         await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Scalp.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(symbol, "loss", -1.0)
+                        await log_trade_result(symbol, "loss", -1.0)
                         continue
                     if trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:]):
                         await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Intraday.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(symbol, "loss", -2.0)
+                        await log_trade_result(symbol, "loss", -2.0)
                         continue
                     if trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]):
                         await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Swing.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
-                        log_trade_result(symbol, "loss", -3.0)
+                        await log_trade_result(symbol, "loss", -3.0)
                         continue
                     continue
 
-                # Final confirmation before signal
+                # Final confirmation before sending signal
                 if not is_duplicate_signal(symbol):
                     await asyncio.sleep(2)
                     re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
