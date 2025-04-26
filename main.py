@@ -9,7 +9,7 @@ from config import DEFAULT_LEVERAGE
 from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
-from trade_executor import calculate_dynamic_sl_tp
+from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -22,10 +22,10 @@ MIN_INTRADAY_SCORE = 7.5
 MIN_SWING_SCORE = 8.0
 
 async def run_bot():
-    log("🚀 Bot starting...")
+    log("\ud83d\ude80 Bot starting...")
 
     symbols = await fetch_symbols()
-    log(f"✅ Fetched {len(symbols)} symbols.")
+    log(f"\u2705 Fetched {len(symbols)} symbols.")
     asyncio.create_task(stream_candles(symbols))
     await asyncio.sleep(5)
 
@@ -62,19 +62,17 @@ async def run_bot():
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
 
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
+                log(f"\ud83d\udcca [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
 
-                # Early pump detection
                 pump_data = await detect_early_pump(candles_by_tf, symbol)
                 if pump_data["trigger_count"] >= 3:
                     pump_reasons = ', '.join([k for k, v in pump_data.items() if v is True and k != "trigger_count"])
                     await send_telegram_message(
-                        f"🚀 <b>Early Pump Signal Detected!</b>\n"
+                        f"\ud83d\ude80 <b>Early Pump Signal Detected!</b>\n"
                         f"<b>Symbol:</b> {symbol}\n"
                         f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
                     )
 
-                # Skip weak setups
                 if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
                     continue
                 if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
@@ -82,31 +80,29 @@ async def run_bot():
                 if trade_type == "Swing" and score < MIN_SWING_SCORE:
                     continue
 
-                # Active signal tracking
                 if symbol in active_signals:
                     data = active_signals[symbol]
                     data['score_history'].append(score)
                     if trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Scalp.")
+                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped on Scalp.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
                         await log_trade_result(symbol, "loss", -1.0)
                         continue
                     if trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Intraday.")
+                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped on Intraday.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
                         await log_trade_result(symbol, "loss", -2.0)
                         continue
                     if trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Swing.")
+                        await send_telegram_message(f"\u274c Exit {symbol} | Score dropped on Swing.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
                         await log_trade_result(symbol, "loss", -3.0)
                         continue
                     continue
 
-                # Final confirmation before sending signal
                 if not is_duplicate_signal(symbol):
                     await asyncio.sleep(2)
                     re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
@@ -139,17 +135,16 @@ async def run_bot():
                         'score': score,
                         'score_history': [score]
                     }
-                    
-                    await execute_trade_if_valid({
-                     "symbol": symbol,
-                     "price": price,
-                     "trade_type": trade_type,
-                     "direction": direction,
-                     "score": score,
-                     "confidence": confidence,
-                     "candles": candles_by_tf
-                    })
 
+                    await execute_trade_if_valid({
+                        "symbol": symbol,
+                        "price": price,
+                        "trade_type": trade_type,
+                        "direction": direction,
+                        "score": score,
+                        "confidence": confidence,
+                        "candles": candles_by_tf
+                    })
 
             await send_daily_report()
 
@@ -159,5 +154,5 @@ async def run_bot():
         await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
-    log("🔧 DEBUG TEST: main.py is running...")
+    log("\ud83d\udd27 DEBUG TEST: main.py is running...")
     asyncio.run(run_bot())
