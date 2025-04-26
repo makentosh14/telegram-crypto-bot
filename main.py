@@ -136,20 +136,19 @@ async def run_bot():
                         'score_history': [score]
                     }
 
-                    await execute_trade_if_valid({
-                        "symbol": symbol,
-                        "price": price,
-                        "trade_type": trade_type,
-                        "direction": direction,
-                        "score": score,
-                        "confidence": confidence,
-                        "candles": candles_by_tf,
-                        
-                        trade = await execute_trade_if_valid({...})
-                   if trade:
+                   trade = await execute_trade_if_valid({
+                       "symbol": symbol,
+                       "price": price,
+                       "trade_type": trade_type,
+                       "direction": direction,
+                       "score": score,
+                       "confidence": confidence,
+                       "candles": candles_by_tf,
+                   })
+
+                  if trade:
                         log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
 
-                    })
 
             await send_daily_report()
 
