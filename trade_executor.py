@@ -5,6 +5,30 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 
+
+def calculate_quantity(risk_amount, price, category="spot"):
+    """
+    Calculate quantity based on price and market type with dynamic precision.
+    - More decimals for cheaper coins.
+    - Futures and spot handled separately.
+    """
+    if category == "spot":
+        if price < 0.1:
+            qty = round(risk_amount / price, 4)
+        elif price < 1:
+            qty = round(risk_amount / price, 3)
+        elif price < 100:
+            qty = round(risk_amount / price, 2)
+        else:
+            qty = round(risk_amount / price, 1)
+    else:  # Futures
+        if price < 1:
+            qty = round(risk_amount / price, 3)
+        else:
+            qty = round(risk_amount / price, 1)
+    
+    return qty
+
 def calculate_sl_tp(price, trade_type, direction):
     if trade_type == "Scalp":
         sl_pct = 0.7
@@ -82,7 +106,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         price = float(signal_data.get("price", 1.0))
         risk_amount = usdt_balance * max_risk
-        qty = round(risk_amount / price, 2 if category == "spot" else 1)
+        qty = calculate_quantity(risk_amount, price, category)
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
