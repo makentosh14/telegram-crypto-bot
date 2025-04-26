@@ -5,8 +5,8 @@ import hmac
 import hashlib
 
 # Your Bybit API keys
-API_KEY = "VFEBK9XrpC6polx31h"
-API_SECRET = "WBFlSemMj1EMihM2CHkiVbyYT3vyRoUNFjYS"
+API_KEY = "ZWnRCXNtjKrbPZxUjA"
+API_SECRET = "rqayiOaNSdL25CmwwfIuOtExt077uXkqruLT"
 
 async def test_api_auth():
     url = "https://api.bybit.com/v5/account/wallet-balance"
