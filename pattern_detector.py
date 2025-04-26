@@ -76,5 +76,5 @@ def detect_pattern(candles):
         return "inverted_hammer"
     if is_inside_bar(c2, c3):
         return "inside_bar"
-    
+
     return None
