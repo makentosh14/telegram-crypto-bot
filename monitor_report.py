@@ -2,7 +2,9 @@ import datetime
 import pytz
 from telegram_bot import send_telegram_message
 from logger import log
+
 last_report_date = None
+
 # In-memory trade tracking structure
 active_trades = {}
 daily_stats = {
