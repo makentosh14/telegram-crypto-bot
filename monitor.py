@@ -1,5 +1,3 @@
-# monitor.py
-
 from telegram_bot import send_telegram_message
 from score import score_symbol
 from pattern_detector import detect_pattern
