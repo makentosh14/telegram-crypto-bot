@@ -1,10 +1,4 @@
-from bybit_api import (
-    place_market_order,
-    get_balance,
-    set_leverage,
-    set_margin_mode,
-    cancel_all_orders
-)
+from bybit_api_async import signed_request
 from symbol_utils import get_symbol_category
 from config import DEFAULT_LEVERAGE, MARGIN_MODE
 from logger import log
@@ -71,7 +65,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     return sl, tp1, sl_pct, trailing_pct
 
-async def execute_trade_if_valid(signal_data, max_risk=0.06):  # ⬅️ Risk increased 3x
+async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
     trade_type = signal_data.get("trade_type", "Intraday")
@@ -80,9 +74,14 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):  # ⬅️ Risk inc
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
-        balance = await get_balance()
+        # === Step 1: Get account balance ===
+        balance_data = await signed_request("GET", "/v5/account/wallet-balance", {
+            "accountType": "UNIFIED"
+        })
+        usdt_balance = float(balance_data["result"]["list"][0]["coin"][0]["availableToWithdraw"])
+
         price = float(signal_data.get("price", 1.0))
-        risk_amount = balance * max_risk
+        risk_amount = usdt_balance * max_risk
         qty = round(risk_amount / price, 2 if category == "spot" else 1)
 
         score = signal_data.get("score", 5)
@@ -94,11 +93,29 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):  # ⬅️ Risk inc
         )
 
         if category != "spot":
-            await set_margin_mode(symbol, MARGIN_MODE)
-            await set_leverage(symbol, buy_leverage=DEFAULT_LEVERAGE, sell_leverage=DEFAULT_LEVERAGE)
+            # Set margin mode (crossed)
+            await signed_request("POST", "/v5/position/set-leverage", {
+                "category": "linear",
+                "symbol": symbol,
+                "buyLeverage": DEFAULT_LEVERAGE,
+                "sellLeverage": DEFAULT_LEVERAGE
+            })
 
-        await cancel_all_orders(symbol, category=category)
-        order_result = await place_market_order(symbol, "Buy" if direction == "Long" else "Sell", qty, market_type=category)
+        # Cancel existing open orders
+        await signed_request("POST", "/v5/order/cancel-all", {
+            "category": "linear" if category == "futures" else "spot",
+            "symbol": symbol
+        })
+
+        # Place market order
+        order_result = await signed_request("POST", "/v5/order/create", {
+            "category": "linear" if category == "futures" else "spot",
+            "symbol": symbol,
+            "side": "Buy" if direction == "Long" else "Sell",
+            "orderType": "Market",
+            "qty": qty,
+            "timeInForce": "GTC"
+        })
 
         if order_result.get("retCode") == 0:
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
