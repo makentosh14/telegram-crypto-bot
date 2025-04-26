@@ -1,5 +1,3 @@
-# macd.py
-
 def calculate_ema(values, period):
     ema = []
     multiplier = 2 / (period + 1)
