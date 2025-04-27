@@ -47,13 +47,17 @@ async def signed_request(method: str, endpoint: str, params: dict):
     log(f"📦 Headers (for request): {headers}")
     log(f"📦 Sending Body (only clean params): {params}")
 
-    async with aiohttp.ClientSession() as session:
-        if method == "GET":
-            async with session.get(url, params=params, headers=headers) as resp:
-                return await resp.json()
-        elif method == "POST":
-            async with session.post(url, json=params, headers=headers) as resp:
-                return await resp.json()
+async with aiohttp.ClientSession() as session:
+    if method == "GET":
+        async with session.get(url, headers=headers, params=params) as resp:
+            response = await resp.json()
+            log(f"📨 Response: {response}")
+            return response
+    elif method == "POST":
+        async with session.post(url, headers=headers, json=params) as resp:
+            response = await resp.json()
+            log(f"📨 Response: {response}")
+            return response
 
 
     async with aiohttp.ClientSession() as session:
