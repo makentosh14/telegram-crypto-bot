@@ -4,6 +4,7 @@ import datetime
 import asyncio
 from config import TELEGRAM_ASSISTANT_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
+import sys
 
 
 def log(msg, level="INFO"):
