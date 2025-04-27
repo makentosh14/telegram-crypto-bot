@@ -14,20 +14,20 @@ BASE_URL = "https://api.bybit.com"
 
 RECV_WINDOW = "5000"
 
-# === SIGNATURE GENERATION ===
-def generate_signature(timestamp, api_key, recv_window, body, secret):
-    payload = str(timestamp) + api_key + recv_window + body
+# === SIGNATURE FUNCTION ===
+def sign(timestamp, api_key, recv_window, body, secret):
+    payload = f"{timestamp}{api_key}{recv_window}{body}"
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
-# === SIGNED REQUEST ===
-async def signed_request(method, endpoint, body_dict=None):
-    if body_dict is None:
-        body_dict = {}
+# === SIGNED REQUEST FUNCTION ===
+async def signed_request(method, endpoint, params=None):
+    if params is None:
+        params = {}
 
-    body_json = json.dumps(body_dict) if body_dict else ""
+    body = json.dumps(params) if params else "{}"
 
     timestamp = str(int(time.time() * 1000))
-    signature = generate_signature(timestamp, BYBIT_API_KEY, RECV_WINDOW, body_json, BYBIT_API_SECRET)
+    signature = sign(timestamp, BYBIT_API_KEY, RECV_WINDOW, body, BYBIT_API_SECRET)
 
     headers = {
         "X-BYBIT-API-KEY": BYBIT_API_KEY,
@@ -46,29 +46,18 @@ async def signed_request(method, endpoint, body_dict=None):
                 print(f"✅ Status: {resp.status}")
                 print(f"📨 Response: {await resp.text()}")
         elif method == "POST":
-            async with session.post(url, headers=headers, data=body_json) as resp:
+            async with session.post(url, headers=headers, data=body) as resp:
                 print(f"\n🔗 [POST] {endpoint}")
                 print(f"✅ Status: {resp.status}")
                 print(f"📨 Response: {await resp.text()}")
-        else:
-            raise ValueError("Unsupported method")
 
-# === MAIN TEST ===
+# === MAIN TEST RUN ===
 async def main():
-    print("🚀 Testing Bybit v5 API Connection...")
+    print("🚀 Testing Bybit API Authentication...")
 
-    # Test Wallet Balance
-    await signed_request("GET", "/v5/account/wallet-balance")
-
-    # Test Cancel All Orders (linear futures)
-    await signed_request("POST", "/v5/order/cancel-all", {
-        "category": "linear"
-    })
-
-    # Test Position List (linear futures)
-    await signed_request("GET", "/v5/position/list", {
-        "category": "linear"
-    })
+    await signed_request("GET", "/v5/account/wallet-balance", {})
+    await signed_request("POST", "/v5/order/cancel-all", {"category": "linear"})
+    await signed_request("GET", "/v5/position/list", {"category": "linear"})
 
 if __name__ == "__main__":
     asyncio.run(main())
