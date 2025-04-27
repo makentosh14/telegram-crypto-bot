@@ -20,18 +20,16 @@ def sign_request(params: dict, secret: str):
 
 async def signed_request(method: str, endpoint: str, params: dict):
     from config import BYBIT_API_KEY, BYBIT_API_SECRET
+    import aiohttp
 
+    # Prepare timestamp and signature
     timestamp = str(await get_server_time())
-
-    # Separate signing params and sending params
-    signing_params = {
-        "api_key": BYBIT_API_KEY,
+    base_params = {
         "timestamp": timestamp,
         "recvWindow": "5000",
         **params
     }
-
-    signature = sign_request(signing_params, BYBIT_API_SECRET)
+    signature = sign_request(base_params, BYBIT_API_SECRET)
 
     headers = {
         "X-BYBIT-API-KEY": BYBIT_API_KEY,
@@ -43,21 +41,21 @@ async def signed_request(method: str, endpoint: str, params: dict):
 
     url = f"{BYBIT_API_URL}{endpoint}"
     log(f"🔗 {method} {url}")
-    log(f"📦 Params (for signing): {signing_params}")
-    log(f"📦 Headers (for request): {headers}")
-    log(f"📦 Sending Body (only clean params): {params}")
+    log(f"📦 Headers: {headers}")
+    log(f"📦 Params/Body: {params}")
 
-async with aiohttp.ClientSession() as session:
-    if method == "GET":
-        async with session.get(url, headers=headers, params=params) as resp:
-            response = await resp.json()
-            log(f"📨 Response: {response}")
-            return response
-    elif method == "POST":
-        async with session.post(url, headers=headers, json=params) as resp:
-            response = await resp.json()
-            log(f"📨 Response: {response}")
-            return response
+    async with aiohttp.ClientSession() as session:
+        if method == "GET":
+            async with session.get(url, headers=headers, params=params) as resp:
+                response = await resp.json()
+                log(f"📨 Response: {response}")
+                return response
+        elif method == "POST":
+            async with session.post(url, headers=headers, json=params) as resp:
+                response = await resp.json()
+                log(f"📨 Response: {response}")
+                return response
+
 
 
     async with aiohttp.ClientSession() as session:
