@@ -61,7 +61,7 @@ async def run_bot():
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
 
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | TFs: {tf_scores} | Type: {trade_type} | Dir: {direction} | Conf: {confidence}%")
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | Type: {trade_type} | Direction: {direction} | Confidence: {confidence}%")
 
                 pump_data = await detect_early_pump(candles_by_tf, symbol)
                 if pump_data["trigger_count"] >= 3:
@@ -72,34 +72,24 @@ async def run_bot():
                         f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
                     )
 
-                if trade_type == "Scalp" and score < MIN_SCALP_SCORE:
-                    continue
-                if trade_type == "Intraday" and score < MIN_INTRADAY_SCORE:
-                    continue
-                if trade_type == "Swing" and score < MIN_SWING_SCORE:
+                if (trade_type == "Scalp" and score < MIN_SCALP_SCORE) or \
+                   (trade_type == "Intraday" and score < MIN_INTRADAY_SCORE) or \
+                   (trade_type == "Swing" and score < MIN_SWING_SCORE):
                     continue
 
                 if symbol in active_signals:
                     data = active_signals[symbol]
                     data['score_history'].append(score)
-                    if trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Scalp.")
+                    exit_required = (
+                        (trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:])) or
+                        (trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:])) or
+                        (trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]))
+                    )
+                    if exit_required:
+                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped.")
                         del active_signals[symbol]
                         recent_exits[symbol] = EXIT_COOLDOWN
                         await log_trade_result(symbol, "loss", -1.0)
-                        continue
-                    if trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Intraday.")
-                        del active_signals[symbol]
-                        recent_exits[symbol] = EXIT_COOLDOWN
-                        await log_trade_result(symbol, "loss", -2.0)
-                        continue
-                    if trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]):
-                        await send_telegram_message(f"❌ Exit {symbol} | Score dropped on Swing.")
-                        del active_signals[symbol]
-                        recent_exits[symbol] = EXIT_COOLDOWN
-                        await log_trade_result(symbol, "loss", -3.0)
-                        continue
                     continue
 
                 if not is_duplicate_signal(symbol):
@@ -135,7 +125,7 @@ async def run_bot():
                         'score_history': [score]
                     }
 
-                    # ✅ Correct placement of trade execution
+                    # ✅ Execute trade properly
                     trade = await execute_trade_if_valid({
                         "symbol": symbol,
                         "price": price,
@@ -157,5 +147,5 @@ async def run_bot():
         await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
-    log("🔧 DEBUG TEST: main.py is running...")
+    log("🔧 DEBUG: main.py is running...")
     asyncio.run(run_bot())
