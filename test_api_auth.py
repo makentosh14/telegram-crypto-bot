@@ -5,13 +5,13 @@ import hmac
 import hashlib
 import json
 
-# API credentials
+# Your API credentials
 API_KEY = "9LSEH2ZksKPSk1fJud"
 API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
 BASE_URL = "https://api.bybit.com"
 
-def sign_message(secret, timestamp, method, endpoint, body=""):
-    payload = f"{timestamp}{method}{endpoint}{body}"
+def sign_payload(secret, timestamp, method, path, body=""):
+    payload = f"{timestamp}{method}{path}{body}"
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 async def signed_request(method, endpoint, params=None):
@@ -20,13 +20,16 @@ async def signed_request(method, endpoint, params=None):
 
     timestamp = str(int(time.time() * 1000))
     if method == "GET":
-        body_str = ""
-        query = "?" + "&".join([f"{k}={v}" for k, v in sorted(params.items())]) if params else ""
+        body = ""
+        query_string = "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items())) if params else ""
     else:
-        body_str = json.dumps(params)
-        query = ""
+        body = json.dumps(params)
+        query_string = ""
 
-    signature = sign_message(API_SECRET, timestamp, method.upper(), endpoint, body_str if method == "POST" else "")
+    # Full path for signing
+    full_path = endpoint + (query_string if method == "GET" else "")
+
+    signature = sign_payload(API_SECRET, timestamp, method.upper(), endpoint, body if method == "POST" else "")
 
     headers = {
         "X-BYBIT-API-KEY": API_KEY,
@@ -36,17 +39,15 @@ async def signed_request(method, endpoint, params=None):
         "Content-Type": "application/json"
     }
 
-    url = BASE_URL + endpoint + (query if method == "GET" else "")
-    
+    url = BASE_URL + endpoint + (query_string if method == "GET" else "")
+
     async with aiohttp.ClientSession() as session:
         if method == "GET":
             async with session.get(url, headers=headers) as resp:
                 return resp.status, await resp.text()
         elif method == "POST":
-            async with session.post(url, headers=headers, data=body_str) as resp:
+            async with session.post(url, headers=headers, data=body) as resp:
                 return resp.status, await resp.text()
-        else:
-            raise ValueError("Unsupported HTTP method.")
 
 async def main():
     print("🔍 Testing /v5/account/wallet-balance ...")
