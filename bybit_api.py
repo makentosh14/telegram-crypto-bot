@@ -19,25 +19,42 @@ def sign_request(params: dict, secret: str):
     return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
 async def signed_request(method: str, endpoint: str, params: dict):
+    from config import BYBIT_API_KEY, BYBIT_API_SECRET
+
     timestamp = str(await get_server_time())
 
-    base_params = {
+    # Separate signing params and sending params
+    signing_params = {
         "api_key": BYBIT_API_KEY,
         "timestamp": timestamp,
         "recvWindow": "5000",
         **params
     }
 
-    signature = sign_request(base_params, BYBIT_API_SECRET)
-    base_params["sign"] = signature
+    signature = sign_request(signing_params, BYBIT_API_SECRET)
 
     headers = {
+        "X-BYBIT-API-KEY": BYBIT_API_KEY,
+        "X-BYBIT-API-TIMESTAMP": timestamp,
+        "X-BYBIT-API-SIGN": signature,
+        "X-BYBIT-API-RECV-WINDOW": "5000",
         "Content-Type": "application/json"
     }
 
     url = f"{BYBIT_API_URL}{endpoint}"
-    log(f"\ud83d\udd17 {method} {url}")
-    log(f"\ud83d\udcc6 Params: {base_params}")
+    log(f"🔗 {method} {url}")
+    log(f"📦 Params (for signing): {signing_params}")
+    log(f"📦 Headers (for request): {headers}")
+    log(f"📦 Sending Body (only clean params): {params}")
+
+    async with aiohttp.ClientSession() as session:
+        if method == "GET":
+            async with session.get(url, params=params, headers=headers) as resp:
+                return await resp.json()
+        elif method == "POST":
+            async with session.post(url, json=params, headers=headers) as resp:
+                return await resp.json()
+
 
     async with aiohttp.ClientSession() as session:
         if method.upper() == "GET":
