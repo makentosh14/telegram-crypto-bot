@@ -1,9 +1,14 @@
 # bybit_api_async.py (FULLY FIXED for 2025 Bybit REST v5)
 
+import aiohttp
+import asyncio
 import time
 import hmac
 import hashlib
-import aiohttp
+import os
+
+# Now your code can run asyncio.run(main()) correctly
+
 
 from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
 
