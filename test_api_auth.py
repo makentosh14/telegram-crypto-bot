@@ -1,72 +1,74 @@
+# test_api_auth.py
 import aiohttp
 import asyncio
 import time
 import hmac
 import hashlib
 import json
+import os
 
-# Your API credentials
-API_KEY = "9LSEH2ZksKPSk1fJud"
-API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
+# === CONFIG ===
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY") or "YOUR_API_KEY"
+BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET") or "YOUR_API_SECRET"
 BASE_URL = "https://api.bybit.com"
 
-def sign_payload(secret, timestamp, method, path, body=""):
-    payload = f"{timestamp}{method}{path}{body}"
+RECV_WINDOW = "5000"
+
+# === SIGNATURE GENERATION ===
+def generate_signature(timestamp, api_key, recv_window, body, secret):
+    payload = str(timestamp) + api_key + recv_window + body
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
-async def signed_request(method, endpoint, params=None):
-    if params is None:
-        params = {}
+# === SIGNED REQUEST ===
+async def signed_request(method, endpoint, body_dict=None):
+    if body_dict is None:
+        body_dict = {}
+
+    body_json = json.dumps(body_dict) if body_dict else ""
 
     timestamp = str(int(time.time() * 1000))
-    if method == "GET":
-        body = ""
-        query_string = "?" + "&".join(f"{k}={v}" for k, v in sorted(params.items())) if params else ""
-    else:
-        body = json.dumps(params)
-        query_string = ""
-
-    # Full path for signing
-    full_path = endpoint + (query_string if method == "GET" else "")
-
-    signature = sign_payload(API_SECRET, timestamp, method.upper(), endpoint, body if method == "POST" else "")
+    signature = generate_signature(timestamp, BYBIT_API_KEY, RECV_WINDOW, body_json, BYBIT_API_SECRET)
 
     headers = {
-        "X-BYBIT-API-KEY": API_KEY,
-        "X-BYBIT-API-SIGN": signature,
+        "X-BYBIT-API-KEY": BYBIT_API_KEY,
         "X-BYBIT-API-TIMESTAMP": timestamp,
-        "X-BYBIT-API-RECV-WINDOW": "5000",
+        "X-BYBIT-API-SIGN": signature,
+        "X-BYBIT-API-RECV-WINDOW": RECV_WINDOW,
         "Content-Type": "application/json"
     }
 
-    url = BASE_URL + endpoint + (query_string if method == "GET" else "")
+    url = BASE_URL + endpoint
 
     async with aiohttp.ClientSession() as session:
         if method == "GET":
             async with session.get(url, headers=headers) as resp:
-                return resp.status, await resp.text()
+                print(f"\n🔗 [GET] {endpoint}")
+                print(f"✅ Status: {resp.status}")
+                print(f"📨 Response: {await resp.text()}")
         elif method == "POST":
-            async with session.post(url, headers=headers, data=body) as resp:
-                return resp.status, await resp.text()
+            async with session.post(url, headers=headers, data=body_json) as resp:
+                print(f"\n🔗 [POST] {endpoint}")
+                print(f"✅ Status: {resp.status}")
+                print(f"📨 Response: {await resp.text()}")
+        else:
+            raise ValueError("Unsupported method")
 
+# === MAIN TEST ===
 async def main():
-    print("🔍 Testing /v5/account/wallet-balance ...")
-    status, response = await signed_request("GET", "/v5/account/wallet-balance", {
-        "accountType": "UNIFIED"
-    })
-    print(f"✅ Status: {status}\n📨 Response: {response}\n")
+    print("🚀 Testing Bybit v5 API Connection...")
 
-    print("🔍 Testing /v5/order/cancel-all ...")
-    status, response = await signed_request("POST", "/v5/order/cancel-all", {
+    # Test Wallet Balance
+    await signed_request("GET", "/v5/account/wallet-balance")
+
+    # Test Cancel All Orders (linear futures)
+    await signed_request("POST", "/v5/order/cancel-all", {
         "category": "linear"
     })
-    print(f"✅ Status: {status}\n📨 Response: {response}\n")
 
-    print("🔍 Testing /v5/position/list ...")
-    status, response = await signed_request("GET", "/v5/position/list", {
+    # Test Position List (linear futures)
+    await signed_request("GET", "/v5/position/list", {
         "category": "linear"
     })
-    print(f"✅ Status: {status}\n📨 Response: {response}\n")
 
 if __name__ == "__main__":
     asyncio.run(main())
