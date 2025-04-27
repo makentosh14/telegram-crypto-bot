@@ -1,37 +1,27 @@
-# test_trade.py
-
 import asyncio
-import sys
-from trade_executor import execute_trade_if_valid
-from trend_filters import get_trend_context
+from bybit_api_async import place_market_order
+from logger import log
 
 async def test_trade():
-    if len(sys.argv) < 4:
-        print("Usage: python test_trade.py <symbol> <side> <score>")
-        print("Example: python test_trade.py BTCUSDT long 5")
-        return
+    symbol = "BTCUSDT"   # ← Change to any tradable symbol you want to test
+    qty = 0.0001          # ← Adjust quantity for small test
+    side = "Buy"         # ← "Buy" or "Sell"
+    market_type = "linear"  # "linear" for futures, "spot" for spot market
 
-    symbol = sys.argv[1].upper()
-    side = sys.argv[2].lower()
-    score = int(sys.argv[3])
+    log(f"🚀 Sending {side} market order for {symbol} | Qty: {qty}")
 
-    # Fake TF score map
-    tf_scores = {"1": score}
+    result = await place_market_order(
+        symbol=symbol,
+        side=side,
+        qty=qty,
+        market_type=market_type,
+        reduce_only=False
+    )
 
-    # Simulate current trend
-    trend_context = get_trend_context()
-
-    signal = {
-        "symbol": symbol,
-        "score": score,
-        "tf_scores": tf_scores,
-        "btc_trend": trend_context["btc_trend"],
-        "altseason": trend_context["altseason"],
-        "side": side  # Optional, in case your executor uses it
-    }
-
-    print(f"🚀 Executing test trade for {symbol} with score {score} and trend: {trend_context}")
-    await execute_trade_if_valid(signal, max_risk=0.005)  # 0.5% risk
+    if result and result.get("retCode") == 0:
+        log(f"✅ Test Trade Successful: {result}")
+    else:
+        log(f"❌ Test Trade Failed: {result}")
 
 if __name__ == "__main__":
     asyncio.run(test_trade())
