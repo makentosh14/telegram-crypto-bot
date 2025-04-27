@@ -5,9 +5,14 @@ import asyncio
 from config import TELEGRAM_ASSISTANT_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 
+
 def log(msg, level="INFO"):
-    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] [{level}] {msg}")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        print(f"[{timestamp}] [{level}] {msg}")
+    except UnicodeEncodeError:
+        print(f"[{timestamp}] [{level}] {msg.encode('utf-8', 'ignore').decode('utf-8')}", file=sys.stderr)
+
 
     # Optionally forward to Telegram assistant channel
     if TELEGRAM_ASSISTANT_CHAT_ID and level in ["ERROR", "ALERT"]:
