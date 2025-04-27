@@ -1,5 +1,5 @@
 import asyncio
-from bybit_api_async import place_market_order
+from bybit_api import place_market_order
 from logger import log
 
 async def test_trade():
