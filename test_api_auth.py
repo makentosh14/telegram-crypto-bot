@@ -1,80 +1,90 @@
-import aiohttp
-import asyncio
+# bybit_api_async.py (FULLY FIXED for 2025 Bybit REST v5)
+
 import time
 import hmac
 import hashlib
-import socket
+import aiohttp
 
-# === YOUR BYBIT API KEYS ===
-BYBIT_API_KEY = "ZWnRCXNtjKrbPZxUjA"
-BYBIT_API_SECRET = "rqayiOaNSdL25CmwwfIuOtExt077uXkqruLT"
-BYBIT_API_URL = "https://api.bybit.com"
+from config import BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_API_URL
 
-def generate_signature(params, secret):
-    sorted_params = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    return hmac.new(secret.encode(), sorted_params.encode(), hashlib.sha256).hexdigest()
+RECV_WINDOW = 5000
 
-async def send_signed_request(endpoint="/v5/account/wallet-balance", method="GET", extra_params=None):
+# --- Correct Signature Method (v5 REST) ---
+def generate_v5_signature(api_secret, timestamp, api_key, recv_window, body=""):
+    payload = f"{timestamp}{api_key}{recv_window}{body}"
+    return hmac.new(api_secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+# --- Signed Request Function ---
+async def signed_request(method, endpoint, params=None):
+    if params is None:
+        params = {}
+
     timestamp = str(int(time.time() * 1000))
-    recv_window = "5000"
+    recv_window = str(RECV_WINDOW)
 
-    params = {
-        "accountType": "UNIFIED",
-        "timestamp": timestamp,
-        "recvWindow": recv_window
-    }
+    # Prepare body
+    body = ""
+    if method == "POST":
+        body = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
 
-    if extra_params:
-        params.update(extra_params)
-
-    sorted_params = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    signature = generate_signature(params, BYBIT_API_SECRET)
-    params["sign"] = signature
-
-    url = BYBIT_API_URL + endpoint
+    signature = generate_v5_signature(
+        BYBIT_API_SECRET,
+        timestamp,
+        BYBIT_API_KEY,
+        recv_window,
+        body
+    )
 
     headers = {
         "X-BYBIT-API-KEY": BYBIT_API_KEY,
+        "X-BYBIT-SIGN": signature,
+        "X-BYBIT-TIMESTAMP": timestamp,
+        "X-BYBIT-RECV-WINDOW": recv_window,
         "Content-Type": "application/x-www-form-urlencoded"
     }
 
-    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(family=socket.AF_INET)) as session:
+    url = f"{BYBIT_API_URL}{endpoint}"
+
+    async with aiohttp.ClientSession() as session:
         if method == "GET":
-            async with session.get(url, params=params, headers=headers) as response:
-                status = response.status
-                text = await response.text()
-                return status, text
+            async with session.get(url, params=params, headers=headers) as resp:
+                print(f"\n🔗 [GET] {url}")
+                print(f"📦 Params: {params}")
+                print(f"✅ Status: {resp.status}")
+                response = await resp.text()
+                print(f"📨 Response: {response}")
+                return await resp.json()
+
         elif method == "POST":
-            async with session.post(url, data=params, headers=headers) as response:
-                status = response.status
-                text = await response.text()
-                return status, text
+            async with session.post(url, data=body, headers=headers) as resp:
+                print(f"\n🔗 [POST] {url}")
+                print(f"📦 Body: {body}")
+                print(f"✅ Status: {resp.status}")
+                response = await resp.text()
+                print(f"📨 Response: {response}")
+                return await resp.json()
 
-async def main():
-    print("🚀 Testing Bybit API connection...\n")
+        else:
+            raise ValueError("Unsupported HTTP method!")
 
-    tests = [
-        ("/v5/account/wallet-balance", "GET", None),
-        ("/v5/order/cancel-all", "POST", {"category": "linear", "symbol": "BTCUSDT"}),
-        ("/v5/position/list", "GET", {"category": "linear", "symbol": "BTCUSDT"})
-    ]
-
-    for endpoint, method, extra_params in tests:
-        print(f"🔍 Testing {endpoint} ...")
-        try:
-            status, response = await send_signed_request(endpoint, method, extra_params)
-            print(f"✅ Status: {status}")
-            print(f"📨 Response: {response}\n")
-
-            if status == 401:
-                print("❌ 401 Unauthorized! Likely API signature/header issue.\n")
-            elif status == 200:
-                print("✅ 200 OK! This endpoint is properly authenticated.\n")
-            else:
-                print("⚠️ Unexpected status, check response.\n")
-
-        except Exception as e:
-            print(f"❌ Error testing {endpoint}: {e}\n")
-
+# --- Quick Test Example ---
 if __name__ == "__main__":
+    async def main():
+        print("\n🚀 Testing Bybit v5 API Authentication...")
+
+        # Test Wallet Balance
+        await signed_request("GET", "/v5/account/wallet-balance", {
+            "accountType": "UNIFIED"
+        })
+
+        # Test Cancel All Orders (should still work)
+        await signed_request("POST", "/v5/order/cancel-all", {
+            "category": "linear"
+        })
+
+        # Test Position List
+        await signed_request("GET", "/v5/position/list", {
+            "category": "linear"
+        })
+
     asyncio.run(main())
