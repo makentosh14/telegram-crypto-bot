@@ -7,8 +7,8 @@ import hashlib
 import json
 import os
 
-BYBIT_API_KEY = os.getenv("BYBIT_API_KEY") or "YOUR_API_KEY"
-BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET") or "YOUR_API_SECRET"
+BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"
+BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
 BASE_URL = "https://api.bybit.com"
 
 RECV_WINDOW = "5000"
