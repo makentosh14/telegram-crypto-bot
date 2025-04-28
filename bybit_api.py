@@ -1,9 +1,8 @@
-import aiohttp
+import httpx
 import hmac
 import hashlib
 import json
 import time
-import socket
 from logger import log
 
 # === CONFIG ===
@@ -15,11 +14,10 @@ BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"  # <-- Replace if need
 # === UTILS ===
 
 async def get_server_time():
-    connector = aiohttp.TCPConnector(family=socket.AF_INET)
-    async with aiohttp.ClientSession(connector=connector) as session:
-        async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
-            data = await resp.json()
-            return int(data["time"])
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{BYBIT_API_URL}/v5/market/time")
+        data = resp.json()
+        return int(data["time"])
 
 def create_signature(api_secret, payload):
     return hmac.new(api_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -52,20 +50,17 @@ async def signed_request(method, endpoint, params=None):
     log(f"📦 Headers: {headers}")
     log(f"📦 Body: {body}")
 
-    connector = aiohttp.TCPConnector(family=socket.AF_INET)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    async with httpx.AsyncClient() as client:
         if method.upper() == "GET":
-            async with session.get(url, headers=headers, params=params) as resp:
-                response = await resp.json()
-                log(f"📨 Response: {response}")
-                return response
+            response = await client.get(url, headers=headers, params=params)
         elif method.upper() == "POST":
-            async with session.post(url, headers=headers, data=body) as resp:
-                response = await resp.json()
-                log(f"📨 Response: {response}")
-                return response
+            response = await client.post(url, headers=headers, content=body)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
+
+        result = response.json()
+        log(f"📨 Response: {result}")
+        return result
 
 # === TRADING FUNCTIONS ===
 
