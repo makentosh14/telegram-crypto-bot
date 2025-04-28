@@ -5,13 +5,15 @@ import hmac
 import hashlib
 import json
 import time
+import socket
 from config import BYBIT_API_URL, BYBIT_API_KEY, BYBIT_API_SECRET
 from logger import log
 
 # === UTILS ===
 
 async def get_server_time():
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    async with aiohttp.ClientSession(connector=connector) as session:
         async with session.get(f"{BYBIT_API_URL}/v5/market/time") as resp:
             data = await resp.json()
             return int(data["time"])
@@ -46,7 +48,8 @@ async def signed_request(method, endpoint, params=None):
     log(f"📦 Headers: {headers}")
     log(f"📦 Params/Body: {params}")
 
-    async with aiohttp.ClientSession() as session:
+    connector = aiohttp.TCPConnector(family=socket.AF_INET)
+    async with aiohttp.ClientSession(connector=connector) as session:
         if method.upper() == "GET":
             async with session.get(url, headers=headers, params=params) as resp:
                 response = await resp.json()
