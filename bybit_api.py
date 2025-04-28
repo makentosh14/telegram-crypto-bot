@@ -8,10 +8,11 @@ import time
 import socket
 from logger import log
 
-BYBIT_API_URL = "https://api.bybit.com"
-BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"
-BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
+# === CONFIG ===
 
+BYBIT_API_URL = "https://api.bybit.com"
+BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"     # <-- Replace if needed
+BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"  # <-- Replace if needed
 
 # === UTILS ===
 
@@ -35,6 +36,7 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
+    # IMPORTANT: Use compact JSON body without spaces
     body = json.dumps(params, separators=(",", ":"))
 
     sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
@@ -114,9 +116,13 @@ async def set_margin_mode(symbol, mode="ISOLATED"):
     }
     return await signed_request("POST", endpoint, params)
 
-async def get_open_positions():
+async def get_open_positions(symbol=None, settleCoin="USDT"):
     endpoint = "/v5/position/list"
     params = {"category": "linear"}
+    if symbol:
+        params["symbol"] = symbol
+    else:
+        params["settleCoin"] = settleCoin
     result = await signed_request("GET", endpoint, params)
     return result.get("result", {}).get("list", [])
 
