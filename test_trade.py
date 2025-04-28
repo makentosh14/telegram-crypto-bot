@@ -1,6 +1,9 @@
 import asyncio
 from bybit_api import place_market_order
 from logger import log
+import bybit_api_async
+bybit_api.BYBIT_API_KEY = TEST_API_KEY
+bybit_api.BYBIT_API_SECRET = TEST_API_SECRET
 
 async def test_trade():
     symbol = "BTCUSDT"   # ← Change to any tradable symbol you want to test
