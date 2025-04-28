@@ -1,5 +1,3 @@
-# bybit_api_async.py
-
 import aiohttp
 import hmac
 import hashlib
@@ -11,7 +9,7 @@ from logger import log
 # === CONFIG ===
 
 BYBIT_API_URL = "https://api.bybit.com"
-BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"     # <-- Replace if needed
+BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"  # <-- Replace if needed
 BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"  # <-- Replace if needed
 
 # === UTILS ===
@@ -36,7 +34,7 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    # IMPORTANT: Use compact JSON body without spaces
+    # Create compact JSON body for signing and sending
     body = json.dumps(params, separators=(",", ":"))
 
     sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
@@ -52,7 +50,7 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {url}")
     log(f"📦 Headers: {headers}")
-    log(f"📦 Params/Body: {params}")
+    log(f"📦 Body: {body}")
 
     connector = aiohttp.TCPConnector(family=socket.AF_INET)
     async with aiohttp.ClientSession(connector=connector) as session:
@@ -62,7 +60,7 @@ async def signed_request(method, endpoint, params=None):
                 log(f"📨 Response: {response}")
                 return response
         elif method.upper() == "POST":
-            async with session.post(url, headers=headers, json=params) as resp:
+            async with session.post(url, headers=headers, data=body) as resp:
                 response = await resp.json()
                 log(f"📨 Response: {response}")
                 return response
