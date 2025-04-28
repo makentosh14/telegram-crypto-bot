@@ -6,8 +6,12 @@ import hashlib
 import json
 import time
 import socket
-from config import BYBIT_API_URL, BYBIT_API_KEY, BYBIT_API_SECRET
 from logger import log
+
+BYBIT_API_URL = "https://api.bybit.com"
+BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"
+BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
+
 
 # === UTILS ===
 
