@@ -4,8 +4,11 @@ import aiohttp
 import hmac
 import hashlib
 import json
+import time
 from config import BYBIT_API_URL, BYBIT_API_KEY, BYBIT_API_SECRET
 from logger import log
+
+# === UTILS ===
 
 async def get_server_time():
     async with aiohttp.ClientSession() as session:
@@ -13,74 +16,49 @@ async def get_server_time():
             data = await resp.json()
             return int(data["time"])
 
-def sign_request(params: dict, secret: str):
-    sorted_params = dict(sorted(params.items()))
-    query_string = "&".join([f"{k}={v}" for k, v in sorted_params.items()])
-    return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+def create_signature(api_secret, payload):
+    return hmac.new(api_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+# === SIGNED REQUEST ===
 
 async def signed_request(method, endpoint, params=None):
     if params is None:
         params = {}
 
-    url = BASE_URL + endpoint
-
+    url = BYBIT_API_URL + endpoint
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    payload = {
-        "category": params.get("category"),
-        "symbol": params.get("symbol"),
-        "side": params.get("side"),
-        "orderType": params.get("orderType"),
-        "qty": params.get("qty"),
-        "timeInForce": params.get("timeInForce"),
-        "reduceOnly": params.get("reduceOnly", False)
-    }
+    body = json.dumps(params)
 
-    # Remove None values
-    payload = {k: v for k, v in payload.items() if v is not None}
-
-    body = json.dumps(payload)
-
-    # Create signature
-    sign_payload = timestamp + API_KEY + recv_window + body
-    signature = hmac.new(
-        API_SECRET.encode("utf-8"),
-        sign_payload.encode("utf-8"),
-        hashlib.sha256
-    ).hexdigest()
+    sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
+    signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
     headers = {
-        "X-BYBIT-API-KEY": API_KEY,
+        "X-BYBIT-API-KEY": BYBIT_API_KEY,
         "X-BYBIT-API-SIGN": signature,
         "X-BYBIT-API-TIMESTAMP": timestamp,
         "X-BYBIT-API-RECV-WINDOW": recv_window,
         "Content-Type": "application/json"
     }
 
-    async with aiohttp.ClientSession() as session:
-        if method == "POST":
-            async with session.post(url, headers=headers, data=body) as resp:
-                return await resp.json()
-        elif method == "GET":
-            async with session.get(url, headers=headers, params=payload) as resp:
-                return await resp.json()
-                log(f"📨 Response: {response}")
-                return response
-
-
+    log(f"🔗 {method} {url}")
+    log(f"📦 Headers: {headers}")
+    log(f"📦 Params/Body: {params}")
 
     async with aiohttp.ClientSession() as session:
         if method.upper() == "GET":
-            async with session.get(url, params=base_params, headers=headers) as resp:
-                result = await resp.json()
-                log(f"\ud83d\udce6 Response: {result}")
-                return result
+            async with session.get(url, headers=headers, params=params) as resp:
+                response = await resp.json()
+                log(f"📨 Response: {response}")
+                return response
         elif method.upper() == "POST":
-            async with session.post(url, json=base_params, headers=headers) as resp:
-                result = await resp.json()
-                log(f"\ud83d\udce6 Response: {result}")
-                return result
+            async with session.post(url, headers=headers, data=body) as resp:
+                response = await resp.json()
+                log(f"📨 Response: {response}")
+                return response
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
 
 # === TRADING FUNCTIONS ===
 
@@ -107,7 +85,7 @@ async def get_balance(asset="USDT", wallet_type="UNIFIED"):
             if coin["coin"] == asset:
                 return float(coin["availableToWithdraw"])
     except Exception as e:
-        log(f"\u274c Failed to parse balance: {e}")
+        log(f"❌ Failed to parse balance: {e}")
     return 0
 
 async def set_leverage(symbol, buy_leverage=5, sell_leverage=5):
@@ -152,7 +130,7 @@ async def get_open_orders(symbol, category="linear"):
     result = await signed_request("GET", endpoint, params)
     return result.get("result", {}).get("list", [])
 
-# Helper
+# === HELPER ===
 
 def get_category_for_symbol(symbol):
     return "linear" if symbol.endswith("USDT") else "spot"
