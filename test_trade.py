@@ -3,10 +3,10 @@ from bybit_api import place_market_order
 from logger import log
 
 async def test_trade():
-    symbol = "BTCUSDT"      # Trading Futures (Perpetual)
-    qty = 0.0001            # Small test quantity (~$6–$7)
-    side = "Buy"            # Buy position
-    market_type = "linear"  # "linear" = Futures market
+    symbol = "BTCUSDT"   # ← Change to any tradable symbol you want to test
+    qty = 0.0001         # ← Adjust quantity for small test
+    side = "Buy"         # ← "Buy" or "Sell"
+    market_type = "linear"  # "linear" for futures, "spot" for spot market
 
     log(f"🚀 Sending {side} market order for {symbol} | Qty: {qty}")
 
@@ -19,12 +19,21 @@ async def test_trade():
             reduce_only=False
         )
 
-        if result and result.get("retCode") == 0:
+        if result is None:
+            log(f"❌ No response received from Bybit!")
+            return
+
+        if result.get("retCode") == 0:
             log(f"✅ Test Trade Successful: {result}")
         else:
             log(f"❌ Test Trade Failed: {result}")
+            if "retMsg" in result:
+                log(f"⚠️ Reason: {result['retMsg']}")
+            else:
+                log(f"⚠️ No specific reason provided by Bybit!")
+
     except Exception as e:
-        log(f"⛔ Error during test trade: {str(e)}")
+        log(f"❌ Exception occurred during test trade: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test_trade())
