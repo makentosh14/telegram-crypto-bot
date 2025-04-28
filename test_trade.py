@@ -1,10 +1,15 @@
 import asyncio
+import bybit_api  # Import the whole module so we can override keys
 from bybit_api import place_market_order
 from logger import log
 
+# === Test API keys (override the ones in bybit_api.py) ===
 TEST_API_KEY = "9LSEH2ZksKPSk1fJud"
 TEST_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
 
+# Monkey patch (override the imported bybit_api variables)
+bybit_api.BYBIT_API_KEY = TEST_API_KEY
+bybit_api.BYBIT_API_SECRET = TEST_API_SECRET
 
 async def test_trade():
     symbol = "BTCUSDT"   # ← Change to any tradable symbol you want to test
@@ -37,7 +42,3 @@ async def test_trade():
                 log(f"⚠️ No specific reason provided by Bybit!")
 
     except Exception as e:
-        log(f"❌ Exception occurred during test trade: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(test_trade())
