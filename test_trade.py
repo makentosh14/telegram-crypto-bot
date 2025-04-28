@@ -1,7 +1,7 @@
 import asyncio
 from bybit_api import place_market_order
 from logger import log
-import bybit_api_async
+import bybit_api
 bybit_api.BYBIT_API_KEY = API_KEY
 bybit_api.BYBIT_API_SECRET = API_SECRET
 
