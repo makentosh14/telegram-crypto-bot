@@ -1,8 +1,12 @@
+import asyncio
+from bybit_api import place_market_order
+from logger import log
+
 async def test_trade():
-    symbol = "BTCUSDT"
-    qty = 0.0001
-    side = "Buy"
-    market_type = "linear"
+    symbol = "BTCUSDT"      # Trading Futures (Perpetual)
+    qty = 0.0001            # Small test quantity (~$6–$7)
+    side = "Buy"            # Buy position
+    market_type = "linear"  # "linear" = Futures market
 
     log(f"🚀 Sending {side} market order for {symbol} | Qty: {qty}")
 
@@ -21,3 +25,6 @@ async def test_trade():
             log(f"❌ Test Trade Failed: {result}")
     except Exception as e:
         log(f"⛔ Error during test trade: {str(e)}")
+
+if __name__ == "__main__":
+    asyncio.run(test_trade())
