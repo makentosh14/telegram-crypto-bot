@@ -53,7 +53,7 @@ async def signed_request(method, endpoint, params=None):
                 log(f"📨 Response: {response}")
                 return response
         elif method.upper() == "POST":
-            async with session.post(url, headers=headers, data=body) as resp:
+            async with session.post(url, headers=headers, json=params) as resp:
                 response = await resp.json()
                 log(f"📨 Response: {response}")
                 return response
