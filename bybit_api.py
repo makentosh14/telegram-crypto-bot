@@ -35,7 +35,7 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    body = json.dumps(params)
+    body = json.dumps(params, separators=(",", ":"))
 
     sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
