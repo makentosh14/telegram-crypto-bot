@@ -42,3 +42,7 @@ async def test_trade():
                 log(f"⚠️ No specific reason provided by Bybit!")
 
     except Exception as e:
+        log(f"❌ Exception occurred during test trade: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(test_trade())
