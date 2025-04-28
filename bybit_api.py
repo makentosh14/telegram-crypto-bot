@@ -18,41 +18,53 @@ def sign_request(params: dict, secret: str):
     query_string = "&".join([f"{k}={v}" for k, v in sorted_params.items()])
     return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
-async def signed_request(method: str, endpoint: str, params: dict):
-    from config import BYBIT_API_KEY, BYBIT_API_SECRET
-    import aiohttp
+async def signed_request(method, endpoint, params=None):
+    if params is None:
+        params = {}
 
-    # Prepare timestamp and signature
-    timestamp = str(await get_server_time())
-    base_params = {
-        "timestamp": timestamp,
-        "recvWindow": "5000",
-        **params
+    url = BASE_URL + endpoint
+
+    timestamp = str(int(time.time() * 1000))
+    recv_window = "5000"
+
+    payload = {
+        "category": params.get("category"),
+        "symbol": params.get("symbol"),
+        "side": params.get("side"),
+        "orderType": params.get("orderType"),
+        "qty": params.get("qty"),
+        "timeInForce": params.get("timeInForce"),
+        "reduceOnly": params.get("reduceOnly", False)
     }
-    signature = sign_request(base_params, BYBIT_API_SECRET)
+
+    # Remove None values
+    payload = {k: v for k, v in payload.items() if v is not None}
+
+    body = json.dumps(payload)
+
+    # Create signature
+    sign_payload = timestamp + API_KEY + recv_window + body
+    signature = hmac.new(
+        API_SECRET.encode("utf-8"),
+        sign_payload.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
 
     headers = {
-        "X-BYBIT-API-KEY": BYBIT_API_KEY,
-        "X-BYBIT-API-TIMESTAMP": timestamp,
+        "X-BYBIT-API-KEY": API_KEY,
         "X-BYBIT-API-SIGN": signature,
-        "X-BYBIT-API-RECV-WINDOW": "5000",
+        "X-BYBIT-API-TIMESTAMP": timestamp,
+        "X-BYBIT-API-RECV-WINDOW": recv_window,
         "Content-Type": "application/json"
     }
 
-    url = f"{BYBIT_API_URL}{endpoint}"
-    log(f"🔗 {method} {url}")
-    log(f"📦 Headers: {headers}")
-    log(f"📦 Params/Body: {params}")
-
     async with aiohttp.ClientSession() as session:
-        if method == "GET":
-            async with session.get(url, headers=headers, params=params) as resp:
-                response = await resp.json()
-                log(f"📨 Response: {response}")
-                return response
-        elif method == "POST":
-            async with session.post(url, headers=headers, json=params) as resp:
-                response = await resp.json()
+        if method == "POST":
+            async with session.post(url, headers=headers, data=body) as resp:
+                return await resp.json()
+        elif method == "GET":
+            async with session.get(url, headers=headers, params=payload) as resp:
+                return await resp.json()
                 log(f"📨 Response: {response}")
                 return response
 
