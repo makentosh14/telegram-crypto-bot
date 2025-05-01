@@ -25,7 +25,6 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    # Sign compact JSON for POST or query string for GET
     if method.upper() == "GET":
         query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{query_string}"
@@ -39,13 +38,12 @@ async def signed_request(method, endpoint, params=None):
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
     headers = {
-        "x-bybit-api-key": BYBIT_API_KEY,
-        "x-bybit-api-sign": signature,
-        "x-bybit-api-timestamp": timestamp,
-        "x-bybit-api-recv-window": recv_window,
-        "content-type": "application/json"
+        "X-BAPI-API-KEY": BYBIT_API_KEY,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-TIMESTAMP": timestamp,
+        "X-BAPI-RECV-WINDOW": recv_window,
+        "Content-Type": "application/json"
     }
-
 
     log(f"🔗 {method} {full_url}")
     log(f"📦 Headers: {headers}")
@@ -59,7 +57,7 @@ async def signed_request(method, endpoint, params=None):
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
         elif method.upper() == "POST":
-            response = await client.post(full_url, headers=headers, json=params)
+            response = await client.post(full_url, headers=headers, data=body)
         else:
             raise ValueError("Unsupported HTTP method")
 
@@ -76,5 +74,5 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "orderType": "Market",
         "qty": str(qty),
         "timeInForce": "IOC",
-        "reduceOnly": reduce_only  # ✅ keep this boolean for proper JSON encoding
+        "reduceOnly": reduce_only
     })
