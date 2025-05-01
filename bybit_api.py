@@ -51,8 +51,8 @@ async def signed_request(method, endpoint, params=None):
     async with httpx.AsyncClient() as client:
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
-        elif method.upper() == "POST":
-            response = await client.post(full_url, headers=headers, content=body)
+       elif method.upper() == "POST":
+            response = await client.post(full_url, headers=headers, json=params)
         else:
             raise ValueError("Unsupported HTTP method")
 
