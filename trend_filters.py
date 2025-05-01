@@ -7,7 +7,7 @@ async def fetch_kline(symbol, interval='60', limit=3, category='linear'):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             data = await resp.json()
-            return data['result']['list'] if data['retCode'] == 0 else []
+            return data.get('result', {}).get('list', []) if data.get('retCode') == 0 else []
 
 async def get_btc_trend():
     candles = await fetch_kline("BTCUSDT")
@@ -30,4 +30,7 @@ async def is_altseason():
 async def get_trend_context():
     btc = await get_btc_trend()
     alt = await is_altseason()
-    return {"btc_trend": btc, "altseason": alt}
+    return {
+        "btc_trend": btc,
+        "altseason": alt
+    }
