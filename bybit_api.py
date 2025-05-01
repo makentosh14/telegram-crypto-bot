@@ -9,7 +9,7 @@ from logger import log
 
 # === CONFIG ===
 BYBIT_API_URL = "https://api.bybit.com"
-bybit_apy_key = "NuGJJSlzNeQG2bMb8h"
+BYBIT_API_KEY = "NuGJJSlzNeQG2bMb8h"
 BYBIT_API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
 
 # === SIGNATURE UTILITY ===
