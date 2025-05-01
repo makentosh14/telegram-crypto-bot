@@ -1,3 +1,5 @@
+# monitor_report.py
+
 import datetime
 import pytz
 from telegram_bot import send_telegram_message
@@ -13,14 +15,14 @@ daily_stats = {
     "profit": 0.0
 }
 
-# Thresholds
+# Thresholds for each trade type
 SCORE_EXIT_THRESHOLDS = {
     "Scalp": {"min_score": 6, "cycles": 2},
     "Intraday": {"min_score": 6, "cycles": 3},
     "Swing": {"min_score": 5, "cycles": 4}
 }
 
-# Called when a trade is triggered
+# Called when a trade is entered
 def track_trade(symbol, trade_type, score, direction, price, sl, tp1):
     active_trades[symbol] = {
         "trade_type": trade_type,
@@ -33,7 +35,7 @@ def track_trade(symbol, trade_type, score, direction, price, sl, tp1):
     }
     log(f"📌 Tracking {symbol} {direction} | Score: {score} | Type: {trade_type}")
 
-# Called on each scan to monitor existing trades
+# Called every scan to evaluate score behavior
 async def monitor_trades(score_data):
     for symbol, data in list(active_trades.items()):
         if symbol not in score_data:
@@ -42,36 +44,37 @@ async def monitor_trades(score_data):
         current_score = score_data[symbol]["score"]
         trade_type = data["trade_type"]
         direction = data["direction"]
-        tf_scores = score_data[symbol]["tf_scores"]
 
         data["score_history"].append(current_score)
         if len(data["score_history"]) > 10:
-            data["score_history"] = data["score_history"][-10:]  # cap memory
+            data["score_history"] = data["score_history"][-10:]
 
-        # Volatility / flat alerts
-        if current_score < SCORE_EXIT_THRESHOLDS[trade_type]["min_score"]:
-            recent = data["score_history"][-SCORE_EXIT_THRESHOLDS[trade_type]["cycles"]:]
-            if all(s < SCORE_EXIT_THRESHOLDS[trade_type]["min_score"] for s in recent):
-                log(f"⚠️ Score dropped below threshold for {symbol} → Exit suggestion.")
-                await send_telegram_message(
-                    f"⚠️ <b>Exit Alert</b>\n"
-                    f"<b>{symbol}</b> ({direction}) {trade_type}\n"
-                    f"Score dropped: {recent}\n"
-                    f"Consider exiting early."
-                )
-                active_trades.pop(symbol)
-                continue
+        # Exit logic
+        threshold = SCORE_EXIT_THRESHOLDS[trade_type]["min_score"]
+        cycles = SCORE_EXIT_THRESHOLDS[trade_type]["cycles"]
+        recent_scores = data["score_history"][-cycles:]
 
-        # Score rebound logic
+        if all(s < threshold for s in recent_scores):
+            log(f"⚠️ Score dropped below threshold for {symbol} → Exit suggestion.")
+            await send_telegram_message(
+                f"⚠️ <b>Exit Alert</b>\n"
+                f"<b>{symbol}</b> ({direction}) {trade_type}\n"
+                f"Score dropped: {recent_scores}\n"
+                f"<i>Monitoring suggests closing this trade.</i>"
+            )
+            active_trades.pop(symbol)
+            continue
+
+        # Score rebound alert
         if len(data["score_history"]) >= 3:
-            if data["score_history"][-3] < 6 and current_score > 8:
+            if data["score_history"][-3] < threshold and current_score >= threshold + 2:
                 await send_telegram_message(
-                    f"🔄 <b>Rebound Alert</b>\n"
+                    f"🔄 <b>Score Recovery Alert</b>\n"
                     f"<b>{symbol}</b> score dropped then recovered to {current_score}.\n"
-                    f"Potential re-entry?"
+                    f"<i>Potential re-entry or hold opportunity.</i>"
                 )
 
-# Track wins/losses after trade closes
+# Called when a trade closes (for win/loss tracking)
 async def log_trade_result(symbol, result: str, profit: float):
     if symbol in active_trades:
         active_trades.pop(symbol)
@@ -80,27 +83,25 @@ async def log_trade_result(symbol, result: str, profit: float):
         daily_stats["wins"] += 1
     elif result == "loss":
         daily_stats["losses"] += 1
+
     daily_stats["profit"] += profit
 
-# Send daily summary
+# Sends the daily Telegram summary at 23:00 Amsterdam time
 async def send_daily_report():
     global last_report_date
     now = datetime.datetime.now(pytz.timezone("Europe/Amsterdam"))
+    today = now.date()
 
-    if now.hour == 23:
-        today = now.date()
-        if last_report_date != today:
-            message = (
-                f"📊 <b>Daily Trade Report</b> ({now.strftime('%Y-%m-%d')})\n"
-                f"Wins: <b>{daily_stats['wins']}</b>\n"
-                f"Losses: <b>{daily_stats['losses']}</b>\n"
-                f"Net Profit: <b>{daily_stats['profit']:.2f} USDT</b>\n"
-            )
-            await send_telegram_message(message)
-            log("✉️ Daily trade report sent.")
-            last_report_date = today
+    if now.hour == 23 and last_report_date != today:
+        message = (
+            f"📊 <b>Daily Trade Report</b> ({now.strftime('%Y-%m-%d')})\n"
+            f"✅ Wins: <b>{daily_stats['wins']}</b>\n"
+            f"❌ Losses: <b>{daily_stats['losses']}</b>\n"
+            f"💰 Net Profit: <b>{daily_stats['profit']:.2f} USDT</b>\n"
+        )
+        await send_telegram_message(message)
+        log("✉️ Daily trade report sent.")
+        last_report_date = today
 
-            # Reset daily stats
-            daily_stats["wins"] = 0
-            daily_stats["losses"] = 0
-            daily_stats["profit"] = 0.0
+        # Reset stats
+        daily_stats.update({"wins": 0, "losses": 0, "profit": 0.0})
