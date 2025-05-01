@@ -27,9 +27,12 @@ async def signed_request(method, endpoint, params=None):
         full_url = f"{url}?{query_string}" if query_string else url
         body = None
     else:
-        body = json.dumps(params, separators=(",", ":"))  # DO NOT use json=params in request!
+        body = json.dumps(params, separators=(",", ":"))
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{body}"
         full_url = url
+
+    # 🧾 Add this line for signature debugging
+    log(f"🧾 Signing payload: {sign_payload}")
 
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
@@ -52,13 +55,14 @@ async def signed_request(method, endpoint, params=None):
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
         elif method.upper() == "POST":
-            response = await client.post(full_url, headers=headers, content=body)  # NOT json=params
+            response = await client.post(full_url, headers=headers, content=body)
         else:
             raise ValueError("Unsupported HTTP method")
 
     result = response.json()
     log(f"📨 Response: {result}")
     return result
+
 
 
 # === TRADE FUNCTION ===
