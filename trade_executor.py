@@ -105,6 +105,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         risk_amount = usdt_balance * max_risk
         qty = calculate_quantity(risk_amount, price, category)
 
+        if qty <= 0:
+            await send_telegram_message(
+                f"❌ <b>Order Failed</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Reason: Calculated quantity is too low ({qty})."
+            )
+            log(f"❌ Order not sent due to invalid quantity: {qty}", level="ERROR")
+            return None
+
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
         candles_by_tf = signal_data.get("candles")
