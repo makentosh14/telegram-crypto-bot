@@ -21,8 +21,13 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    body = json.dumps(params, separators=(",", ":"))
-    sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
+    if method.upper() == "GET":
+        query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        sign_payload = timestamp + BYBIT_API_KEY + recv_window + query_string
+    else:
+        body = json.dumps(params, separators=(",", ":"))
+        sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
+
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
     headers = {
@@ -35,19 +40,20 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {url}")
     log(f"📦 Headers: {headers}")
-    log(f"📦 Body: {body}")
+    log(f"📦 Params/Body: {params}")
 
     async with httpx.AsyncClient() as client:
-        if method.upper() == "POST":
-            response = await client.post(url, headers=headers, content=body)
-        elif method.upper() == "GET":
+        if method.upper() == "GET":
             response = await client.get(url, headers=headers, params=params)
+        elif method.upper() == "POST":
+            response = await client.post(url, headers=headers, json=params)
         else:
             raise ValueError("Unsupported HTTP method")
 
-    data = response.json()
-    log(f"📨 Response: {data}")
-    return data
+    result = response.json()
+    log(f"📨 Response: {result}")
+    return result
+
 
 # === TRADE FUNCTION ===
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
