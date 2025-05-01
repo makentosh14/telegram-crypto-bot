@@ -1,13 +1,18 @@
-# signal_memory.py
-
 import time
 
+# In-memory signal cache to prevent duplicates
 signal_cache = {}
 
 def is_duplicate_signal(symbol, cooldown=1800):
     """
-    Prevents sending repeated signals for the same symbol.
-    cooldown: seconds to wait before allowing another signal (default 30 min)
+    Returns True if a signal was already sent for this symbol within the cooldown period.
+
+    Args:
+        symbol (str): The trading symbol (e.g., BTCUSDT).
+        cooldown (int): Cooldown in seconds before the next signal is allowed (default 1800s = 30min).
+
+    Returns:
+        bool: True if duplicate, False if allowed.
     """
     now = time.time()
     last_signal_time = signal_cache.get(symbol)
@@ -16,5 +21,10 @@ def is_duplicate_signal(symbol, cooldown=1800):
     return False
 
 def log_signal(symbol):
-    """Logs the signal time for a symbol."""
+    """
+    Logs the current time for a signal sent, to avoid duplicates.
+
+    Args:
+        symbol (str): The trading symbol.
+    """
     signal_cache[symbol] = time.time()
