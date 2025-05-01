@@ -72,5 +72,4 @@ async def check_social_sentiment(coin):
     trending_bonus = 2 if coin in trending_list else 0
 
     total_score = reddit_score + twitter_score + trending_bonus
-
-    return total_score >= 3  # Threshold adjustable
+    return total_score >= 3  # Alert threshold
