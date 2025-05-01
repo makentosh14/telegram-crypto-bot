@@ -58,7 +58,7 @@ async def signed_request(method, endpoint, params=None):
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
 
-        result = await response.json()
+        result = response.json()
         log(f"📨 Response: {result}")
         return result
 
