@@ -1,6 +1,7 @@
 # scanner.py
 
 import aiohttp
+import asyncio
 from config import BYBIT_API_URL
 from logger import log
 
@@ -16,9 +17,9 @@ async def fetch_symbols():
             for url, category in [(futures_url, "linear"), (spot_url, "spot")]:
                 cursor = None
                 while True:
-                    full_url = url + (f"&cursor={cursor}" if cursor else "")
-                    log(f"🌐 Fetching {category} symbols | URL: {full_url}")
-                    async with session.get(full_url) as resp:
+                    params = {"cursor": cursor} if cursor else {}
+                    log(f"🌐 Fetching {category} symbols | URL: {url} | Cursor: {cursor}")
+                    async with session.get(url, params=params) as resp:
                         raw = await resp.text()
                         try:
                             data = await resp.json()
@@ -42,6 +43,7 @@ async def fetch_symbols():
                         if not next_cursor or next_cursor == cursor:
                             break
                         cursor = next_cursor
+                        await asyncio.sleep(0.1)
 
         log(f"✅ Total symbols fetched: {len(symbols)}")
         return list(symbols)
