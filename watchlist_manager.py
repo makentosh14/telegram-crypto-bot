@@ -1,5 +1,3 @@
-# watchlist_manager.py
-
 watchlist = set()
 
 def add_to_watchlist(symbol):
