@@ -7,6 +7,8 @@ from atr import calculate_atr
 
 
 def calculate_quantity(risk_amount, price, category="spot"):
+    if price == 0:
+        return 0
     if category == "spot":
         if price < 0.1:
             qty = round(risk_amount / price, 4)
@@ -54,7 +56,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl = round(price * (1 + sl_pct / 100), 6)
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
-    return sl, tp1, sl_pct, trailing_pct
+    return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
@@ -63,7 +65,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     trade_type = signal_data.get("trade_type", "Intraday")
     direction = signal_data.get("direction", "Long")
 
-    log(f"\u2699\ufe0f Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
+    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
         balance_data = await signed_request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
@@ -77,7 +79,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         confidence = signal_data.get("confidence", 60)
         candles_by_tf = signal_data.get("candles")
 
-        sl, tp1, sl_pct, trailing_pct = calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence)
+        sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+            candles_by_tf, price, trade_type, direction, score, confidence
+        )
 
         if category != "spot":
             await signed_request("POST", "/v5/position/set-leverage", {
@@ -87,10 +91,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "sellLeverage": DEFAULT_LEVERAGE
             })
 
-        await signed_request("POST", "/v5/order/cancel-all", {"category": "linear" if category == "futures" else "spot"})
+        await signed_request("POST", "/v5/order/cancel-all", {
+            "category": category
+        })
 
         order_result = await signed_request("POST", "/v5/order/create", {
-            "category": "linear" if category == "futures" else "spot",
+            "category": category,
             "symbol": symbol,
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
@@ -99,9 +105,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         })
 
         if order_result.get("retCode") == 0:
-            log(f"\u2705 {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
+            log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
             await send_telegram_message(
-                f"\ud83d\udea8 <b>{trade_type} {direction} Executed</b>\n"
+                f"📣 <b>{trade_type} {direction} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
                 f"Qty: {qty} | SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1}\n"
                 f"Trailing SL activates after TP1 hit ({trailing_pct:.2f}% base)"
@@ -118,9 +124,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "tp1_pct": tp1_pct
             }
         else:
-            log(f"\u274c Order failed for {symbol}: {order_result}", level="ERROR")
+            log(f"❌ Order failed for {symbol}: {order_result}", level="ERROR")
 
     except Exception as e:
-        log(f"\u274c Exception in trade execution for {symbol}: {e}", level="ERROR")
+        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
 
     return None
