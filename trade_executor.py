@@ -92,14 +92,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "category": category
         })
 
-        order_result = await signed_request("POST", "/v5/order/create", {
+        order_payload = {
             "category": category,
             "symbol": symbol,
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
             "qty": qty,
             "timeInForce": "GTC"
-        })
+        }
+
+        order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
@@ -122,8 +124,18 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             }
         else:
             log(f"❌ Order failed for {symbol}: {order_result}", level="ERROR")
+            await send_telegram_message(
+                f"❌ <b>Order Failed</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Reason: {order_result.get('retMsg', 'Unknown error')}"
+            )
 
     except Exception as e:
         log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
+        await send_telegram_message(
+            f"❌ <b>Execution Error</b>\n"
+            f"Symbol: <b>{symbol}</b>\n"
+            f"Error: {str(e)}"
+        )
 
     return None
