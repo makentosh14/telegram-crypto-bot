@@ -66,7 +66,17 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
     try:
         balance_data = await signed_request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+        if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
+            await send_telegram_message(
+                f"❌ <b>Execution Error</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Error: Wallet balance data is missing or invalid."
+            )
+            log(f"❌ Invalid balance response: {balance_data}", level="ERROR")
+            return None
+
         usdt_balance = float(balance_data["result"]["list"][0]["coin"][0]["availableToWithdraw"])
+
 
         price = float(signal_data.get("price", 1.0))
         risk_amount = usdt_balance * max_risk
