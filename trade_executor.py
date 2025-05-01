@@ -65,7 +65,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
-        balance_data = await signed_request("GET", "/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+       from bybit_api import get_wallet_balance
+       balance_data = await get_wallet_balance()
         if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
             await send_telegram_message(
                 f"❌ <b>Execution Error</b>\n"
