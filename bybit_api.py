@@ -8,8 +8,8 @@ from logger import log
 # === CONFIG ===
 
 BYBIT_API_URL = "https://api.bybit.com"
-BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"  # <-- Replace if needed
-BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"  # <-- Replace if needed
+BYBIT_API_KEY = "9LSEH2ZksKPSk1fJud"
+BYBIT_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
 
 # === UTILS ===
 
@@ -32,9 +32,9 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    body = json.dumps(params, separators=(",", ":"))  # used for signature only
-
-    sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
+    # Sign the raw JSON string as compact
+    body_str = json.dumps(params, separators=(",", ":"))
+    sign_payload = timestamp + BYBIT_API_KEY + recv_window + body_str
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
     headers = {
@@ -47,7 +47,7 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {url}")
     log(f"📦 Headers: {headers}")
-    log(f"📦 Body: {body}")
+    log(f"📦 Body: {body_str}")
     log(f"🕒 Local UTC Timestamp: {timestamp}")
 
     async with httpx.AsyncClient() as client:
@@ -60,9 +60,8 @@ async def signed_request(method, endpoint, params=None):
 
         result = response.json()
         log(f"📨 Response: {result}")
+        log(f"🟨 Raw Response: {result}")
         return result
-
-
 
 # === TRADING FUNCTIONS ===
 
