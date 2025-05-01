@@ -106,7 +106,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         price = float(signal_data.get("price", 1.0))
-        risk_amount = usdt_balance * max_risk
+        risk_amount = usdt_balance * max_risk * DEFAULT_LEVERAGE
         qty = calculate_quantity(risk_amount, price, category)
 
         score = signal_data.get("score", 5)
