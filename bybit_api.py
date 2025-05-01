@@ -1,21 +1,22 @@
+# bybit_api.py
+
 import httpx
 import hmac
 import hashlib
 import json
 import time
-import socket
-import asyncio
 from logger import log
-
 
 # === CONFIG ===
 BYBIT_API_URL = "https://api.bybit.com"
-BYBIT_API_KEY = "NuGJJSlzNeQG2bMb8h"
-BYBIT_API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
+BYBIT_API_KEY = "YOUR_API_KEY"
+BYBIT_API_SECRET = "YOUR_API_SECRET"
 
+# === SIGNATURE UTILITY ===
 def create_signature(secret, payload):
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
+# === SIGNED REQUEST WRAPPER ===
 async def signed_request(method, endpoint, params=None):
     if params is None:
         params = {}
@@ -24,6 +25,7 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
+    # Sign compact JSON for POST or query string for GET
     if method.upper() == "GET":
         query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{query_string}"
@@ -46,26 +48,23 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {full_url}")
     log(f"📦 Headers: {headers}")
-    log(f"📦 Body: {body}")
+    if body:
+        log(f"📦 Body: {body}")
+    else:
+        log(f"📦 Params: {params}")
     log(f"🧾 Signing payload: {sign_payload}")
 
-    # ✅ Enforce IPv4 transport
-    transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
-
-    async with httpx.AsyncClient(transport=transport) as client:
+    async with httpx.AsyncClient() as client:
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
         elif method.upper() == "POST":
-            response = await client.post(full_url, headers=headers, content=body)
+            response = await client.post(full_url, headers=headers, json=params)
         else:
             raise ValueError("Unsupported HTTP method")
 
     result = response.json()
     log(f"📨 Response: {result}")
     return result
-
-
-
 
 # === TRADE FUNCTION ===
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
@@ -76,5 +75,5 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "orderType": "Market",
         "qty": str(qty),
         "timeInForce": "IOC",
-        "reduceOnly": str(reduce_only).lower()  # sends "true" or "false" as strings
+        "reduceOnly": reduce_only  # ✅ keep this boolean for proper JSON encoding
     })
