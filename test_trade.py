@@ -1,11 +1,16 @@
 import os
-os.environ["BYBIT_API_KEY"] = "NuGJJSlzNeQG2bMb8h"
-os.environ["BYBIT_API_SECRET"] = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
-
 import asyncio
 import time
 from bybit_api import place_market_order
 from logger import log
+
+# === Set and verify Bybit API credentials ===
+os.environ["BYBIT_API_KEY"] = "NuGJJSlzNeQG2bMb8h"
+os.environ["BYBIT_API_SECRET"] = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
+
+if not os.environ.get("BYBIT_API_KEY") or not os.environ.get("BYBIT_API_SECRET"):
+    log("❌ Missing Bybit API credentials in environment variables.")
+    exit(1)
 
 async def test_trade():
     symbol = "BTCUSDT"
@@ -13,7 +18,6 @@ async def test_trade():
     side = "Buy"
     market_type = "linear"
 
-    # Logging request metadata
     log(f"🚀 Attempting test trade...")
     log(f"📌 Symbol: {symbol}")
     log(f"📌 Side: {side}")
