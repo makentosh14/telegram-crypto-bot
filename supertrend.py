@@ -9,22 +9,25 @@ def calculate_atr(candles, period=10):
     return sum(trs[-period:]) / period if len(trs) >= period else 0
 
 def calculate_supertrend_signal(candles, period=10, multiplier=3):
+    """
+    Returns 'bullish' or 'bearish' if Supertrend crosses in either direction.
+    """
     if len(candles) < period + 1:
         return None
 
     atr = calculate_atr(candles, period)
-    if atr < 1e-8:  # Handle extremely small ATR
+    if atr < 1e-8:  # ATR too small to be reliable
         return None
 
-    latest_candle = candles[-1]
-    previous_candle = candles[-2]
+    latest = candles[-1]
+    prev = candles[-2]
 
-    avg_price = (float(latest_candle["high"]) + float(latest_candle["low"])) / 2
+    avg_price = (float(latest["high"]) + float(latest["low"])) / 2
     upper_band = avg_price + multiplier * atr
     lower_band = avg_price - multiplier * atr
 
-    close = float(latest_candle["close"])
-    prev_close = float(previous_candle["close"])
+    close = float(latest["close"])
+    prev_close = float(prev["close"])
 
     if close > upper_band and prev_close <= upper_band:
         return "bullish"
