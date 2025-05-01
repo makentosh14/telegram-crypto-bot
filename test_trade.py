@@ -1,7 +1,8 @@
+
 import asyncio
-import bybit_api  # Import the whole module so we can override keys
 from bybit_api import place_market_order
 from logger import log
+import time
 
 # === Test API keys (override the ones in bybit_api.py) ===
 TEST_API_KEY = "9LSEH2ZksKPSk1fJud"
@@ -18,6 +19,7 @@ async def test_trade():
     market_type = "linear"  # "linear" for futures, "spot" for spot market
 
     log(f"🚀 Sending {side} market order for {symbol} | Qty: {qty}")
+    log(f"🕒 Local UTC Timestamp: {int(time.time() * 1000)}")
 
     try:
         result = await place_market_order(
@@ -32,14 +34,17 @@ async def test_trade():
             log(f"❌ No response received from Bybit!")
             return
 
+        log(f"🟨 Raw Response: {result}")
+
         if result.get("retCode") == 0:
-            log(f"✅ Test Trade Successful: {result}")
+            log(f"✅ Test Trade Successful!")
         else:
-            log(f"❌ Test Trade Failed: {result}")
-            if "retMsg" in result:
-                log(f"⚠️ Reason: {result['retMsg']}")
-            else:
-                log(f"⚠️ No specific reason provided by Bybit!")
+            log(f"❌ Test Trade Failed | Code: {result.get('retCode')} | Msg: {result.get('retMsg')}")
+            if result.get("retExtInfo"):
+                log(f"ℹ️ Extended Info: {result['retExtInfo']}")
+            if result.get("result"):
+                log(f"🔍 Result Payload: {result['result']}")
+            log("🧪 Suggestion: Check server time, IP, and signature logic.")
 
     except Exception as e:
         log(f"❌ Exception occurred during test trade: {e}")
