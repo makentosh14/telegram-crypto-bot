@@ -57,7 +57,7 @@ async def run_bot():
                 leverage = DEFAULT_LEVERAGE
                 risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
-                sl, tp1, sl_pct, trailing_pct = calculate_dynamic_sl_tp(
+                sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
 
