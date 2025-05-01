@@ -1,6 +1,10 @@
 # rsi.py
 
 def calculate_rsi(candles, period=14):
+    """
+    Calculates Relative Strength Index (RSI) for a list of candles.
+    Returns a list of RSI values starting from index [period].
+    """
     closes = [float(c['close']) for c in candles]
 
     if len(closes) < period + 1:
@@ -9,30 +13,27 @@ def calculate_rsi(candles, period=14):
     gains = []
     losses = []
 
+    # Initial average gain/loss
     for i in range(1, period + 1):
-        change = closes[i] - closes[i - 1]
-        if change >= 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0))
+        losses.append(abs(min(delta, 0)))
 
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
-
     rsi_values = []
 
+    # Smoothed RSI
     for i in range(period + 1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        gain = max(change, 0)
-        loss = abs(min(change, 0))
+        delta = closes[i] - closes[i - 1]
+        gain = max(delta, 0)
+        loss = abs(min(delta, 0))
 
-        avg_gain = (avg_gain * (period - 1) + gain) / period
-        avg_loss = (avg_loss * (period - 1) + loss) / period
+        avg_gain = ((avg_gain * (period - 1)) + gain) / period
+        avg_loss = ((avg_loss * (period - 1)) + loss) / period
 
         if avg_loss == 0:
-            rsi = 100
+            rsi = 100.0
         else:
             rs = avg_gain / avg_loss
             rsi = 100 - (100 / (1 + rs))
