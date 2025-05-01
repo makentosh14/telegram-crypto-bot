@@ -32,8 +32,7 @@ async def signed_request(method, endpoint, params=None):
     timestamp = str(int(time.time() * 1000))
     recv_window = "5000"
 
-    # Create compact JSON body for signing and sending
-    body = json.dumps(params, separators=(",", ":"))
+    body = json.dumps(params, separators=(",", ":"))  # used for signature only
 
     sign_payload = timestamp + BYBIT_API_KEY + recv_window + body
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
@@ -49,18 +48,20 @@ async def signed_request(method, endpoint, params=None):
     log(f"🔗 {method} {url}")
     log(f"📦 Headers: {headers}")
     log(f"📦 Body: {body}")
+    log(f"🕒 Local UTC Timestamp: {timestamp}")
 
     async with httpx.AsyncClient() as client:
         if method.upper() == "GET":
             response = await client.get(url, headers=headers, params=params)
         elif method.upper() == "POST":
-    response = await client.post(url, headers=headers, json=params)
+            response = await client.post(url, headers=headers, json=params)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
 
         result = response.json()
         log(f"📨 Response: {result}")
         return result
+
 
 # === TRADING FUNCTIONS ===
 
