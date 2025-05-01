@@ -1,4 +1,4 @@
-from bybit_api_async import signed_request
+from bybit_api import signed_request
 from symbol_utils import get_symbol_category
 from config import DEFAULT_LEVERAGE
 from logger import log
