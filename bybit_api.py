@@ -38,13 +38,14 @@ async def signed_request(method, endpoint, params=None):
 
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
-    headers = {
-        "X-BYBIT-API-KEY": BYBIT_API_KEY,
-        "X-BYBIT-API-SIGN": signature,
-        "X-BYBIT-API-TIMESTAMP": timestamp,
-        "X-BYBIT-API-RECV-WINDOW": recv_window,
-        "Content-Type": "application/json"
-    }
+  headers = {
+      "x-bybit-api-key": api_key,
+      "x-bybit-api-sign": signature,
+      "x-bybit-api-timestamp": timestamp,
+      "x-bybit-api-recv-window": recv_window,
+      "content-type": "application/json"
+  }
+
 
     log(f"🔗 {method} {full_url}")
     log(f"📦 Headers: {headers}")
