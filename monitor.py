@@ -1,3 +1,5 @@
+# monitor.py
+
 from telegram_bot import send_telegram_message
 from score import score_symbol
 from pattern_detector import detect_pattern
@@ -6,10 +8,12 @@ from logger import log
 
 active_trades = {}
 
-def track_active_trade(symbol, trade_type, initial_score):
+def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None):
     active_trades[symbol] = {
         "score_history": [initial_score],
         "trade_type": trade_type,
+        "entry_price": entry_price,
+        "direction": direction,
         "cycles": 0,
         "exited": False
     }
@@ -59,32 +63,33 @@ async def monitor_trades(live_candles):
                 trade["exited"] = True
                 await send_telegram_message(
                     f"⚠️ <b>Exit Signal Triggered</b>\n"
-                    f"Symbol: <b>{symbol}</b>\n"
-                    f"Score dropped to {score} after {trade['cycles']} cycles.\n"
+                    f"<b>Symbol:</b> {symbol}\n"
+                    f"<b>Score:</b> {score} after {trade['cycles']} cycles.\n"
                     f"<i>Monitoring suggests closing this trade.</i>"
                 )
                 log(f"📉 Score drop exit triggered for {symbol}")
                 continue
 
-        # Rebound alert if score previously dropped and recovered
+        # Rebound alert
         if len(trade["score_history"]) >= 3:
             if trade["score_history"][-3] < get_exit_threshold(trade_type) and score >= get_exit_threshold(trade_type) + 2:
                 await send_telegram_message(
                     f"🔁 <b>Score Recovery Alert</b>\n"
-                    f"Symbol: <b>{symbol}</b>\n"
-                    f"Score dropped earlier but recovered to {score}.\n"
+                    f"<b>Symbol:</b> {symbol}\n"
+                    f"<b>Recovered Score:</b> {score}\n"
                     f"<i>Re-entry or hold may be considered.</i>"
                 )
 
-        # Detect bearish pattern after entry
+        # Detect bearish pattern
         last_candles = candles_by_tf['1'][-2:]
-        if detect_pattern(last_candles) in ["bearish_engulfing", "inverted_hammer"]:
+        pattern = detect_pattern(last_candles)
+        if pattern in ["bearish_engulfing", "inverted_hammer"]:
             await send_telegram_message(
                 f"⚠️ <b>Bearish Reversal Pattern</b> on {symbol}\n"
-                f"<i>Reversal candle after entry. Watch closely.</i>"
+                f"<i>Pattern: {pattern} after entry. Watch closely.</i>"
             )
 
-        # Check volume drop vs 20-period avg
+        # Volume drop warning
         recent_vol = float(candles_by_tf['1'][-1]['volume'])
         avg_vol = get_average_volume(candles_by_tf['1'], window=20)
         if recent_vol < avg_vol * 0.5:
@@ -94,7 +99,7 @@ async def monitor_trades(live_candles):
                 f"<i>Momentum fading. Watch this trade.</i>"
             )
 
-        # Check flat price action
+        # Flat price warning
         closes = [float(c['close']) for c in candles_by_tf['1'][-5:]]
         if max(closes) - min(closes) < float(closes[-1]) * 0.002:
             await send_telegram_message(
