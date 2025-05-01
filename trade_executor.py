@@ -5,7 +5,6 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 
-
 def calculate_quantity(risk_amount, price, category="spot"):
     if price == 0:
         return 0
@@ -24,7 +23,6 @@ def calculate_quantity(risk_amount, price, category="spot"):
         else:
             qty = round(risk_amount / price, 1)
     return qty
-
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -57,7 +55,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
-
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
