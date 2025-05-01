@@ -160,12 +160,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "tp1_pct": tp1_pct
             }
         else:
-            log(f"❌ Order failed for {symbol}: {order_result}", level="ERROR")
+            error_msg = order_result.get("retMsg", "Unknown error")
             await send_telegram_message(
                 f"❌ <b>Order Failed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
-                f"Reason: {order_result.get('retMsg', 'Unknown error')}"
+                f"Qty: <b>{qty}</b>\n"
+                f"Reason: {error_msg}"
             )
+            log(f"❌ Order failed payload: {order_payload}", level="ERROR")
+            log(f"❌ Order failed response: {order_result}", level="ERROR")
 
     except Exception as e:
         log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
