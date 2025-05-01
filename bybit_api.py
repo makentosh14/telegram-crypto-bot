@@ -25,8 +25,9 @@ async def signed_request(method, endpoint, params=None):
         query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{query_string}"
         full_url = f"{url}?{query_string}" if query_string else url
+        body = None
     else:
-        body = json.dumps(params, separators=(",", ":"))
+        body = json.dumps(params, separators=(",", ":"))  # DO NOT use json=params in request!
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{body}"
         full_url = url
 
@@ -42,19 +43,23 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {full_url}")
     log(f"📦 Headers: {headers}")
-    log(f"📦 Params: {params}")
+    if body:
+        log(f"📦 Body: {body}")
+    else:
+        log(f"📦 Params: {params}")
 
     async with httpx.AsyncClient() as client:
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
         elif method.upper() == "POST":
-            response = await client.post(full_url, headers=headers, json=params)
+            response = await client.post(full_url, headers=headers, content=body)  # NOT json=params
         else:
             raise ValueError("Unsupported HTTP method")
 
     result = response.json()
     log(f"📨 Response: {result}")
     return result
+
 
 # === TRADE FUNCTION ===
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
