@@ -10,8 +10,12 @@ async def send_telegram_message(message):
         "parse_mode": "HTML"
     }
     async with aiohttp.ClientSession() as session:
-        async with session.post(BOT_URL, data=payload) as resp:
-            return await resp.text()
+        try:
+            async with session.post(BOT_URL, data=payload) as resp:
+                return await resp.text()
+        except Exception as e:
+            print(f"❌ Telegram send error: {e}")
+            return None
 
 def format_trade_signal(
     symbol,
@@ -33,7 +37,7 @@ def format_trade_signal(
         "Scalp": [1, 3],
         "Intraday": [5, 15],
         "Swing": [30, 60, 240]
-    }[trade_type]
+    }.get(trade_type, [])
 
     filtered_tf_scores = {k: v for k, v in tf_scores.items() if int(k) in relevant_tfs}
     emoji = "🟢" if direction == "Long" else "🔴"
