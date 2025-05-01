@@ -54,7 +54,7 @@ async def signed_request(method, endpoint, params=None):
         if method.upper() == "GET":
             response = await client.get(url, headers=headers, params=params)
         elif method.upper() == "POST":
-            response = await client.post(url, headers=headers, content=body)
+    response = await client.post(url, headers=headers, json=params)
         else:
             raise ValueError(f"Unsupported HTTP method: {method}")
 
