@@ -76,8 +76,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"❌ Invalid balance response: {balance_data}", level="ERROR")
             return None
 
-        usdt_balance = float(balance_data["result"]["list"][0]["coin"][0]["availableToWithdraw"])
+        coins = balance_data["result"]["list"][0]["coin"]
+        usdt_info = next((coin for coin in coins if coin["coin"] == "USDT" and coin.get("availableToWithdraw")), None)
 
+        if not usdt_info:
+            await send_telegram_message(
+                f"❌ <b>Execution Error</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Error: USDT balance not found or empty in wallet data."
+            )
+            log(f"❌ USDT balance missing or invalid: {coins}", level="ERROR")
+            return None
+
+        usdt_balance = float(usdt_info["availableToWithdraw"])
         price = float(signal_data.get("price", 1.0))
         risk_amount = usdt_balance * max_risk
         qty = calculate_quantity(risk_amount, price, category)
