@@ -1,8 +1,11 @@
+import os
+os.environ["BYBIT_API_KEY"] = "NuGJJSlzNeQG2bMb8h"
+os.environ["BYBIT_API_SECRET"] = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
+
 import asyncio
 import time
 from bybit_api import place_market_order
 from logger import log
-
 
 async def test_trade():
     symbol = "BTCUSDT"
@@ -48,7 +51,6 @@ async def test_trade():
             if result.get("result"):
                 log(f"🔍 Result Payload: {result['result']}")
 
-            # Error-specific suggestions
             if ret_code == 10001:
                 log("🧪 Likely Causes for retCode 10001:")
                 log("    - ❌ Incorrect signature (check signing payload and JSON body)")
@@ -59,7 +61,6 @@ async def test_trade():
 
     except Exception as e:
         log(f"❌ Exception occurred during test trade: {e}")
-
 
 if __name__ == "__main__":
     asyncio.run(test_trade())
