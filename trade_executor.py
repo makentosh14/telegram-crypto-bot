@@ -67,7 +67,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     try:
        from bybit_api import get_wallet_balance
        balance_data = await get_wallet_balance()
-        if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
+       if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
             await send_telegram_message(
                 f"❌ <b>Execution Error</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
