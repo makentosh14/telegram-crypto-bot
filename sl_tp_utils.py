@@ -1,5 +1,3 @@
-# sl_tp_utils.py (ATR-based Dynamic SL Strategy)
-
 import numpy as np
 
 def calculate_atr(candles, period=14):
@@ -24,12 +22,13 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
     tf = '3' if trade_type == "Scalp" else ('15' if trade_type == "Intraday" else '60')
     candles = candles_by_tf.get(tf)
     if not candles:
-        return None, None, 1.5, 0.5  # fallback static SL/TP if no candles available
+        return None, None, 1.5, 0.5  # fallback static SL/TP
 
     atr = calculate_atr(candles)
     if atr is None:
         return None, None, 1.5, 0.5
 
+    # Adjust SL % based on confidence
     factor = 1.2 if confidence > 75 else (1.5 if confidence > 60 else 1.8)
     sl_pct = (atr / entry_price) * 100 * factor
 
