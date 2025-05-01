@@ -135,7 +135,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
             "qty": qty,
-            "timeInForce": "GTC"
+            "timeInForce": "IOC"
         }
 
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
