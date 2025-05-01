@@ -76,5 +76,5 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "orderType": "Market",
         "qty": str(qty),
         "timeInForce": "IOC",
-        "reduceOnly": reduce_only
+        "reduceOnly": str(reduce_only).lower()  # sends "true" or "false" as strings
     })
