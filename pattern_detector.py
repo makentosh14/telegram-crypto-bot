@@ -1,5 +1,7 @@
 # pattern_detector.py
 
+from logger import log
+
 def is_bullish_engulfing(prev, curr):
     return (
         float(prev["close"]) < float(prev["open"]) and
@@ -56,6 +58,13 @@ def is_evening_star(c1, c2, c3):
         float(c3["close"]) < float(c1["open"])
     )
 
+def is_doji(candle):
+    open_ = float(candle["open"])
+    close = float(candle["close"])
+    high = float(candle["high"])
+    low = float(candle["low"])
+    return abs(open_ - close) <= (high - low) * 0.1
+
 def detect_pattern(candles):
     if len(candles) < 3:
         return None
@@ -63,18 +72,28 @@ def detect_pattern(candles):
     c1, c2, c3 = candles[-3], candles[-2], candles[-1]
 
     if is_morning_star(c1, c2, c3):
+        log("🔍 Pattern Detected: morning_star")
         return "morning_star"
     if is_evening_star(c1, c2, c3):
+        log("🔍 Pattern Detected: evening_star")
         return "evening_star"
     if is_bullish_engulfing(c2, c3):
+        log("🔍 Pattern Detected: bullish_engulfing")
         return "bullish_engulfing"
     if is_bearish_engulfing(c2, c3):
+        log("🔍 Pattern Detected: bearish_engulfing")
         return "bearish_engulfing"
     if is_hammer(c3):
+        log("🔍 Pattern Detected: hammer")
         return "hammer"
     if is_inverted_hammer(c3):
+        log("🔍 Pattern Detected: inverted_hammer")
         return "inverted_hammer"
     if is_inside_bar(c2, c3):
+        log("🔍 Pattern Detected: inside_bar")
         return "inside_bar"
+    if is_doji(c3):
+        log("🔍 Pattern Detected: doji")
+        return "doji"
 
     return None
