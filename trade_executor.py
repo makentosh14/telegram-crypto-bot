@@ -67,6 +67,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     try:
         from bybit_api import get_wallet_balance
         balance_data = await get_wallet_balance()
+
         if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
             await send_telegram_message(
                 f"❌ <b>Execution Error</b>\n"
@@ -77,7 +78,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         coins = balance_data["result"]["list"][0]["coin"]
-        usdt_info = next((coin for coin in coins if coin["coin"] == "USDT" and coin.get("availableToWithdraw")), None)
+        usdt_info = next(
+            (coin for coin in coins if coin["coin"] == "USDT" and coin.get("availableToWithdraw") not in [None, "", "0", "0.0"]),
+            None
+        )
 
         if not usdt_info:
             await send_telegram_message(
