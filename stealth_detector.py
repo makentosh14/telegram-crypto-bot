@@ -20,6 +20,7 @@ def detect_volume_divergence(candles, min_growth_ratio=1.2):
 def detect_slow_breakout(candles, window=15):
     """
     Detects slow, creeping breakout — useful for early meme pumps.
+    Looks for the last 3 candles consistently closing above average.
     """
     if len(candles) < window:
         return False
@@ -28,7 +29,6 @@ def detect_slow_breakout(candles, window=15):
     avg = sum(closes) / len(closes)
     last_close = closes[-1]
 
-    # Stronger breakout detection: recent 3 closes must stay above moving average
     recent_3 = closes[-3:]
     if all(c > avg for c in recent_3) and last_close > avg * 1.01:
         return True
