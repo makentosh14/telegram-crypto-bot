@@ -6,23 +6,27 @@ from telegram_bot import send_telegram_message
 from atr import calculate_atr
 
 def calculate_quantity(risk_amount, price, category="spot"):
-    if price == 0:
+    if price <= 0 or risk_amount <= 0:
         return 0
+
+    raw_qty = risk_amount / price
+
     if category == "spot":
         if price < 0.1:
-            qty = round(risk_amount / price, 4)
+            qty = round(raw_qty, 4)
         elif price < 1:
-            qty = round(risk_amount / price, 3)
+            qty = round(raw_qty, 3)
         elif price < 100:
-            qty = round(risk_amount / price, 2)
+            qty = round(raw_qty, 2)
         else:
-            qty = round(risk_amount / price, 1)
+            qty = round(raw_qty, 1)
     else:
         if price < 1:
-            qty = round(risk_amount / price, 3)
+            qty = round(raw_qty, 3)
         else:
-            qty = round(risk_amount / price, 1)
-    return qty
+            qty = round(raw_qty, 1)
+
+    return max(qty, 0.001)
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -104,15 +108,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         price = float(signal_data.get("price", 1.0))
         risk_amount = usdt_balance * max_risk
         qty = calculate_quantity(risk_amount, price, category)
-
-        if qty <= 0:
-            await send_telegram_message(
-                f"❌ <b>Order Failed</b>\n"
-                f"Symbol: <b>{symbol}</b>\n"
-                f"Reason: Calculated quantity is too low ({qty})."
-            )
-            log(f"❌ Order not sent due to invalid quantity: {qty}", level="ERROR")
-            return None
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
