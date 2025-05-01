@@ -4,13 +4,6 @@ from bybit_api import place_market_order
 from logger import log
 import time
 
-# === Test API keys (override the ones in bybit_api.py) ===
-TEST_API_KEY = "9LSEH2ZksKPSk1fJud"
-TEST_API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
-
-# Monkey patch (override the imported bybit_api variables)
-bybit_api.BYBIT_API_KEY = TEST_API_KEY
-bybit_api.BYBIT_API_SECRET = TEST_API_SECRET
 
 async def test_trade():
     symbol = "BTCUSDT"   # ← Change to any tradable symbol you want to test
