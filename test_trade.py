@@ -14,7 +14,7 @@ if not os.environ.get("BYBIT_API_KEY") or not os.environ.get("BYBIT_API_SECRET")
 
 async def test_trade():
     symbol = "BTCUSDT"
-    qty = 0.0001
+    qty = 0.001
     side = "Buy"
     market_type = "linear"
 
