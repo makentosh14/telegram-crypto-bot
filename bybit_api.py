@@ -65,6 +65,12 @@ async def signed_request(method, endpoint, params=None):
     log(f"📨 Response: {result}")
     return result
 
+    async def get_wallet_balance():
+    return await signed_request("GET", "/v5/account/wallet-balance", {
+        "accountType": "UNIFIED"
+    })
+
+
 # === TRADE FUNCTION ===
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
     return await signed_request("POST", "/v5/order/create", {
