@@ -8,8 +8,8 @@ import hashlib
 import urllib.parse
 
 # === YOUR API KEYS ===
-API_KEY = "9LSEH2ZksKPSk1fJud"
-API_SECRET = "eDjrnmIcgJD2FTwvuEDkocLVo3v7c7IqGuq0"
+API_KEY = "NuGJJSlzNeQG2bMb8h"
+API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
 BASE_URL = "https://api.bybit.com"
 RECV_WINDOW = "5000"
 
