@@ -57,11 +57,12 @@ async def run_bot():
                 leverage = DEFAULT_LEVERAGE
                 risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
+                # 👇 This line moved earlier so logs show for all scores
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | Type: {trade_type} | Direction: {direction} | Confidence: {confidence}%")
+
                 sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
-
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | Type: {trade_type} | Direction: {direction} | Confidence: {confidence}%")
 
                 pump_data = await detect_early_pump(candles_by_tf, symbol)
                 if pump_data["trigger_count"] >= 3:
@@ -125,7 +126,6 @@ async def run_bot():
                         'score_history': [score]
                     }
 
-                    # ✅ Execute trade properly
                     trade = await execute_trade_if_valid({
                         "symbol": symbol,
                         "price": price,
