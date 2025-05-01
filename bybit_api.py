@@ -3,7 +3,10 @@ import hmac
 import hashlib
 import json
 import time
+import socket
+import asyncio
 from logger import log
+
 
 # === CONFIG ===
 BYBIT_API_URL = "https://api.bybit.com"
@@ -31,9 +34,6 @@ async def signed_request(method, endpoint, params=None):
         sign_payload = f"{timestamp}{BYBIT_API_KEY}{recv_window}{body}"
         full_url = url
 
-    # 🧾 Add this line for signature debugging
-    log(f"🧾 Signing payload: {sign_payload}")
-
     signature = create_signature(BYBIT_API_SECRET, sign_payload)
 
     headers = {
@@ -46,12 +46,13 @@ async def signed_request(method, endpoint, params=None):
 
     log(f"🔗 {method} {full_url}")
     log(f"📦 Headers: {headers}")
-    if body:
-        log(f"📦 Body: {body}")
-    else:
-        log(f"📦 Params: {params}")
+    log(f"📦 Body: {body}")
+    log(f"🧾 Signing payload: {sign_payload}")
 
-    async with httpx.AsyncClient() as client:
+    # ✅ Enforce IPv4 transport
+    transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+
+    async with httpx.AsyncClient(transport=transport) as client:
         if method.upper() == "GET":
             response = await client.get(full_url, headers=headers)
         elif method.upper() == "POST":
@@ -62,6 +63,7 @@ async def signed_request(method, endpoint, params=None):
     result = response.json()
     log(f"📨 Response: {result}")
     return result
+
 
 
 
