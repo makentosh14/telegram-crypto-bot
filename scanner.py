@@ -4,6 +4,7 @@ import aiohttp
 import asyncio
 from config import BYBIT_API_URL
 from logger import log
+from telegram_bot import send_error_to_telegram  # NEW
 
 symbol_category_map = {}
 
@@ -24,11 +25,15 @@ async def fetch_symbols():
                         try:
                             data = await resp.json()
                         except Exception:
-                            log(f"❌ Failed to parse {category} JSON. Raw:\n{raw}")
+                            msg = f"❌ Failed to parse {category} JSON.\nRaw:\n{raw}"
+                            log(msg)
+                            await send_error_to_telegram(msg)
                             break
 
                         if data.get("retCode") != 0:
-                            log(f"❌ Error fetching {category} symbols: {data}")
+                            msg = f"❌ Error fetching {category} symbols:\n{data}"
+                            log(msg)
+                            await send_error_to_telegram(msg)
                             break
 
                         instruments = data.get("result", {}).get("list", [])
@@ -49,5 +54,7 @@ async def fetch_symbols():
         return list(symbols)
 
     except Exception as e:
-        log(f"❌ Exception while fetching symbols: {e}")
+        error_msg = f"❌ Exception while fetching symbols: {e}"
+        log(error_msg)
+        await send_error_to_telegram(error_msg)
         return []
