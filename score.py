@@ -85,7 +85,8 @@ def score_symbol(symbol, candles_by_timeframe):
                 long_score += score
 
         except Exception as e:
-            await send_error_to_telegram(f"❌ <b>Scoring Error</b>\nSymbol: <b>{symbol}</b>\nTimeframe: {tf}m\nError: {str(e)}")
+            from logger import log
+            log(f"❌ Scoring Error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
 
         tf_scores[tf] = score
 
