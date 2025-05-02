@@ -1,8 +1,8 @@
-""import asyncio
+import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence
-from telegram_bot import send_telegram_message, format_trade_signal
+from telegram_bot import send_telegram_message, format_trade_signal, send_error_to_telegram
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
 from config import DEFAULT_LEVERAGE
@@ -11,6 +11,7 @@ from logger import log
 from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
+import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
@@ -142,7 +143,8 @@ async def run_bot():
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
-            await asyncio.sleep(5)  # Ensure bot doesn't crash loop
+            await send_error_to_telegram(traceback.format_exc())
+            await asyncio.sleep(5)
 
         await asyncio.sleep(0.5)
 
@@ -154,7 +156,9 @@ if __name__ == "__main__":
             try:
                 await run_bot()
             except Exception as e:
-                log(f"🔁 Restarting bot due to crash: {e}", level="ERROR")
+                err_msg = f"🔁 Restarting bot due to crash:\n{traceback.format_exc()}"
+                log(err_msg, level="ERROR")
+                await send_error_to_telegram(err_msg)
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
