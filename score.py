@@ -8,6 +8,7 @@ from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 from telegram_bot import send_error_to_telegram  # ✅ NEW
+from config import ALWAYS_ALLOW_SWING  # ✅ NEW
 
 def score_symbol(symbol, candles_by_timeframe):
     tf_scores = {}
@@ -105,7 +106,12 @@ def determine_direction(tf_scores):
 
 def calculate_confidence(score, tf_scores, trend_context, trade_type):
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
-    trend_boost = 2 if trend_context.get("btc_trend") == "strong" or trend_context.get("altseason") else 0
+
+    if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
+        trend_boost = 2  # Always boost swing
+    else:
+        trend_boost = 2 if trend_context.get("btc_trend") == "strong" or trend_context.get("altseason") else 0
+
     tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
     confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
     return round(min(confidence, 100), 1)
