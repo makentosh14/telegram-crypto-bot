@@ -108,8 +108,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             await signed_request("POST", "/v5/position/set-leverage", {
                 "category": "linear",
                 "symbol": symbol,
-                "buyLeverage": leverage,
-                "sellLeverage": leverage
+                "buyLeverage": str(leverage),
+                "sellLeverage": str(leverage)
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
@@ -144,7 +144,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "direction": direction,
                 "symbol": symbol,
                 "sl_pct": sl_pct,
-                "tp1_pct": tp1_pct
+                "tp1_pct": tp1_pct,
+                "trailing_pct": trailing_pct
             }
         else:
             error_msg = order_result.get("retMsg", "Unknown error")
