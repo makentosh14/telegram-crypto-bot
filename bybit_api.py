@@ -92,3 +92,13 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "timeInForce": "IOC",
         "reduceOnly": reduce_only
     })
+
+async def get_futures_available_balance():
+    try:
+        response = await get_wallet_balance()
+        if response.get("retCode") != 0:
+            return 0.0
+        return float(response["result"]["list"][0]["totalAvailableBalance"])
+    except Exception as e:
+        log(f"❌ Failed to fetch available futures balance: {e}", level="ERROR")
+        return 0.0
