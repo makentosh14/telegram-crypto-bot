@@ -8,13 +8,12 @@ from logger import log
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
 SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
 
-async def stream_candles(symbols):
-    futures_url = "wss://stream.bybit.com/v5/public/linear"
-    spot_url = "wss://stream.bybit.com/v5/public/spot"
+RECONNECT_DELAY = 5
 
-    async def handle_stream(url, symbols, category, interval):
+async def handle_stream(url, symbols, category, interval):
+    while True:
         try:
-            async with websockets.connect(url) as ws:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
                 args = [f"kline.{interval}.{symbol}" for symbol in symbols if symbol_category_map.get(symbol) == category]
                 if not args:
                     return
@@ -24,7 +23,7 @@ async def stream_candles(symbols):
 
                 while True:
                     try:
-                        message = await ws.recv()
+                        message = await asyncio.wait_for(ws.recv(), timeout=30)
                         data = json.loads(message)
 
                         topic = data.get("topic", "")
@@ -36,7 +35,6 @@ async def stream_candles(symbols):
 
                         candles = data["data"]
 
-                        # If data is a list (snapshot)
                         if isinstance(candles, list):
                             for k in candles:
                                 candle = {
@@ -49,7 +47,6 @@ async def stream_candles(symbols):
                                 }
                                 live_candles[symbol][interval_from_topic].append(candle)
 
-                        # If data is a dict (update)
                         elif isinstance(candles, dict):
                             k = candles
                             candle = {
@@ -64,13 +61,22 @@ async def stream_candles(symbols):
 
                         log(f"📈 {symbol} [{category}] @{interval_from_topic} updated | total: {len(live_candles[symbol][interval_from_topic])}")
 
+                    except asyncio.TimeoutError:
+                        log(f"⚠️ No data received for {category} {interval}m in 30s — reconnecting...", level="WARNING")
+                        break
                     except Exception as e:
-                        log(f"❌ WebSocket error in {category} {interval}m: {e}", level="ERROR")
-                        await asyncio.sleep(2)
-                        return
+                        log(f"❌ WebSocket stream error in {category} {interval}m: {e}", level="ERROR")
+                        break
 
         except Exception as e:
             log(f"❌ Connection failed for {category} {interval}m: {e}", level="ERROR")
+
+        log(f"🔁 Reconnecting {category} {interval}m in {RECONNECT_DELAY}s...")
+        await asyncio.sleep(RECONNECT_DELAY)
+
+async def stream_candles(symbols):
+    futures_url = "wss://stream.bybit.com/v5/public/linear"
+    spot_url = "wss://stream.bybit.com/v5/public/spot"
 
     tasks = []
     for interval in SUPPORTED_INTERVALS:
