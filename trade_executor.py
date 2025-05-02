@@ -102,6 +102,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence
         )
+        log(f"📏 Final qty = {qty} (type: {type(qty)})")
 
         if category != "spot":
             await signed_request("POST", "/v5/position/set-leverage", {
@@ -120,7 +121,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "symbol": symbol,
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
-            "qty": qty,
+            "qty": str(qty),
             "timeInForce": "IOC"
         }
 
