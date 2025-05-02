@@ -1,5 +1,6 @@
 from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
+import traceback
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
@@ -15,7 +16,21 @@ async def send_telegram_message(message):
                 return await resp.text()
         except Exception as e:
             print(f"❌ Telegram send error: {e}")
+            await send_error_to_telegram(f"Telegram Error: {str(e)}")
             return None
+
+async def send_error_to_telegram(error_text):
+    error_msg = f"❗️<b>Bot Error/Crash Detected</b>\n<pre>{error_text}</pre>"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": error_msg[:4096],  # Telegram max length
+        "parse_mode": "HTML"
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(BOT_URL, data=payload)
+    except Exception as e:
+        print(f"❌ Telegram crash-report failed: {e}")
 
 def format_trade_signal(
     symbol,
@@ -61,7 +76,6 @@ def format_trade_signal(
 
     return message
 
-# 🚀 Early Pump Alert Function
 async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct, reason):
     message = (
         f"🚀 <b>Early Pump Signal Detected</b>\n"
