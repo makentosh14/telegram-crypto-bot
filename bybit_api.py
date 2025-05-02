@@ -63,11 +63,23 @@ async def signed_request(method, endpoint, params=None):
     log(f"📨 Response: {result}")
     return result
 
-# ✅ FIXED: Now this is a separate function, not nested
+# === BALANCE FUNCTIONS ===
 async def get_wallet_balance():
     return await signed_request("GET", "/v5/account/wallet-balance", {
         "accountType": "UNIFIED"
     })
+
+# ✅ NEW: Fetch only futures 'availableToTrade' balance for USDT
+async def get_futures_available_balance():
+    result = await get_wallet_balance()
+    try:
+        usdt = next(
+            coin for coin in result["result"]["list"][0]["coin"] if coin["coin"] == "USDT"
+        )
+        return float(usdt.get("availableToTrade", 0))
+    except Exception as e:
+        log(f"❌ Failed to parse availableToTrade: {e}", level="ERROR")
+        return 0
 
 # === TRADE FUNCTION ===
 async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
