@@ -1,6 +1,7 @@
-# pattern_detector.py
-
+import asyncio
+import traceback
 from logger import log
+from telegram_bot import send_error_to_telegram  # 🚨 make sure this is implemented
 
 def is_bullish_engulfing(prev, curr):
     return (
@@ -66,34 +67,41 @@ def is_doji(candle):
     return abs(open_ - close) <= (high - low) * 0.1
 
 def detect_pattern(candles):
-    if len(candles) < 3:
+    try:
+        if len(candles) < 3:
+            return None
+
+        c1, c2, c3 = candles[-3], candles[-2], candles[-1]
+
+        if is_morning_star(c1, c2, c3):
+            log("🔍 Pattern Detected: morning_star")
+            return "morning_star"
+        if is_evening_star(c1, c2, c3):
+            log("🔍 Pattern Detected: evening_star")
+            return "evening_star"
+        if is_bullish_engulfing(c2, c3):
+            log("🔍 Pattern Detected: bullish_engulfing")
+            return "bullish_engulfing"
+        if is_bearish_engulfing(c2, c3):
+            log("🔍 Pattern Detected: bearish_engulfing")
+            return "bearish_engulfing"
+        if is_hammer(c3):
+            log("🔍 Pattern Detected: hammer")
+            return "hammer"
+        if is_inverted_hammer(c3):
+            log("🔍 Pattern Detected: inverted_hammer")
+            return "inverted_hammer"
+        if is_inside_bar(c2, c3):
+            log("🔍 Pattern Detected: inside_bar")
+            return "inside_bar"
+        if is_doji(c3):
+            log("🔍 Pattern Detected: doji")
+            return "doji"
+
         return None
 
-    c1, c2, c3 = candles[-3], candles[-2], candles[-1]
-
-    if is_morning_star(c1, c2, c3):
-        log("🔍 Pattern Detected: morning_star")
-        return "morning_star"
-    if is_evening_star(c1, c2, c3):
-        log("🔍 Pattern Detected: evening_star")
-        return "evening_star"
-    if is_bullish_engulfing(c2, c3):
-        log("🔍 Pattern Detected: bullish_engulfing")
-        return "bullish_engulfing"
-    if is_bearish_engulfing(c2, c3):
-        log("🔍 Pattern Detected: bearish_engulfing")
-        return "bearish_engulfing"
-    if is_hammer(c3):
-        log("🔍 Pattern Detected: hammer")
-        return "hammer"
-    if is_inverted_hammer(c3):
-        log("🔍 Pattern Detected: inverted_hammer")
-        return "inverted_hammer"
-    if is_inside_bar(c2, c3):
-        log("🔍 Pattern Detected: inside_bar")
-        return "inside_bar"
-    if is_doji(c3):
-        log("🔍 Pattern Detected: doji")
-        return "doji"
-
-    return None
+    except Exception as e:
+        asyncio.create_task(send_error_to_telegram(
+            f"❌ <b>Pattern Detection Error</b>\nError: <code>{str(e)}</code>\n<pre>{traceback.format_exc()}</pre>"
+        ))
+        return None
