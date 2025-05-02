@@ -7,20 +7,18 @@ BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
 BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
 BYBIT_API_URL = "https://api.bybit.com"
 
-
 TELEGRAM_BOT_TOKEN = "7803544014:AAGLJVwfTg4Ij5lzI8RIVRfrZkKG9uIZnh4"
 TELEGRAM_CHAT_ID = "1806610681"
-TELEGRAM_ASSISTANT_CHAT_ID = "-1000000000000" # optional
+TELEGRAM_ASSISTANT_CHAT_ID = "-1000000000000"  # optional
 
 # === TRADING MODE ===
 TRADING_MODE = "auto"  # "auto" or "signal"
-RISK_SPOT = 0.06       # default 2% per spot trade
-RISK_FUTURES = 0.09    # default 3% per futures trade
+RISK_FUTURES = 0.09    # default 9% per futures trade
 DAILY_MAX_LOSS = 0.1   # max daily loss before auto pause (10%)
 
 # === LEVERAGE / MARGIN SETTINGS ===
 DEFAULT_LEVERAGE = 5
-MARGIN_MODE = "CROSSED"  # or "CROSSED"
+MARGIN_MODE = "CROSSED"  # or "ISOLATED"
 
 # === CANDLE INTERVAL SETTINGS ===
 DEFAULT_INTERVAL = '1'
@@ -44,7 +42,7 @@ ALTSEASON_SCAN_INTERVAL = 120
 MEME_HYPE_SCAN_INTERVAL = 90
 
 # === MARKET TYPES ===
-ENABLE_SPOT = True
+ENABLE_SPOT = False  # 🔴 Spot trading disabled
 ENABLE_FUTURES = True
 
 # === SMART SYSTEMS ===
