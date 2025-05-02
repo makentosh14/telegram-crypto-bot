@@ -1,4 +1,4 @@
-import asyncio
+""import asyncio
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence
@@ -57,7 +57,6 @@ async def run_bot():
                 leverage = DEFAULT_LEVERAGE
                 risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
-                # 👇 This line moved earlier so logs show for all scores
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | Type: {trade_type} | Direction: {direction} | Confidence: {confidence}%")
 
                 sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
@@ -143,9 +142,19 @@ async def run_bot():
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
+            await asyncio.sleep(5)  # Ensure bot doesn't crash loop
 
         await asyncio.sleep(0.5)
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
-    asyncio.run(run_bot())
+
+    async def restart_forever():
+        while True:
+            try:
+                await run_bot()
+            except Exception as e:
+                log(f"🔁 Restarting bot due to crash: {e}", level="ERROR")
+                await asyncio.sleep(10)
+
+    asyncio.run(restart_forever())
