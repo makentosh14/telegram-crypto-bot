@@ -1,4 +1,4 @@
-from bybit_api import signed_request
+from bybit_api import signed_request, get_futures_available_balance
 from symbol_utils import get_symbol_category
 from config import DEFAULT_LEVERAGE
 from logger import log
@@ -70,40 +70,14 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
-        from bybit_api import get_wallet_balance
-        balance_data = await get_wallet_balance()
+        usdt_balance = await get_futures_available_balance()
 
-        if not balance_data or "result" not in balance_data or "list" not in balance_data["result"]:
+        if usdt_balance <= 0:
             await send_telegram_message(
                 f"❌ <b>Execution Error</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
-                f"Error: Wallet balance data is missing or invalid."
+                f"Error: Futures available balance is 0."
             )
-            log(f"❌ Invalid balance response: {balance_data}", level="ERROR")
-            return None
-
-        coins = balance_data["result"]["list"][0]["coin"]
-        usdt_info = next((coin for coin in coins if coin["coin"] == "USDT"), None)
-
-        if not usdt_info:
-            await send_telegram_message(
-                f"❌ <b>Execution Error</b>\n"
-                f"Symbol: <b>{symbol}</b>\n"
-                f"Error: USDT coin entry missing in wallet."
-            )
-            log(f"❌ USDT entry missing: {coins}", level="ERROR")
-            return None
-
-        usdt_str = usdt_info.get("availableToWithdraw") or usdt_info.get("walletBalance")
-        try:
-            usdt_balance = float(usdt_str)
-        except (ValueError, TypeError):
-            await send_telegram_message(
-                f"❌ <b>Execution Error</b>\n"
-                f"Symbol: <b>{symbol}</b>\n"
-                f"Error: USDT balance string invalid: '{usdt_str}'"
-            )
-            log(f"❌ Cannot convert USDT balance string: '{usdt_str}'", level="ERROR")
             return None
 
         price = float(signal_data.get("price", 1.0))
