@@ -86,11 +86,9 @@ async def handle_stream(url, symbols, category, interval):
 
 async def stream_candles(symbols):
     futures_url = "wss://stream.bybit.com/v5/public/linear"
-    spot_url = "wss://stream.bybit.com/v5/public/spot"
-
     tasks = []
+
     for interval in SUPPORTED_INTERVALS:
         tasks.append(asyncio.create_task(handle_stream(futures_url, symbols, "linear", interval)))
-        tasks.append(asyncio.create_task(handle_stream(spot_url, symbols, "spot", interval)))
 
     await asyncio.gather(*tasks)
