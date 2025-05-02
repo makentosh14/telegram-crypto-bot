@@ -4,6 +4,7 @@ import websockets
 from collections import defaultdict, deque
 from scanner import symbol_category_map
 from logger import log
+from telegram_bot import send_error_to_telegram  # NEW: send critical errors to Telegram
 
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
 SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
@@ -62,16 +63,25 @@ async def handle_stream(url, symbols, category, interval):
                         log(f"📈 {symbol} [{category}] @{interval_from_topic} updated | total: {len(live_candles[symbol][interval_from_topic])}")
 
                     except asyncio.TimeoutError:
-                        log(f"⚠️ No data received for {category} {interval}m in 30s — reconnecting...", level="WARNING")
+                        warning = f"⚠️ No data received for {category} {interval}m in 30s — reconnecting..."
+                        log(warning, level="WARNING")
+                        await send_error_to_telegram(warning)
                         break
+
                     except Exception as e:
-                        log(f"❌ WebSocket stream error in {category} {interval}m: {e}", level="ERROR")
+                        error = f"❌ WebSocket stream error in {category} {interval}m: {e}"
+                        log(error, level="ERROR")
+                        await send_error_to_telegram(error)
                         break
 
         except Exception as e:
-            log(f"❌ Connection failed for {category} {interval}m: {e}", level="ERROR")
+            error = f"❌ Connection failed for {category} {interval}m: {e}"
+            log(error, level="ERROR")
+            await send_error_to_telegram(error)
 
-        log(f"🔁 Reconnecting {category} {interval}m in {RECONNECT_DELAY}s...")
+        reconnect_msg = f"🔁 Reconnecting {category} {interval}m in {RECONNECT_DELAY}s..."
+        log(reconnect_msg)
+        await send_error_to_telegram(reconnect_msg)
         await asyncio.sleep(RECONNECT_DELAY)
 
 async def stream_candles(symbols):
