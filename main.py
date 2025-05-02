@@ -11,6 +11,7 @@ from logger import log
 from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
+from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING  # ✅
 import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -75,7 +76,7 @@ async def run_bot():
 
                 if (trade_type == "Scalp" and score < MIN_SCALP_SCORE) or \
                    (trade_type == "Intraday" and score < MIN_INTRADAY_SCORE) or \
-                   (trade_type == "Swing" and score < MIN_SWING_SCORE):
+                   (trade_type == "Swing" and score < MIN_SWING_SCORE and not ALWAYS_ALLOW_SWING):
                     continue
 
                 if symbol in active_signals:
