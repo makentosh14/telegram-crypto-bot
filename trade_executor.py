@@ -5,11 +5,10 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 
-def calculate_quantity(risk_amount, price, category="spot"):
-    if price <= 0 or risk_amount <= 0:
-        return 0
 
-    raw_qty = risk_amount / price
+def calculate_quantity(raw_qty, price, category="spot"):
+    if raw_qty <= 0:
+        return 0
 
     if category == "spot":
         if price < 0.1:
@@ -27,6 +26,7 @@ def calculate_quantity(risk_amount, price, category="spot"):
             qty = round(raw_qty, 1)
 
     return max(qty, 0.001)
+
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -59,6 +59,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
+
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
@@ -106,8 +107,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         price = float(signal_data.get("price", 1.0))
-        risk_amount = usdt_balance * max_risk * 8.2 # This is the margin (e.g. 9 USDT)
-        qty = calculate_quantity(risk_amount, price, category)  # Final tradable qty
+        leverage = DEFAULT_LEVERAGE
+        risk_amount = usdt_balance * max_risk
+        position_size = risk_amount * leverage
+        raw_qty = position_size / price
+        qty = calculate_quantity(raw_qty, price, category)
+
+        if qty * price > usdt_balance * leverage:
+            log(f"⚠️ Qty too large for balance! Requested ${qty * price:.2f} > Available {usdt_balance * leverage:.2f}")
+            await send_telegram_message(
+                f"⚠️ <b>Order Blocked</b>\n<b>{symbol}</b>: Qty too large.\n"
+                f"Needed: ${qty * price:.2f}, Available: ${usdt_balance * leverage:.2f}"
+            )
+            return None
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
@@ -121,8 +133,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             await signed_request("POST", "/v5/position/set-leverage", {
                 "category": "linear",
                 "symbol": symbol,
-                "buyLeverage": DEFAULT_LEVERAGE,
-                "sellLeverage": DEFAULT_LEVERAGE
+                "buyLeverage": leverage,
+                "sellLeverage": leverage
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
