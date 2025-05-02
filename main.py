@@ -76,9 +76,13 @@ async def run_bot():
 
                 if (trade_type == "Scalp" and score < MIN_SCALP_SCORE) or \
                    (trade_type == "Intraday" and score < MIN_INTRADAY_SCORE) or \
-                   (trade_type == "Swing" and score < MIN_SWING_SCORE and not ALWAYS_ALLOW_SWING):
-                    continue
-
+                   (trade_type == "Swing" and score < MIN_SWING_SCORE):
+                   # Allow swing setups below BTC trend filter, but NOT below score threshold
+                   if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
+                       log(f"⚠️ Swing setup below min score ({score} < {MIN_SWING_SCORE}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
+                       continue
+                   continue
+                       
                 if symbol in active_signals:
                     data = active_signals[symbol]
                     data['score_history'].append(score)
