@@ -20,7 +20,7 @@ EXIT_COOLDOWN = 10
 
 MIN_SCALP_SCORE = 6.5
 MIN_INTRADAY_SCORE = 7.5
-MIN_SWING_SCORE = 8.0
+MIN_SWING_SCORE = 8.5
 
 async def run_bot():
     log("🚀 Bot starting...")
