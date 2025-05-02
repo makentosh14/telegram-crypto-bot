@@ -106,8 +106,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         price = float(signal_data.get("price", 1.0))
-        risk_amount = usdt_balance * max_risk * DEFAULT_LEVERAGE
-        qty = calculate_quantity(risk_amount, price, category)
+        risk_amount = usdt_balance * max_risk  # This is the margin (e.g. 9 USDT)
+        position_size = risk_amount * DEFAULT_LEVERAGE  # Total size with leverage (e.g. 45 USDT)
+        qty = calculate_quantity(position_size, price, category)  # Final tradable qty
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
