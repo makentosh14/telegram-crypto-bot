@@ -1,10 +1,10 @@
-# pump_detector.py
-
 import asyncio
+import traceback
 from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from stealth_detector import detect_slow_breakout
 from social_sentiment import check_social_sentiment
+from telegram_bot import send_error_to_telegram
 from logger import log
 
 async def detect_early_pump(candles_by_tf, symbol):
@@ -19,31 +19,44 @@ async def detect_early_pump(candles_by_tf, symbol):
     tf1 = candles_by_tf.get("1", [])
     tf3 = candles_by_tf.get("3", [])
 
-    # Volume spike detection (1min)
-    if tf1 and is_volume_spike(tf1, multiplier=2.5):
-        results["volume_spike"] = True
-        results["trigger_count"] += 1
-        log(f"⚡ Volume spike detected on {symbol}")
+    try:
+        if tf1 and is_volume_spike(tf1, multiplier=2.5):
+            results["volume_spike"] = True
+            results["trigger_count"] += 1
+            log(f"⚡ Volume spike detected on {symbol}")
+    except Exception as e:
+        await send_error_to_telegram(
+            f"⚠️ <b>Volume Spike Error</b>\nSymbol: <b>{symbol}</b>\n<code>{traceback.format_exc()}</code>"
+        )
 
-    # Whale activity (3min)
-    if tf3 and detect_whale_activity(tf3, threshold_ratio=1.8):
-        results["whale_activity"] = True
-        results["trigger_count"] += 1
-        log(f"🐋 Whale activity detected on {symbol}")
+    try:
+        if tf3 and detect_whale_activity(tf3, threshold_ratio=1.8):
+            results["whale_activity"] = True
+            results["trigger_count"] += 1
+            log(f"🐋 Whale activity detected on {symbol}")
+    except Exception as e:
+        await send_error_to_telegram(
+            f"🐋 <b>Whale Detection Error</b>\nSymbol: <b>{symbol}</b>\n<code>{traceback.format_exc()}</code>"
+        )
 
-    # Stealth base breakout (3min)
-    if tf3 and detect_slow_breakout(tf3):
-        results["base_breakout"] = True
-        results["trigger_count"] += 1
-        log(f"📈 Slow breakout detected on {symbol}")
+    try:
+        if tf3 and detect_slow_breakout(tf3):
+            results["base_breakout"] = True
+            results["trigger_count"] += 1
+            log(f"📈 Slow breakout detected on {symbol}")
+    except Exception as e:
+        await send_error_to_telegram(
+            f"📈 <b>Slow Breakout Error</b>\nSymbol: <b>{symbol}</b>\n<code>{traceback.format_exc()}</code>"
+        )
 
-    # Social hype (Reddit/Twitter/Trending)
     try:
         if await check_social_sentiment(symbol):
             results["social_hype"] = True
             results["trigger_count"] += 1
             log(f"📢 Social hype detected on {symbol}")
     except Exception as e:
-        log(f"❌ Social sentiment check failed for {symbol}: {e}", level="ERROR")
+        await send_error_to_telegram(
+            f"📢 <b>Social Sentiment Error</b>\nSymbol: <b>{symbol}</b>\n<code>{traceback.format_exc()}</code>"
+        )
 
     return results
