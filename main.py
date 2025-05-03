@@ -19,7 +19,7 @@ active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
 
-MIN_SCALP_SCORE = 6.5
+MIN_SCALP_SCORE = 5
 MIN_INTRADAY_SCORE = 7.5
 MIN_SWING_SCORE = 8.5
 
