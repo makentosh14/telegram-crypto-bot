@@ -71,7 +71,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
     try:
         usdt_balance = await get_futures_available_balance()
-
         if usdt_balance <= 0:
             await send_telegram_message(
                 f"❌ <b>Execution Error</b>\n"
@@ -82,9 +81,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         price = float(signal_data.get("price", 1.0))
         leverage = DEFAULT_LEVERAGE
-        risk_amount = usdt_balance * max_risk
-        position_size = risk_amount * leverage
-        raw_qty = position_size / price
+        risk_amount = usdt_balance * max_risk  # 🔥 uses only AVAILABLE balance
+        position_value = risk_amount * leverage  # 🔥 final market order value
+        raw_qty = position_value / price
         qty = calculate_quantity(raw_qty, price, category)
 
         if qty * price > usdt_balance * leverage:
@@ -129,11 +128,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
-            # Submit SL and TP1 orders
+            # Submit SL and TP1
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
 
-            # Take-Profit (TP1)
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -145,7 +143,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # Stop-Loss
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -197,3 +194,4 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         )
 
     return None
+
