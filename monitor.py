@@ -5,17 +5,20 @@ from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
 from logger import log
+from exit_manager import should_trail_stop  # ✅ NEW
 
 active_trades = {}
 
-def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None):
+def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None):
     active_trades[symbol] = {
         "score_history": [initial_score],
         "trade_type": trade_type,
         "entry_price": entry_price,
         "direction": direction,
         "cycles": 0,
-        "exited": False
+        "exited": False,
+        "trailing_pct": trailing_pct,
+        "trailing_sl": None  # ✅ NEW: stores last updated SL to avoid spamming
     }
 
 def remove_trade(symbol):
@@ -42,6 +45,9 @@ async def monitor_trades(live_candles):
             continue
 
         trade_type = trade["trade_type"]
+        direction = trade["direction"]
+        entry_price = trade["entry_price"]
+
         if symbol not in live_candles:
             continue
 
@@ -57,7 +63,23 @@ async def monitor_trades(live_candles):
         trade["score_history"].append(score)
         trade["cycles"] += 1
 
-        # Exit if score remains too low for N cycles
+        # === SMART TRAILING STOP LOGIC === ✅
+        current_price = float(candles_by_tf['1'][-1]['close'])
+        trailing_pct = trade.get("trailing_pct")
+        if trailing_pct and entry_price:
+            new_sl = should_trail_stop(entry_price, current_price, direction.lower(), candles=candles_by_tf['1'],
+                                       trigger_pct=trailing_pct * 2, trail_pct=trailing_pct)
+
+            if new_sl and new_sl != trade.get("trailing_sl"):
+                trade["trailing_sl"] = new_sl
+                await send_telegram_message(
+                    f"🔐 <b>Trailing Stop Updated</b>\n"
+                    f"<b>{symbol}</b> | New SL: {new_sl} | Price: {current_price}\n"
+                    f"<i>Smart SL activated by trailing logic.</i>"
+                )
+                log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
+
+        # === Exit if score stays low too long ===
         if score < get_exit_threshold(trade_type):
             if trade["cycles"] >= get_exit_cycles(trade_type):
                 trade["exited"] = True
