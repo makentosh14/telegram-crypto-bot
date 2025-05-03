@@ -18,7 +18,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "cycles": 0,
         "exited": False,
         "trailing_pct": trailing_pct,
-        "trailing_sl": None  # ✅ NEW: stores last updated SL to avoid spamming
+        "trailing_sl": None,  # ✅ NEW
+        "tp1_hit": False,     # ✅ New
+        "tp2": None           # ✅ TP2 logic support
     }
 
 def remove_trade(symbol):
@@ -64,74 +66,77 @@ async def monitor_trades(live_candles):
         trade["score_history"].append(score)
         trade["cycles"] += 1
 
-        # === SMART TRAILING STOP LOGIC === ✅
         current_price = float(candles_by_tf['1'][-1]['close'])
         trailing_pct = trade.get("trailing_pct")
-        if trailing_pct and entry_price:
+
+        # === Smart TP1 Trigger and Break-even SL Logic === ✅
+        if not trade.get("tp1_hit") and direction and entry_price:
+            tp1_level = entry_price * (1.018 if direction == "Long" else 0.982)
+            if (direction == "Long" and current_price >= tp1_level) or (direction == "Short" and current_price <= tp1_level):
+                trade["tp1_hit"] = True
+                new_sl = entry_price
+                trade["trailing_sl"] = new_sl
+                await send_telegram_message(
+                    f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b>
+<b>Break-even SL activated</b> at {new_sl:.4f}"
+                )
+                write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
+
+        # === Smart Trailing SL After TP1 === ✅
+        if trade.get("tp1_hit") and trailing_pct:
             new_sl = should_trail_stop(entry_price, current_price, direction.lower(), candles=candles_by_tf['1'],
                                        trigger_pct=trailing_pct * 2, trail_pct=trailing_pct)
 
             if new_sl and new_sl != trade.get("trailing_sl"):
                 trade["trailing_sl"] = new_sl
                 await send_telegram_message(
-                    f"🔐 <b>Trailing Stop Updated</b>\n"
-                    f"<b>{symbol}</b> | New SL: {new_sl} | Price: {current_price}\n"
-                    f"<i>Smart SL activated by trailing logic.</i>"
+                    f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}"
                 )
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
-        # === Exit if score stays low too long ===
+        # === Score-based Exit ===
         if score < get_exit_threshold(trade_type):
             if trade["cycles"] >= get_exit_cycles(trade_type):
                 trade["exited"] = True
                 await send_telegram_message(
-                    f"⚠️ <b>Exit Signal Triggered</b>\n"
-                    f"<b>Symbol:</b> {symbol}\n"
-                    f"<b>Score:</b> {score} after {trade['cycles']} cycles.\n"
-                    f"<i>Monitoring suggests closing this trade.</i>"
+                    f"⚠️ <b>Exit Signal Triggered</b>
+<b>{symbol}</b> | Score: {score} after {trade['cycles']} cycles."
                 )
                 log(f"📉 Score drop exit triggered for {symbol}")
                 write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
                 continue
 
-        # Rebound alert
         if len(trade["score_history"]) >= 3:
             if trade["score_history"][-3] < get_exit_threshold(trade_type) and score >= get_exit_threshold(trade_type) + 2:
                 await send_telegram_message(
-                    f"🔁 <b>Score Recovery Alert</b>\n"
-                    f"<b>Symbol:</b> {symbol}\n"
-                    f"<b>Recovered Score:</b> {score}\n"
-                    f"<i>Re-entry or hold may be considered.</i>"
+                    f"🔁 <b>Score Recovery Alert</b>
+<b>{symbol}</b> | Score rebound to {score}"
                 )
                 write_log(f"SCORE RECOVERY: {symbol} | Score rebounded to {score}")
 
-        # Detect bearish pattern
         last_candles = candles_by_tf['1'][-2:]
         pattern = detect_pattern(last_candles)
         if pattern in ["bearish_engulfing", "inverted_hammer"]:
             await send_telegram_message(
-                f"⚠️ <b>Bearish Reversal Pattern</b> on {symbol}\n"
-                f"<i>Pattern: {pattern} after entry. Watch closely.</i>"
+                f"⚠️ <b>Bearish Reversal Pattern</b> on {symbol}
+<i>Pattern: {pattern}</i>"
             )
             write_log(f"BEARISH PATTERN: {symbol} | Pattern: {pattern}")
 
-        # Volume drop warning
         recent_vol = float(candles_by_tf['1'][-1]['volume'])
         avg_vol = get_average_volume(candles_by_tf['1'], window=20)
         if recent_vol < avg_vol * 0.5:
             await send_telegram_message(
-                f"⚠️ <b>Volume Drop</b> on {symbol}\n"
-                f"Latest volume is below 50% of average.\n"
-                f"<i>Momentum fading. Watch this trade.</i>"
+                f"⚠️ <b>Volume Drop</b> on {symbol}
+Latest volume below 50% avg."
             )
             write_log(f"VOLUME DROP: {symbol} | Volume {recent_vol:.2f} < 50% avg {avg_vol:.2f}")
 
-        # Flat price warning
         closes = [float(c['close']) for c in candles_by_tf['1'][-5:]]
         if max(closes) - min(closes) < float(closes[-1]) * 0.002:
             await send_telegram_message(
-                f"😴 <b>Flat Price Action</b> on {symbol}\n"
-                f"<i>Volatility has dropped. Trend may be stalling.</i>"
+                f"😴 <b>Flat Price Action</b> on {symbol}
+<i>Low volatility detected.</i>"
             )
             write_log(f"FLAT PRICE: {symbol} | Low volatility detected")
