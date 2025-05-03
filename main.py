@@ -66,7 +66,7 @@ async def run_bot():
                 tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
-                sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
+                sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
 
