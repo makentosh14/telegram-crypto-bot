@@ -5,12 +5,20 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 from activity_logger import write_log
-from symbol_info import round_qty  # ✅ for dynamic qty precision
+from symbol_info import round_qty, symbol_precisions  # ✅ Added for precision and min_qty support
+
 
 def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
-    return max(round_qty(symbol, raw_qty), 0.001)
+
+    min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+    rounded_qty = round_qty(symbol, raw_qty)
+
+    if rounded_qty < min_qty:
+        return 0  # Too small — invalid
+    return rounded_qty
+
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -44,6 +52,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
+
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
@@ -68,6 +77,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         position_value = risk_amount * leverage
         raw_qty = position_value / price
         qty = calculate_quantity(symbol, raw_qty)
+
+        if qty <= 0:
+            log(f"❌ Skipping {symbol} — qty too low ({qty}) or invalid for Bybit min limit")
+            await send_telegram_message(
+                f"⚠️ Skipped <b>{symbol}</b>: Quantity too small or invalid for Bybit minimum."
+            )
+            return None
 
         if qty * price > usdt_balance * leverage:
             log(f"⚠️ Qty too large for balance! Requested ${qty * price:.2f} > Available {usdt_balance * leverage:.2f}")
