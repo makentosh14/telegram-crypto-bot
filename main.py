@@ -143,6 +143,15 @@ async def run_bot():
 
                     if trade:
                         log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
+    
+                        track_active_trade(
+                            symbol=symbol,
+                            trade_type=trade_type,
+                            initial_score=score,
+                            entry_price=price,
+                            direction=direction,
+                            trailing_pct=trade.get("trailing_pct")  # ✅ Enables smart trailing monitoring
+                        )
 
             await send_daily_report()
 
