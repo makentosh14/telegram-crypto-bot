@@ -59,7 +59,9 @@ async def run_bot():
                 leverage = DEFAULT_LEVERAGE
                 risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
-                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score} | Type: {trade_type} | Direction: {direction} | Confidence: {confidence}%")
+                tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
+                log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
+
 
                 sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
