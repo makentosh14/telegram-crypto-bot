@@ -46,3 +46,16 @@ def detect_slow_ramp(candles, lookback=6):
             f"❌ <b>Slow Ramp Detection Error</b>\nError: <code>{str(e)}</code>\n<pre>{traceback.format_exc()}</pre>"
         ))
         return False
+
+
+# volume.py
+
+def get_average_volume(candles, window=20):
+    """
+    Calculates the average volume over the last `window` candles.
+    """
+    if not candles or len(candles) < window:
+        return 0.0
+
+    volumes = [float(c['volume']) for c in candles[-window:]]
+    return sum(volumes) / len(volumes)
