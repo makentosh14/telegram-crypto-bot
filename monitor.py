@@ -4,7 +4,7 @@ from telegram_bot import send_telegram_message
 from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
-from logger import log
+from logger import log, write_log
 from exit_manager import should_trail_stop  # ✅ NEW
 
 active_trades = {}
@@ -57,6 +57,7 @@ async def monitor_trades(live_candles):
             }
         except Exception as e:
             log(f"Monitor: Failed to fetch candles for {symbol}: {e}", level="ERROR")
+            write_log(f"MONITOR ERROR: {symbol} candle fetch failed: {e}", level="ERROR")
             continue
 
         score, tf_scores, _ = score_symbol(symbol, candles_by_tf)
@@ -78,6 +79,7 @@ async def monitor_trades(live_candles):
                     f"<i>Smart SL activated by trailing logic.</i>"
                 )
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
+                write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
         # === Exit if score stays low too long ===
         if score < get_exit_threshold(trade_type):
@@ -90,6 +92,7 @@ async def monitor_trades(live_candles):
                     f"<i>Monitoring suggests closing this trade.</i>"
                 )
                 log(f"📉 Score drop exit triggered for {symbol}")
+                write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
                 continue
 
         # Rebound alert
@@ -101,6 +104,7 @@ async def monitor_trades(live_candles):
                     f"<b>Recovered Score:</b> {score}\n"
                     f"<i>Re-entry or hold may be considered.</i>"
                 )
+                write_log(f"SCORE RECOVERY: {symbol} | Score rebounded to {score}")
 
         # Detect bearish pattern
         last_candles = candles_by_tf['1'][-2:]
@@ -110,6 +114,7 @@ async def monitor_trades(live_candles):
                 f"⚠️ <b>Bearish Reversal Pattern</b> on {symbol}\n"
                 f"<i>Pattern: {pattern} after entry. Watch closely.</i>"
             )
+            write_log(f"BEARISH PATTERN: {symbol} | Pattern: {pattern}")
 
         # Volume drop warning
         recent_vol = float(candles_by_tf['1'][-1]['volume'])
@@ -120,6 +125,7 @@ async def monitor_trades(live_candles):
                 f"Latest volume is below 50% of average.\n"
                 f"<i>Momentum fading. Watch this trade.</i>"
             )
+            write_log(f"VOLUME DROP: {symbol} | Volume {recent_vol:.2f} < 50% avg {avg_vol:.2f}")
 
         # Flat price warning
         closes = [float(c['close']) for c in candles_by_tf['1'][-5:]]
@@ -128,3 +134,4 @@ async def monitor_trades(live_candles):
                 f"😴 <b>Flat Price Action</b> on {symbol}\n"
                 f"<i>Volatility has dropped. Trend may be stalling.</i>"
             )
+            write_log(f"FLAT PRICE: {symbol} | Low volatility detected")
