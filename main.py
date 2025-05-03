@@ -11,9 +11,10 @@ from logger import log
 from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
-from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING  # ✅
-from symbol_info import fetch_symbol_info 
+from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING
+from symbol_info import fetch_symbol_info
 from activity_logger import write_log
+from monitor import track_active_trade
 import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -21,13 +22,14 @@ active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
 
-MIN_SCALP_SCORE = 5
-MIN_INTRADAY_SCORE = 7.5
-MIN_SWING_SCORE = 8.5
+MIN_SCALP_SCORE = 6
+MIN_INTRADAY_SCORE = 7
+MIN_SWING_SCORE = 8
 
 async def run_bot():
     log("🚀 Bot starting...")
 
+    await fetch_symbol_info()  # ✅ Load min qty/precision before trading
     symbols = await fetch_symbols()
     log(f"✅ Fetched {len(symbols)} symbols.")
     asyncio.create_task(stream_candles(symbols))
@@ -64,7 +66,6 @@ async def run_bot():
                 tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
                 log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
-
                 sl, tp1, sl_pct, trailing_pct, _ = calculate_dynamic_sl_tp(
                     candles_by_tf, price, trade_type, direction, score, confidence
                 )
@@ -81,12 +82,11 @@ async def run_bot():
                 if (trade_type == "Scalp" and score < MIN_SCALP_SCORE) or \
                    (trade_type == "Intraday" and score < MIN_INTRADAY_SCORE) or \
                    (trade_type == "Swing" and score < MIN_SWING_SCORE):
-                   # Allow swing setups below BTC trend filter, but NOT below score threshold
-                   if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
-                       log(f"⚠️ Swing setup below min score ({score} < {MIN_SWING_SCORE}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
-                       continue
-                   continue
-                       
+                    if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
+                        log(f"⚠️ Swing setup below min score ({score} < {MIN_SWING_SCORE}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
+                        continue
+                    continue
+
                 if symbol in active_signals:
                     data = active_signals[symbol]
                     data['score_history'].append(score)
@@ -148,14 +148,14 @@ async def run_bot():
                     if trade:
                         log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
                         write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
-    
+
                         track_active_trade(
                             symbol=symbol,
                             trade_type=trade_type,
                             initial_score=score,
                             entry_price=price,
                             direction=direction,
-                            trailing_pct=trade.get("trailing_pct")  # ✅ Enables smart trailing monitoring
+                            trailing_pct=trade.get("trailing_pct")
                         )
 
             await send_daily_report()
