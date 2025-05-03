@@ -122,7 +122,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "orderType": "Market",
             "qty": str(qty),
             "timeInForce": "IOC",
-            "isLeverage": True
         }
 
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
