@@ -5,6 +5,7 @@ import asyncio
 from config import TELEGRAM_ASSISTANT_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 import sys
+import os
 
 
 def log(msg, level="INFO"):
@@ -14,10 +15,10 @@ def log(msg, level="INFO"):
     except UnicodeEncodeError:
         print(f"[{timestamp}] [{level}] {msg.encode('utf-8', 'ignore').decode('utf-8')}", file=sys.stderr)
 
-
     # Optionally forward to Telegram assistant channel
     if TELEGRAM_ASSISTANT_CHAT_ID and level in ["ERROR", "ALERT"]:
         asyncio.create_task(send_assistant_log(msg))
+
 
 async def send_assistant_log(message):
     if not message.strip():
@@ -36,3 +37,13 @@ async def send_assistant_log(message):
             await session.post(url, data=payload)
     except Exception as e:
         print(f"[Logger] Failed to send assistant log: {e}")
+
+
+def write_log(message, level="INFO"):
+    """
+    Writes logs to logs/activity.log with timestamp and level.
+    """
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    os.makedirs("logs", exist_ok=True)
+    with open("logs/activity.log", "a") as f:
+        f.write(f"[{timestamp}] [{level}] {message}\n")
