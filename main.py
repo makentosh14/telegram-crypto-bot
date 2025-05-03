@@ -12,6 +12,7 @@ from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
 from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING  # ✅
+from symbol_info import fetch_symbol_info 
 import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
