@@ -5,29 +5,12 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 from activity_logger import write_log
+from symbol_info import round_qty  # ✅ for dynamic qty precision
 
-
-def calculate_quantity(raw_qty, price, category="spot"):
+def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
-
-    if category == "spot":
-        if price < 0.1:
-            qty = round(raw_qty, 4)
-        elif price < 1:
-            qty = round(raw_qty, 3)
-        elif price < 100:
-            qty = round(raw_qty, 2)
-        else:
-            qty = round(raw_qty, 1)
-    else:
-        if price < 1:
-            qty = round(raw_qty, 3)
-        else:
-            qty = round(raw_qty, 1)
-
-    return max(qty, 0.001)
-
+    return max(round_qty(symbol, raw_qty), 0.001)
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -61,7 +44,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
-
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
@@ -82,10 +64,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         price = float(signal_data.get("price", 1.0))
         leverage = DEFAULT_LEVERAGE
-        risk_amount = usdt_balance * max_risk  # 🔥 uses only AVAILABLE balance
-        position_value = risk_amount * leverage  # 🔥 final market order value
+        risk_amount = usdt_balance * max_risk
+        position_value = risk_amount * leverage
         raw_qty = position_value / price
-        qty = calculate_quantity(raw_qty, price, category)
+        qty = calculate_quantity(symbol, raw_qty)
 
         if qty * price > usdt_balance * leverage:
             log(f"⚠️ Qty too large for balance! Requested ${qty * price:.2f} > Available {usdt_balance * leverage:.2f}")
@@ -128,11 +110,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
-            # Submit SL and TP1
             sl_side = "Sell" if direction == "Long" else "Buy"
-            write_log(f"STOP-LOSS SET: {symbol} at {sl} | Direction: {direction}")
             tp_side = sl_side
-            write_log(f"TAKE-PROFIT SET (TP1): {symbol} at {tp1} | Direction: {direction}")
 
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
@@ -159,7 +138,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | Type: {trade_type}")
-            
+
             await send_telegram_message(
                 f"📣 <b>{trade_type} {direction} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
@@ -200,4 +179,3 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         write_log(f"BALANCE ERROR: No available USDT for {symbol}", level="WARNING")
 
     return None
-
