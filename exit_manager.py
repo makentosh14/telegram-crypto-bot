@@ -24,15 +24,15 @@ def calculate_trailing_stop(symbol, entry_price, current_price, direction="long"
 
 def should_trail_stop(symbol, entry_price, current_price, direction="long", candles=None, trigger_pct=0.01, trail_pct=0.005):
     """
-    Checks if trailing stop should activate, based on:
-      - price exceeding the trigger threshold
-      - current volume > 1.2x average volume
-    Returns new SL price if activated, else None.
+    Checks if trailing stop should activate:
+      - price exceeds trigger threshold
+      - AND volume is at least 1.2x average (if candle data present)
     """
     if candles:
         avg_volume = get_average_volume(candles)
         current_volume = float(candles[-1]['volume'])
         if current_volume < avg_volume * 1.2:
-            return None  # Not enough volume to justify SL adjustment
+            write_log(f"🔕 Volume too low for trailing: {current_volume:.2f} < 1.2x avg {avg_volume:.2f}")
+            return None
 
     return calculate_trailing_stop(symbol, entry_price, current_price, direction, trigger_pct, trail_pct)
