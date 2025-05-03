@@ -145,6 +145,7 @@ async def run_bot():
 
                     if trade:
                         log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
+                        write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
     
                         track_active_trade(
                             symbol=symbol,
@@ -159,6 +160,7 @@ async def run_bot():
 
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
+            write_log(f"MAIN LOOP ERROR: {str(e)}", level="ERROR")
             await send_error_to_telegram(traceback.format_exc())
             await asyncio.sleep(5)
 
