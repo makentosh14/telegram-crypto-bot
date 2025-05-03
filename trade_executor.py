@@ -122,12 +122,42 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
             "qty": str(qty),
-            "timeInForce": "IOC"
+            "timeInForce": "IOC",
+            "isLeverage": True
         }
 
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
+            # Submit SL and TP1 orders
+            sl_side = "Sell" if direction == "Long" else "Buy"
+            tp_side = sl_side
+
+            # Take-Profit (TP1)
+            await signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": tp_side,
+                "orderType": "Limit",
+                "qty": str(qty),
+                "price": str(tp1),
+                "timeInForce": "GTC",
+                "reduceOnly": True
+            })
+
+            # Stop-Loss
+            await signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": sl_side,
+                "orderType": "Market",
+                "triggerDirection": 1 if direction == "Long" else 2,
+                "triggerPrice": str(sl),
+                "qty": str(qty),
+                "timeInForce": "IOC",
+                "reduceOnly": True
+            })
+
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
             await send_telegram_message(
                 f"📣 <b>{trade_type} {direction} Executed</b>\n"
