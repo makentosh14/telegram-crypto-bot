@@ -4,6 +4,7 @@ from config import DEFAULT_LEVERAGE
 from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
+from activity_logger import write_log
 
 
 def calculate_quantity(raw_qty, price, category="spot"):
@@ -129,7 +130,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         if order_result.get("retCode") == 0:
             # Submit SL and TP1
             sl_side = "Sell" if direction == "Long" else "Buy"
+            write_log(f"STOP-LOSS SET: {symbol} at {sl} | Direction: {direction}")
             tp_side = sl_side
+            write_log(f"TAKE-PROFIT SET (TP1): {symbol} at {tp1} | Direction: {direction}")
 
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
@@ -155,6 +158,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1}")
+            write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | Type: {trade_type}")
+            
             await send_telegram_message(
                 f"📣 <b>{trade_type} {direction} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
@@ -183,6 +188,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             )
             log(f"❌ Order failed payload: {order_payload}", level="ERROR")
             log(f"❌ Order failed response: {order_result}", level="ERROR")
+            write_log(f"ORDER FAILED: {symbol} | Reason: {error_msg} | Payload: {order_payload}", level="ERROR")
 
     except Exception as e:
         log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
@@ -191,6 +197,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             f"Symbol: <b>{symbol}</b>\n"
             f"Error: {str(e)}"
         )
+        write_log(f"BALANCE ERROR: No available USDT for {symbol}", level="WARNING")
 
     return None
 
