@@ -1,7 +1,7 @@
 import asyncio
 import traceback
 from logger import log
-from telegram_bot import send_error_to_telegram  # 🚨 make sure this is implemented
+from error_handler import send_error_to_telegram
 
 def is_bullish_engulfing(prev, curr):
     return (
