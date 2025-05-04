@@ -2,7 +2,7 @@ from bybit_api import signed_request, get_futures_available_balance
 from symbol_utils import get_symbol_category
 from config import DEFAULT_LEVERAGE
 from logger import log
-from telegram_bot import send_telegram_message
+from error_handler import send_telegram_message, send_error_to_telegram
 from atr import calculate_atr
 from activity_logger import write_log
 from symbol_info import round_qty, symbol_precisions
