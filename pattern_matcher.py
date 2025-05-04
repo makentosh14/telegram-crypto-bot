@@ -8,6 +8,8 @@ from telegram_bot import send_telegram_message
 from trade_executor import execute_trade_if_valid
 from logger import log, write_log
 from datetime import datetime
+from monitor import track_active_trade  # ✅ Track in monitor.py
+from monitor_report import log_trade_result  # ✅ Log wins/losses on exit
 
 TIMEFRAMES = ['1', '3', '5']
 MATCH_KEYS = ["pattern", "volume_spike"]
@@ -43,7 +45,7 @@ async def pattern_match_scan(symbols):
             volume_spike = volume_now > avg_volume * 1.5
 
             matched = []
-            for entry in patterns[-100:]:  # Only compare to last 100 patterns for speed
+            for entry in patterns[-100:]:
                 match_count = 0
                 if pattern_type and entry.get("pattern") == pattern_type:
                     match_count += 1
@@ -65,8 +67,8 @@ async def pattern_match_scan(symbols):
                 price = float(live_candles[symbol]['1'][-1]['close'])
                 confidence = 90
                 leverage = 5
-                risk_pct = 9.0  # Fixed 9% risk for pattern match
-                trailing_pct = 0.5  # Fixed for now
+                risk_pct = 9.0
+                trailing_pct = 0.5
 
                 sl = price * 0.985 if direction == "Long" else price * 1.015
                 tp1 = price * 1.018 if direction == "Long" else price * 0.982
@@ -95,5 +97,15 @@ async def pattern_match_scan(symbols):
                     log(f"🚀 Pattern-based trade executed for {symbol} | Entry: {price}")
                     write_log(f"AUTO TRADE (pattern match): {symbol} | Entry: {price} | SL: {sl} | TP1: {tp1}")
 
+                    # ✅ Register trade in monitor.py for smart exit tracking
+                    track_active_trade(
+                        symbol=symbol,
+                        trade_type="Scalp",
+                        initial_score=score,
+                        entry_price=price,
+                        direction=direction,
+                        trailing_pct=trailing_pct
+                    )
+
         except Exception as e:
-            log(f"❌ Pattern match failed for {symbol}: {e}")
+            log(f"❌ Pattern match failed for {symbol}: {e}", level="ERROR")
