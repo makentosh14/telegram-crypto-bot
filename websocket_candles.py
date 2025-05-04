@@ -4,7 +4,7 @@ import websockets
 from collections import defaultdict, deque
 from scanner import symbol_category_map
 from logger import log
-from telegram_bot import send_error_to_telegram  # NEW: send critical errors to Telegram
+from telegram_bot import send_error_to_telegram  # ✅ NEW: send critical errors to Telegram
 
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
 SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
@@ -63,8 +63,14 @@ async def handle_stream(url, symbols, category, interval):
                         log(f"📈 {symbol} [{category}] @{interval_from_topic} updated | total: {len(live_candles[symbol][interval_from_topic])}")
 
                     except asyncio.TimeoutError:
-                        warning = f"⚠️ No data received for {category} {interval}m in 30s — reconnecting..."
+                        warning = f"⚠️ No data for {category} {interval}m in 30s — reconnecting..."
                         log(warning, level="WARNING")
+                        await send_error_to_telegram(warning)
+                        break
+
+                    except websockets.exceptions.ConnectionClosedError as e:
+                        warning = f"❌ WebSocket closed unexpectedly for {category} {interval}m: {e}"
+                        log(warning, level="ERROR")
                         await send_error_to_telegram(warning)
                         break
 
