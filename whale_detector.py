@@ -1,6 +1,6 @@
 import asyncio
 import traceback
-from telegram_bot import send_error_to_telegram  # ✅ Ensure this exists
+from error_handler import send_error_to_telegram
 
 def detect_whale_activity(candles, threshold_ratio=1.8):
     """
