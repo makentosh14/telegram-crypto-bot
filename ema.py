@@ -1,5 +1,5 @@
 import asyncio
-from telegram_bot import send_error_to_telegram  # ✅ Add this import
+from error_handler import send_error_to_telegram
 
 def calculate_ema(candles, period):
     try:
