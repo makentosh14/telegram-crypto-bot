@@ -153,15 +153,17 @@ async def scan_for_new_signals(symbols):
                 )
                 log_trade_to_file(
                     symbol=symbol,
-                    score=score,
                     direction=direction,
-                    trade_type=trade_type,
                     entry=price,
                     sl=sl,
                     tp1=tp1,
                     tp2=tp2,
+                    result="open",  # Use "open" or another placeholder until trade closes
+                    score=score,
+                    trade_type=trade_type,
                     confidence=confidence
                 )
+
 
 async def run_bot():
     log("🚀 Bot starting...")
