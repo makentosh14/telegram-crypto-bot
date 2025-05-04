@@ -1,6 +1,6 @@
 # auto_reentry.py
 
-from telegram_bot import send_telegram_message
+from error_handler import send_telegram_message, send_error_to_telegram
 from logger import log, write_log
 from score import score_symbol, determine_direction
 
