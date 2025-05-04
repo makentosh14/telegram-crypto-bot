@@ -1,6 +1,6 @@
 import asyncio
 import traceback
-from telegram_bot import send_error_to_telegram  # 🚨 Ensure this function exists in telegram_bot.py
+from error_handler import send_error_to_telegram
 
 def calculate_bollinger_bands(candles, period=20, multiplier=2):
     """
