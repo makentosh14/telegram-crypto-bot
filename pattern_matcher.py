@@ -2,7 +2,7 @@ import asyncio
 from websocket_candles import live_candles
 from pattern_discovery import load_patterns
 from score import score_symbol
-from telegram_bot import send_telegram_message
+from error_handler import send_telegram_message, send_error_to_telegram
 from trade_executor import execute_trade_if_valid
 from logger import log, write_log
 from datetime import datetime
