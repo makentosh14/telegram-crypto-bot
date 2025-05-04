@@ -4,7 +4,7 @@ from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from stealth_detector import detect_slow_breakout
 from social_sentiment import check_social_sentiment
-from telegram_bot import send_error_to_telegram
+from error_handler import send_error_to_telegram
 from logger import log
 
 async def detect_early_pump(candles_by_tf, symbol):
