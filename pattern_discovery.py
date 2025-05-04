@@ -6,7 +6,7 @@ from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
 from logger import log, write_log
-from telegram_bot import send_telegram_message
+from error_handler import send_telegram_message, send_error_to_telegram
 from websocket_candles import live_candles
 
 import json
