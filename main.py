@@ -17,6 +17,9 @@ from monitor import track_active_trade, monitor_trades, load_active_trades
 from pattern_discovery import pattern_discovery_scan
 from pattern_matcher import pattern_match_scan
 import traceback
+from ai_memory import load_memory
+load_memory()
+
 
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
