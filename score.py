@@ -7,7 +7,7 @@ from pattern_detector import detect_pattern
 from volume import is_volume_spike
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
-from telegram_bot import send_error_to_telegram  # ✅ NEW
+from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING  # ✅ NEW
 from ai_memory import get_profile_confidence
 ai_conf = get_profile_confidence(tf_scores)
