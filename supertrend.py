@@ -1,5 +1,5 @@
 import asyncio
-from telegram_bot import send_error_to_telegram  # ✅ Telegram error sender
+from error_handler import send_error_to_telegram
 
 def calculate_atr(candles, period=10):
     try:
