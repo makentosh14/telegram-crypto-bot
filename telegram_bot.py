@@ -1,3 +1,5 @@
+# telegram_bot.py
+
 from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 import traceback
@@ -6,12 +8,12 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InputFile
 from logger import LOG_FILE
-from monitor import active_trades
-from error_handler import send_error_to_telegram
+from error_handler import send_error_to_telegram  # ✅ Use only from external file
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(bot)
+
 
 async def send_telegram_message(message):
     payload = {
@@ -28,18 +30,6 @@ async def send_telegram_message(message):
             await send_error_to_telegram(f"Telegram Error: {str(e)}")
             return None
 
-async def send_error_to_telegram(error_text):
-    error_msg = f"❗️<b>Bot Error/Crash Detected</b>\n<pre>{error_text}</pre>"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": error_msg[:4096],
-        "parse_mode": "HTML"
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            await session.post(BOT_URL, data=payload)
-    except Exception as e:
-        print(f"❌ Telegram crash-report failed: {e}")
 
 def format_trade_signal(
     symbol,
@@ -85,6 +75,7 @@ def format_trade_signal(
 
     return message
 
+
 async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct, reason):
     message = (
         f"🚀 <b>Early Pump Signal Detected</b>\n"
@@ -97,9 +88,11 @@ async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct
     )
     await send_telegram_message(message)
 
+
 # ✅ Command: /active
 @dp.message_handler(commands=["active"])
 async def handle_active_trades(message: types.Message):
+    from monitor import active_trades  # ⬅️ Lazy import avoids circular import
     if not active_trades:
         await message.reply("📭 No active trades currently being monitored.")
         return
@@ -125,6 +118,7 @@ async def handle_active_trades(message: types.Message):
 
     await message.reply(msg, parse_mode="HTML")
 
+
 # ✅ Command: /download_trades
 @dp.message_handler(commands=["download_trades"])
 async def handle_download_trades(message: types.Message):
@@ -133,6 +127,7 @@ async def handle_download_trades(message: types.Message):
         await message.reply_document(file_to_send, caption="📁 Trade log file attached.")
     else:
         await message.reply("❌ Log file not found.")
+
 
 # ✅ Start the bot
 def run_telegram_bot():
