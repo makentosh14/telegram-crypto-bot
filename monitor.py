@@ -1,5 +1,7 @@
 # monitor.py
 
+import json
+import os
 from telegram_bot import send_telegram_message
 from score import score_symbol
 from pattern_detector import detect_pattern
@@ -8,7 +10,29 @@ from logger import log, write_log
 from exit_manager import should_trail_stop  # ✅ NEW
 from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry  # ✅ Re-entry
 
+PERSIST_PATH = "monitor_active_trades.json"
+
 active_trades = {}
+
+def save_active_trades():
+    try:
+        with open(PERSIST_PATH, 'w') as f:
+            json.dump(active_trades, f, indent=2)
+    except Exception as e:
+        log(f"❌ Failed to save trades: {e}", level="ERROR")
+
+def load_active_trades():
+    global active_trades
+    if os.path.exists(PERSIST_PATH):
+        try:
+            with open(PERSIST_PATH, 'r') as f:
+                active_trades = json.load(f)
+                for symbol in active_trades:
+                    active_trades[symbol]["exited"] = False  # Reset on reload
+            log("🔁 Loaded active trades from disk")
+        except Exception as e:
+            log(f"❌ Failed to load active trades: {e}", level="ERROR")
+
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None):
     active_trades[symbol] = {
@@ -23,10 +47,12 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "tp1_hit": False,
         "tp2": None
     }
+    save_active_trades()
 
 def remove_trade(symbol):
     if symbol in active_trades:
         del active_trades[symbol]
+        save_active_trades()
 
 def get_exit_threshold(trade_type):
     return {
@@ -103,6 +129,7 @@ async def monitor_trades(live_candles):
                 log(f"📉 Score drop exit triggered for {symbol}")
                 write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
                 log_exit(symbol, score)
+                save_active_trades()
                 continue
 
         if should_reenter(symbol, score):
@@ -137,3 +164,7 @@ async def monitor_trades(live_candles):
                 f"😴 <b>Flat Price Action</b> on {symbol}\n<i>Low volatility detected.</i>"
             )
             write_log(f"FLAT PRICE: {symbol} | Low volatility detected")
+
+    save_active_trades()
+
+
