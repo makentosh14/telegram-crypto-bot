@@ -14,6 +14,7 @@ from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
 from activity_logger import write_log
 from monitor import track_active_trade, monitor_trades, load_active_trades
+from pattern_discovery import pattern_discovery_scan
 import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -193,3 +194,14 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
+
+async def pattern_discovery_loop(symbols):
+    while True:
+        try:
+            await pattern_discovery_scan(symbols)
+        except Exception as e:
+            log(f"❌ Error in pattern discovery loop: {e}", level="ERROR")
+        await asyncio.sleep(60)  # Run every 60 seconds
+
+asyncio.create_task(pattern_discovery_loop(symbols))
+
