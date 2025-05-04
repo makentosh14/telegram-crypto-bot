@@ -167,4 +167,5 @@ async def monitor_trades(live_candles):
 
     save_active_trades()
 
-
+# Call this once in main.py before monitor_trades starts
+    load_active_trades()
