@@ -4,7 +4,6 @@ import aiohttp
 import asyncio
 from config import BYBIT_API_URL
 from logger import log
-from telegram_bot import send_error_to_telegram  # NEW
 from error_handler import send_error_to_telegram  # ✅ instead of telegram_bot
 
 symbol_category_map = {}
