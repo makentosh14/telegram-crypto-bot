@@ -7,7 +7,9 @@ from score import score_symbol, determine_direction
 cooldown_exits = {}
 COOLDOWN_CYCLES = 12  # wait ~6m after exit before reentry
 
-def log_exit(symbol):
+def log_exit(symbol, score):
+    write_log(f"EXIT LOGGED: {symbol} | Final Score: {score}")
+    # You can store this in a pattern or performance memory too
     cooldown_exits[symbol] = COOLDOWN_CYCLES
 
 def update_exit_cooldowns():
