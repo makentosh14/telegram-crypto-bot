@@ -115,6 +115,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "category": category
         })
 
+        # Place Market Entry Order
         order_payload = {
             "category": category,
             "symbol": symbol,
@@ -130,7 +131,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
 
-            await signed_request("POST", "/v5/order/create", {
+            # Place TP1
+            tp_result = await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": tp_side,
@@ -141,17 +143,29 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            await signed_request("POST", "/v5/order/create", {
+            # Place SL as conditional trigger-market order
+            sl_result = await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": sl_side,
                 "orderType": "Market",
-                "triggerDirection": 1 if direction == "Long" else 2,
                 "triggerPrice": str(sl),
+                "triggerDirection": 1 if direction == "Long" else 2,
+                "triggerBy": "LastPrice",  # ✅ Required to trigger SL
                 "qty": str(qty),
-                "timeInForce": "IOC",
-                "reduceOnly": True
+                "reduceOnly": True,
+                "timeInForce": "GTC"
             })
+
+            if tp_result.get("retCode") != 0:
+                await send_telegram_message(
+                    f"⚠️ <b>TP1 Order Warning</b> for {symbol}\nCould not place TP1. Response: {tp_result.get('retMsg')}"
+                )
+
+            if sl_result.get("retCode") != 0:
+                await send_telegram_message(
+                    f"⚠️ <b>SL Order Warning</b> for {symbol}\nCould not place SL. Response: {sl_result.get('retMsg')}"
+                )
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
@@ -162,6 +176,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 f"Qty: {qty} | SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1} | TP2: {tp2}\n"
                 f"Trailing SL activates after TP1 hit ({trailing_pct:.2f}% base)"
             )
+
             return {
                 "entry": price,
                 "sl": sl,
