@@ -15,6 +15,7 @@ from symbol_info import fetch_symbol_info
 from activity_logger import write_log
 from monitor import track_active_trade, monitor_trades, load_active_trades
 from pattern_discovery import pattern_discovery_scan
+from pattern_matcher import pattern_match_scan
 import traceback
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -204,4 +205,15 @@ async def pattern_discovery_loop(symbols):
         await asyncio.sleep(60)  # Run every 60 seconds
 
 asyncio.create_task(pattern_discovery_loop(symbols))
+
+async def pattern_match_loop(symbols):
+    while True:
+        try:
+            await pattern_match_scan(symbols)
+        except Exception as e:
+            log(f"❌ Error in pattern match loop: {e}")
+        await asyncio.sleep(60)  # Run every 60s
+
+asyncio.create_task(pattern_match_loop(symbols))
+
 
