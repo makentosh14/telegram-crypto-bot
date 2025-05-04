@@ -1,4 +1,3 @@
-from telegram_bot import send_error_to_telegram# ✅ For error reporting
 from error_handler import send_error_to_telegram  # ✅ instead of telegram_bot
 
 def calculate_ema(values, period):
