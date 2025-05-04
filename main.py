@@ -230,5 +230,5 @@ async def pattern_summary_loop():
         pattern_stats['matches'] = 0
         pattern_stats['trades'] = 0
 
-
+asyncio.create_task(pattern_summary_loop())
 
