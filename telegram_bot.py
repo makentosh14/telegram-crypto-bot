@@ -7,6 +7,7 @@ from aiogram.utils import executor
 from aiogram.types import InputFile
 from logger import LOG_FILE
 from monitor import active_trades
+from error_handler import send_error_to_telegram
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
