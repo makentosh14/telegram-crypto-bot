@@ -10,8 +10,6 @@ from whale_detector import detect_whale_activity
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING  # ✅ NEW
 from ai_memory import get_profile_confidence
-ai_conf = get_profile_confidence(tf_scores)
-
 
 def score_symbol(symbol, candles_by_timeframe):
     tf_scores = {}
@@ -117,5 +115,6 @@ def calculate_confidence(score, tf_scores, trend_context, trade_type):
         trend_boost = 2 if trend_context.get("btc_trend") == "strong" or trend_context.get("altseason") else 0
 
     tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
-    confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
+    ai_conf = get_profile_confidence(tf_scores)
+    confidence = (score + trend_boost + tf_alignment + ai_conf / 25) / (max_score + 4) * 100
     return round(min(confidence, 100), 1)
