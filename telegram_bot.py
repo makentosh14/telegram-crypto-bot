@@ -1,8 +1,16 @@
 from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 import traceback
+import os
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+from aiogram.types import InputFile
+from logger import LOG_FILE
+from monitor import active_trades
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
+dp = Dispatcher(bot)
 
 async def send_telegram_message(message):
     payload = {
@@ -88,41 +96,43 @@ async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct
     )
     await send_telegram_message(message)
 
-# ✅ Optional: command support via aiogram (if enabled in your bot)
-try:
-    from aiogram import Bot, Dispatcher, types
-    from aiogram.utils import executor
-    from monitor import active_trades
+# ✅ Command: /active
+@dp.message_handler(commands=["active"])
+async def handle_active_trades(message: types.Message):
+    if not active_trades:
+        await message.reply("📭 No active trades currently being monitored.")
+        return
 
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    dp = Dispatcher(bot)
+    msg = "📡 <b>Active Trade Setups:</b>\n"
+    for symbol, trade in active_trades.items():
+        if trade.get("exited"):
+            continue
 
-    @dp.message_handler(commands=["active"])
-    async def handle_active_trades(message: types.Message):
-        if not active_trades:
-            await message.reply("📭 No active trades currently being monitored.")
-            return
+        trade_type = trade.get("trade_type", "N/A")
+        entry = trade.get("entry_price", "?")
+        direction = trade.get("direction", "?")
+        trailing_sl = trade.get("trailing_sl", "Not set")
+        tp1_hit = "✅" if trade.get("tp1_hit") else "❌"
+        tp2_hit = "✅" if trade.get("tp2_hit") else "❌"
 
-        msg = "📡 <b>Active Trade Setups:</b>\n"
-        for symbol, trade in active_trades.items():
-            if trade.get("exited"):
-                continue
+        msg += (
+            f"\n<b>{symbol}</b> | {direction} ({trade_type})\n"
+            f"• Entry: {entry}\n"
+            f"• Trailing SL: {trailing_sl}\n"
+            f"• TP1 Hit: {tp1_hit} | TP2 Hit: {tp2_hit}\n"
+        )
 
-            trade_type = trade.get("trade_type", "N/A")
-            entry = trade.get("entry_price", "?")
-            direction = trade.get("direction", "?")
-            trailing_sl = trade.get("trailing_sl", "Not set")
-            tp1_hit = "✅" if trade.get("tp1_hit") else "❌"
-            tp2_hit = "✅" if trade.get("tp2_hit") else "❌"
+    await message.reply(msg, parse_mode="HTML")
 
-            msg += (
-                f"\n<b>{symbol}</b> | {direction} ({trade_type})\n"
-                f"• Entry: {entry}\n"
-                f"• Trailing SL: {trailing_sl}\n"
-                f"• TP1 Hit: {tp1_hit} | TP2 Hit: {tp2_hit}\n"
-            )
+# ✅ Command: /download_trades
+@dp.message_handler(commands=["download_trades"])
+async def handle_download_trades(message: types.Message):
+    if os.path.exists(LOG_FILE):
+        file_to_send = InputFile(LOG_FILE)
+        await message.reply_document(file_to_send, caption="📁 Trade log file attached.")
+    else:
+        await message.reply("❌ Log file not found.")
 
-        await message.reply(msg, parse_mode="HTML")
-
-except ImportError:
-    pass  # aiogram not used — safe fallback
+# ✅ Start the bot
+def run_telegram_bot():
+    executor.start_polling(dp, skip_updates=True)
