@@ -40,6 +40,7 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "exited": False,
         "trailing_pct": trailing_pct,
         "trailing_sl": None,
+        "original_sl": sl,
         "tp1_hit": False,
         "tp2_hit": False,
         "tp2": tp2
@@ -100,8 +101,8 @@ async def monitor_trades(live_candles):
         trailing_pct = trade.get("trailing_pct")
 
         # ✅ SL Hit
-        if trade.get("trailing_sl"):
-            sl_price = trade["trailing_sl"]
+        if not trade.get("tp1_hit") and trade.get("original_sl"):
+            sl_price = trade["original_sl"]
             if (direction == "Long" and current_price <= sl_price) or (direction == "Short" and current_price >= sl_price):
                 trade["exited"] = True
                 await send_telegram_message(
