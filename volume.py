@@ -1,5 +1,5 @@
 import asyncio
-from telegram_bot import send_error_to_telegram  # ✅ For crash reporting
+from error_handler import send_error_to_telegram
 
 def is_volume_spike(candles, multiplier=2.0):
     """
