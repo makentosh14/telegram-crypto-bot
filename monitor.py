@@ -1,6 +1,5 @@
 import json
 import os
-from telegram_bot import send_telegram_message
 from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
@@ -69,6 +68,7 @@ def get_exit_cycles(trade_type):
     }.get(trade_type, 3)
 
 async def monitor_trades(live_candles):
+    from telegram_bot import send_telegram_message  # ✅ Lazy import to fix circular import
     update_exit_cooldowns()
 
     for symbol, trade in list(active_trades.items()):
@@ -113,7 +113,7 @@ async def monitor_trades(live_candles):
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                 log_exit(symbol, score)
                 log_trade_result(symbol, tf_scores, "loss")
-                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0)  # ✅ File log
+                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0)
                 save_active_trades()
                 continue
 
