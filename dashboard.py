@@ -1,11 +1,13 @@
+# ✅ Updated dashboard.py to include indicator score breakdown
+
 import pandas as pd
 import streamlit as st
 import os
 from datetime import datetime
+import ast
 
 LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 
-# Load trade data
 def load_data():
     if os.path.exists(LOG_PATH):
         df = pd.read_csv(LOG_PATH)
@@ -33,6 +35,26 @@ def display_summary_stats(df):
     col2.metric("Win Rate", f"{win_rate:.1f}%")
     col3.metric("Avg Score", f"{avg_score:.2f}")
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
+
+def display_indicator_details(df):
+    st.write("### Indicator Breakdown for Most Recent Trade")
+    latest = df.iloc[0]
+
+    if "indicator_scores" in latest and pd.notna(latest["indicator_scores"]):
+        try:
+            scores = ast.literal_eval(latest["indicator_scores"])
+            st.write("**Indicator Scores:**")
+            st.json(scores)
+        except Exception as e:
+            st.error(f"Error parsing indicator scores: {e}")
+
+    if "used_indicators" in latest and pd.notna(latest["used_indicators"]):
+        try:
+            indicators = ast.literal_eval(latest["used_indicators"])
+            st.write("**Used Indicators:**")
+            st.markdown(", ".join(indicators))
+        except Exception as e:
+            st.error(f"Error parsing used indicators: {e}")
 
 def filter_data(df):
     symbols = df.symbol.unique().tolist()
@@ -64,6 +86,7 @@ def main():
     df = filter_data(df)
     display_summary_stats(df)
     display_trade_table(df)
+    display_indicator_details(df)
 
 if __name__ == "__main__":
     main()
