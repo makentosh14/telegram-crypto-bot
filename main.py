@@ -151,7 +151,7 @@ async def scan_for_new_signals(symbols):
                     direction=direction,
                     trailing_pct=trade.get("trailing_pct")
                 )
-                log_trade_to_csv(
+                log_trade_to_file(
                     symbol=symbol,
                     score=score,
                     direction=direction,
