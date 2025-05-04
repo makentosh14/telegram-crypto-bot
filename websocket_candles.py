@@ -4,7 +4,7 @@ import websockets
 from collections import defaultdict, deque
 from scanner import symbol_category_map
 from logger import log
-from telegram_bot import send_error_to_telegram  # ✅ NEW: send critical errors to Telegram
+from error_handler import send_error_to_telegram
 
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
 SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
