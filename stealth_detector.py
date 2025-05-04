@@ -1,6 +1,6 @@
 import asyncio
 import traceback
-from telegram_bot import send_error_to_telegram  # ✅ ensure this exists
+from error_handler import send_error_to_telegram
 
 def detect_volume_divergence(candles, min_growth_ratio=1.2):
     """
