@@ -216,4 +216,19 @@ async def pattern_match_loop(symbols):
 
 asyncio.create_task(pattern_match_loop(symbols))
 
+async def pattern_summary_loop():
+    while True:
+        await asyncio.sleep(3600)  # 1 hour
+        from pattern_matcher import pattern_stats
+        await send_telegram_message(
+            f"⏱ <b>Pattern Scan Summary (last hour)</b>\n"
+            f"Scans: {pattern_stats['scans']}\n"
+            f"Matches: {pattern_stats['matches']}\n"
+            f"Trades Triggered: {pattern_stats['trades']}"
+        )
+        pattern_stats['scans'] = 0
+        pattern_stats['matches'] = 0
+        pattern_stats['trades'] = 0
+
+
 
