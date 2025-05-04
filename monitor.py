@@ -8,6 +8,7 @@ from logger import log, write_log
 from exit_manager import should_trail_stop
 from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
 from ai_memory import log_trade_result
+from activity_logger import log_trade_to_file  # ✅ NEW
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
@@ -111,7 +112,8 @@ async def monitor_trades(live_candles):
                 )
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                 log_exit(symbol, score)
-                log_trade_result(symbol, tf_scores, "loss")  # 🧠 AI memory
+                log_trade_result(symbol, tf_scores, "loss")
+                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0)  # ✅ File log
                 save_active_trades()
                 continue
 
@@ -136,9 +138,10 @@ async def monitor_trades(live_candles):
                     f"🏁 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}"
                 )
                 write_log(f"TP2 HIT: {symbol} | Reached: {current_price}")
-                log_trade_result(symbol, tf_scores, "win")  # 🧠 AI memory
+                log_trade_result(symbol, tf_scores, "win")
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0)
 
-        # ✅ Trailing SL update
+        # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
             new_sl = should_trail_stop(
                 symbol, entry_price, current_price, direction.lower(),
@@ -154,7 +157,7 @@ async def monitor_trades(live_candles):
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
-        # ✅ Score-based exit
+        # ✅ Score-based Exit
         if score < get_exit_threshold(trade_type):
             if trade["cycles"] >= get_exit_cycles(trade_type):
                 trade["exited"] = True
@@ -164,7 +167,8 @@ async def monitor_trades(live_candles):
                 log(f"📉 Score drop exit triggered for {symbol}")
                 write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
                 log_exit(symbol, score)
-                log_trade_result(symbol, tf_scores, "breakeven")  # 🧠 AI memory
+                log_trade_result(symbol, tf_scores, "breakeven")
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0)
                 save_active_trades()
                 continue
 
@@ -172,7 +176,7 @@ async def monitor_trades(live_candles):
         if should_reenter(symbol, score):
             await handle_reentry(symbol, score)
 
-        # ✅ Score Recovery Alert
+        # ✅ Score Recovery
         if len(trade["score_history"]) >= 3:
             if trade["score_history"][-3] < get_exit_threshold(trade_type) and score >= get_exit_threshold(trade_type) + 2:
                 await send_telegram_message(
@@ -189,7 +193,7 @@ async def monitor_trades(live_candles):
             )
             write_log(f"BEARISH PATTERN: {symbol} | Pattern: {pattern}")
 
-        # ✅ Volume Drop Warning
+        # ✅ Volume Drop
         recent_vol = float(candles_by_tf['1'][-1]['volume'])
         avg_vol = get_average_volume(candles_by_tf['1'], window=20)
         if recent_vol < avg_vol * 0.5:
@@ -208,5 +212,5 @@ async def monitor_trades(live_candles):
 
     save_active_trades()
 
-# Call this once in main.py
+# Init on startup
 load_active_trades()
