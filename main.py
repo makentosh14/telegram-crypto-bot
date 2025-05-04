@@ -12,7 +12,7 @@ from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
-from activity_logger import write_log
+from activity_logger import write_log, log_trade_to_file
 from monitor import track_active_trade, monitor_trades, load_active_trades
 from pattern_discovery import pattern_discovery_scan
 from pattern_matcher import pattern_match_scan
