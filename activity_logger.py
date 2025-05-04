@@ -5,7 +5,7 @@ from datetime import datetime
 
 LOG_PATH = "/mnt/data/bot_logs"
 LOG_FILE = os.path.join(LOG_PATH, "trading_bot_activity.log")
-TRADE_LOG_CSV = os.path.join(LOG_PATH, "trade_log.csv")
+TRADE_LOG_CSV = "/mnt/data/trade_logs/trade_setups.csv"
 
 # Ensure directory exists
 os.makedirs(LOG_PATH, exist_ok=True)
