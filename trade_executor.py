@@ -5,7 +5,7 @@ from logger import log
 from telegram_bot import send_telegram_message
 from atr import calculate_atr
 from activity_logger import write_log
-from symbol_info import round_qty, symbol_precisions  # ✅ Added for precision and min_qty support
+from symbol_info import round_qty, symbol_precisions
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -16,7 +16,7 @@ def calculate_quantity(symbol, raw_qty):
     rounded_qty = round_qty(symbol, raw_qty)
 
     if rounded_qty < min_qty:
-        return 0  # Too small — invalid
+        return 0
     return rounded_qty
 
 
@@ -143,7 +143,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # Place SL as conditional trigger-market order
+            # ✅ Place SL with orderFilter: "Stop"
             sl_result = await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -151,10 +151,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": 1 if direction == "Long" else 2,
-                "triggerBy": "LastPrice",  # ✅ Required to trigger SL
+                "triggerBy": "LastPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
-                "timeInForce": "GTC"
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"  # ✅ Fix applied
             })
 
             if tp_result.get("retCode") != 0:
