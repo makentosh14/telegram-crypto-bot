@@ -1,5 +1,3 @@
-# pattern_matcher.py
-
 import asyncio
 from websocket_candles import live_candles
 from pattern_discovery import load_patterns
@@ -8,19 +6,28 @@ from telegram_bot import send_telegram_message
 from trade_executor import execute_trade_if_valid
 from logger import log, write_log
 from datetime import datetime
-from monitor import track_active_trade  # ✅ Track in monitor.py
-from monitor_report import log_trade_result  # ✅ Log wins/losses on exit
+from monitor import track_active_trade
+from monitor_report import log_trade_result
 
 TIMEFRAMES = ['1', '3', '5']
 MATCH_KEYS = ["pattern", "volume_spike"]
 MATCH_INDICATORS = ["rsi", "macd", "supertrend"]
-MIN_MATCH_SCORE = 3  # Require 3/5 matches to trigger
+MIN_MATCH_SCORE = 3
+
+# ✅ Pattern tracking stats for hourly summaries or commands
+pattern_stats = {
+    "scans": 0,
+    "matches": 0,
+    "trades": 0
+}
 
 async def pattern_match_scan(symbols):
     patterns = load_patterns()
 
     for symbol in symbols:
         await asyncio.sleep(1.5)
+        pattern_stats["scans"] += 1  # ✅ Count every scan
+
         if symbol not in live_candles:
             continue
 
@@ -63,6 +70,8 @@ async def pattern_match_scan(symbols):
                     matched.append(entry)
 
             if matched:
+                pattern_stats["matches"] += 1  # ✅ Track matched patterns
+
                 direction = "Long" if tf_scores.get("rsi", 0) > 45 else "Short"
                 price = float(live_candles[symbol]['1'][-1]['close'])
                 confidence = 90
@@ -72,6 +81,7 @@ async def pattern_match_scan(symbols):
 
                 sl = price * 0.985 if direction == "Long" else price * 1.015
                 tp1 = price * 1.018 if direction == "Long" else price * 0.982
+                tp2 = price * 1.035 if direction == "Long" else price * 0.965
 
                 msg = (
                     f"🧠 <b>Pattern Match Signal</b>\n"
@@ -94,17 +104,20 @@ async def pattern_match_scan(symbols):
                 })
 
                 if trade:
+                    pattern_stats["trades"] += 1  # ✅ Track executed trades
                     log(f"🚀 Pattern-based trade executed for {symbol} | Entry: {price}")
                     write_log(f"AUTO TRADE (pattern match): {symbol} | Entry: {price} | SL: {sl} | TP1: {tp1}")
 
-                    # ✅ Register trade in monitor.py for smart exit tracking
+                    # ✅ Register trade in monitor for ongoing tracking
                     track_active_trade(
                         symbol=symbol,
                         trade_type="Scalp",
                         initial_score=score,
                         entry_price=price,
                         direction=direction,
-                        trailing_pct=trailing_pct
+                        trailing_pct=trailing_pct,
+                        tp2=tp2,
+                        sl=sl
                     )
 
         except Exception as e:
