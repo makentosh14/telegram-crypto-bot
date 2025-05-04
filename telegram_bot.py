@@ -23,7 +23,7 @@ async def send_error_to_telegram(error_text):
     error_msg = f"❗️<b>Bot Error/Crash Detected</b>\n<pre>{error_text}</pre>"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": error_msg[:4096],  # Telegram max length
+        "text": error_msg[:4096],
         "parse_mode": "HTML"
     }
     try:
@@ -87,3 +87,42 @@ async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct
         f"⚡ <i>Monitoring for breakout, Smart SL/TP activation on momentum</i>"
     )
     await send_telegram_message(message)
+
+# ✅ Optional: command support via aiogram (if enabled in your bot)
+try:
+    from aiogram import Bot, Dispatcher, types
+    from aiogram.utils import executor
+    from monitor import active_trades
+
+    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    dp = Dispatcher(bot)
+
+    @dp.message_handler(commands=["active"])
+    async def handle_active_trades(message: types.Message):
+        if not active_trades:
+            await message.reply("📭 No active trades currently being monitored.")
+            return
+
+        msg = "📡 <b>Active Trade Setups:</b>\n"
+        for symbol, trade in active_trades.items():
+            if trade.get("exited"):
+                continue
+
+            trade_type = trade.get("trade_type", "N/A")
+            entry = trade.get("entry_price", "?")
+            direction = trade.get("direction", "?")
+            trailing_sl = trade.get("trailing_sl", "Not set")
+            tp1_hit = "✅" if trade.get("tp1_hit") else "❌"
+            tp2_hit = "✅" if trade.get("tp2_hit") else "❌"
+
+            msg += (
+                f"\n<b>{symbol}</b> | {direction} ({trade_type})\n"
+                f"• Entry: {entry}\n"
+                f"• Trailing SL: {trailing_sl}\n"
+                f"• TP1 Hit: {tp1_hit} | TP2 Hit: {tp2_hit}\n"
+            )
+
+        await message.reply(msg, parse_mode="HTML")
+
+except ImportError:
+    pass  # aiogram not used — safe fallback
