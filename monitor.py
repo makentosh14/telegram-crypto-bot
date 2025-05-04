@@ -1,5 +1,3 @@
-# monitor.py
-
 import json
 import os
 from telegram_bot import send_telegram_message
@@ -7,11 +5,10 @@ from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
 from logger import log, write_log
-from exit_manager import should_trail_stop  # ✅ NEW
-from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry  # ✅ Re-entry
+from exit_manager import should_trail_stop
+from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
 
 PERSIST_PATH = "monitor_active_trades.json"
-
 active_trades = {}
 
 def save_active_trades():
@@ -28,11 +25,10 @@ def load_active_trades():
             with open(PERSIST_PATH, 'r') as f:
                 active_trades = json.load(f)
                 for symbol in active_trades:
-                    active_trades[symbol]["exited"] = False  # Reset on reload
+                    active_trades[symbol]["exited"] = False
             log("🔁 Loaded active trades from disk")
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
-
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None):
     active_trades[symbol] = {
@@ -72,7 +68,12 @@ async def monitor_trades(live_candles):
     update_exit_cooldowns()
 
     for symbol, trade in list(active_trades.items()):
-        if trade["exited"]:
+        if trade.get("exited"):
+            continue
+
+        # ✅ Skip trades with no real entry or missing direction
+        if not trade.get("entry_price") or not trade.get("direction"):
+            write_log(f"🚫 Skipping ghost trade: {symbol} — Missing entry data")
             continue
 
         trade_type = trade["trade_type"]
@@ -167,5 +168,5 @@ async def monitor_trades(live_candles):
 
     save_active_trades()
 
-# Call this once in main.py before monitor_trades starts
-    load_active_trades()
+# Ensure this is called once in main.py
+load_active_trades()
