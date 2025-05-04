@@ -7,6 +7,9 @@ from volume import get_average_volume
 from logger import log, write_log
 from exit_manager import should_trail_stop
 from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
+from ai_memory import log_trade_result
+log_trade_result(symbol, tf_scores, result)  # result = "win", "loss", or "breakeven"
+
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
