@@ -151,6 +151,17 @@ async def scan_for_new_signals(symbols):
                     direction=direction,
                     trailing_pct=trade.get("trailing_pct")
                 )
+                log_trade_to_csv(
+                    symbol=symbol,
+                    score=score,
+                    direction=direction,
+                    trade_type=trade_type,
+                    entry=price,
+                    sl=sl,
+                    tp1=tp1,
+                    tp2=tp2,
+                    confidence=confidence
+                )
 
 async def run_bot():
     log("🚀 Bot starting...")
