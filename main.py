@@ -158,11 +158,13 @@ async def scan_for_new_signals(symbols):
                     sl=sl,
                     tp1=tp1,
                     tp2=tp2,
-                    result="open",  # Use "open" or another placeholder until trade closes
+                    result="open",
                     score=score,
                     trade_type=trade_type,
-                    confidence=confidence
-                )
+                    confidence=confidence,
+                    indicator_scores=trade.get("indicator_scores", {}),
+                    used_indicators=trade.get("used_indicators", [])
+               )
 
 
 async def run_bot():
