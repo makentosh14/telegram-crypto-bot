@@ -10,7 +10,7 @@ LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 
 def load_data():
     if os.path.exists(LOG_PATH):
-        df = pd.read_csv(LOG_PATH)
+        df = pd.read_csv(LOG_PATH, engine="python", quotechar='"', skip_blank_lines=True, error_bad_lines=False)
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         df = df.sort_values(by="timestamp", ascending=False)
         return df
