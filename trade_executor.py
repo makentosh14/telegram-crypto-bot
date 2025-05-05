@@ -6,6 +6,7 @@ from error_handler import send_telegram_message, send_error_to_telegram
 from atr import calculate_atr
 from activity_logger import write_log
 from symbol_info import round_qty, symbol_precisions
+from score import score_symbol, determine_direction, calculate_confidence  # ✅ Ensure direction logic is accurate
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -97,6 +98,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
         candles_by_tf = signal_data.get("candles")
+        indicator_scores = signal_data.get("indicator_scores", {})
+        used_indicators = signal_data.get("used_indicators", [])
 
         sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence
@@ -155,7 +158,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
-                "orderFilter": "Stop"  # ✅ Fix applied
+                "orderFilter": "Stop"
             })
 
             if tp_result.get("retCode") != 0:
