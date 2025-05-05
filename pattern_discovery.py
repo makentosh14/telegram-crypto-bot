@@ -96,6 +96,7 @@ async def pattern_discovery_scan(symbols):
 
             log(f"🔍 Pattern found on {symbol} ({direction}) | Move: {pattern_record['move_pct']}%")
             write_log(f"PATTERN FOUND: {symbol} | {pattern_record}")
+            write_log("PATTERN DISCOVERY: cycle running...")
 
         except Exception as e:
             log(f"❌ Pattern scan failed for {symbol}: {e}", level="ERROR")
