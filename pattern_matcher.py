@@ -119,6 +119,7 @@ async def pattern_match_scan(symbols):
                         tp2=tp2,
                         sl=sl
                     )
+                    
                     write_log("PATTERN MATCH: cycle running...")
 
         except Exception as e:
