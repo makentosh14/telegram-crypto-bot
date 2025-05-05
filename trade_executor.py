@@ -190,7 +190,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "sl_pct": sl_pct,
                 "tp1_pct": tp1_pct,
                 "tp2_pct": tp2_pct,
-                "trailing_pct": trailing_pct
+                "trailing_pct": trailing_pct,
+                "indicator_scores": indicator_scores,
+                "used_indicators": used_indicators
             }
         else:
             error_msg = order_result.get("retMsg", "Unknown error")
