@@ -20,7 +20,6 @@ import traceback
 from ai_memory import load_memory
 load_memory()
 
-
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
 recent_exits = {}
@@ -58,7 +57,7 @@ async def scan_for_new_signals(symbols):
         risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
-        log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
+        log(f"\U0001f4ca [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
         sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence
@@ -164,8 +163,46 @@ async def scan_for_new_signals(symbols):
                     confidence=confidence,
                     indicator_scores=trade.get("indicator_scores", {}),
                     used_indicators=trade.get("used_indicators", [])
-               )
+                )
 
+async def monitor_loop():
+    while True:
+        try:
+            await monitor_trades(live_candles)
+        except Exception as e:
+            log(f"❌ Error in monitor loop: {e}", level="ERROR")
+            await send_error_to_telegram(traceback.format_exc())
+        await asyncio.sleep(5)
+
+async def pattern_discovery_loop(symbols):
+    while True:
+        try:
+            await pattern_discovery_scan(symbols)
+        except Exception as e:
+            log(f"❌ Error in pattern discovery loop: {e}", level="ERROR")
+        await asyncio.sleep(60)
+
+async def pattern_match_loop(symbols):
+    while True:
+        try:
+            await pattern_match_scan(symbols)
+        except Exception as e:
+            log(f"❌ Error in pattern match loop: {e}")
+        await asyncio.sleep(60)
+
+async def pattern_summary_loop():
+    while True:
+        await asyncio.sleep(3600)
+        from pattern_matcher import pattern_stats
+        await send_telegram_message(
+            f"⏱ <b>Pattern Scan Summary (last hour)</b>\n"
+            f"Scans: {pattern_stats['scans']}\n"
+            f"Matches: {pattern_stats['matches']}\n"
+            f"Trades Triggered: {pattern_stats['trades']}"
+        )
+        pattern_stats['scans'] = 0
+        pattern_stats['matches'] = 0
+        pattern_stats['trades'] = 0
 
 async def run_bot():
     log("🚀 Bot starting...")
@@ -175,10 +212,12 @@ async def run_bot():
 
     load_active_trades()
     asyncio.create_task(stream_candles(symbols))
-    await asyncio.sleep(5)
-
-    # Start monitor cycle
     asyncio.create_task(monitor_loop())
+    asyncio.create_task(pattern_discovery_loop(symbols))
+    asyncio.create_task(pattern_match_loop(symbols))
+    asyncio.create_task(pattern_summary_loop())
+
+    await asyncio.sleep(5)
 
     while True:
         try:
@@ -189,15 +228,6 @@ async def run_bot():
             write_log(f"MAIN LOOP ERROR: {str(e)}", level="ERROR")
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(0.5)
-
-async def monitor_loop():
-    while True:
-        try:
-            await monitor_trades(live_candles)
-        except Exception as e:
-            log(f"❌ Error in monitor loop: {e}", level="ERROR")
-            await send_error_to_telegram(traceback.format_exc())
-        await asyncio.sleep(5)  # Faster monitoring for active trades
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
@@ -213,40 +243,3 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
-
-async def pattern_discovery_loop(symbols):
-    while True:
-        try:
-            await pattern_discovery_scan(symbols)
-        except Exception as e:
-            log(f"❌ Error in pattern discovery loop: {e}", level="ERROR")
-        await asyncio.sleep(60)  # Run every 60 seconds
-
-asyncio.create_task(pattern_discovery_loop(symbols))
-
-async def pattern_match_loop(symbols):
-    while True:
-        try:
-            await pattern_match_scan(symbols)
-        except Exception as e:
-            log(f"❌ Error in pattern match loop: {e}")
-        await asyncio.sleep(60)  # Run every 60s
-
-asyncio.create_task(pattern_match_loop(symbols))
-
-async def pattern_summary_loop():
-    while True:
-        await asyncio.sleep(3600)  # 1 hour
-        from pattern_matcher import pattern_stats
-        await send_telegram_message(
-            f"⏱ <b>Pattern Scan Summary (last hour)</b>\n"
-            f"Scans: {pattern_stats['scans']}\n"
-            f"Matches: {pattern_stats['matches']}\n"
-            f"Trades Triggered: {pattern_stats['trades']}"
-        )
-        pattern_stats['scans'] = 0
-        pattern_stats['matches'] = 0
-        pattern_stats['trades'] = 0
-
-asyncio.create_task(pattern_summary_loop())
-
