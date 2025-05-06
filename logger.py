@@ -15,28 +15,36 @@ LOG_FILE = os.path.join(LOG_PATH, "trading_bot_activity.log")
 os.makedirs(LOG_PATH, exist_ok=True)
 
 def log(msg, level="INFO"):
+    """
+    Main logger that prints to console, writes to file, and optionally sends to Telegram.
+    """
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    try:
-        print(f"[{timestamp}] [{level}] {msg}")
-    except UnicodeEncodeError:
-        print(f"[{timestamp}] [{level}] {msg.encode('utf-8', 'ignore').decode('utf-8')}", file=sys.stderr)
 
-    # Log to file
+    # Console log
+    try:
+        print(f"[{timestamp}] [{level.upper()}] {msg}")
+    except UnicodeEncodeError:
+        print(f"[{timestamp}] [{level.upper()}] {msg.encode('utf-8', 'ignore').decode('utf-8')}", file=sys.stderr)
+
+    # File log
     write_log(msg, level)
 
-    # Send to assistant Telegram if level is ERROR/ALERT
-    if TELEGRAM_ASSISTANT_CHAT_ID and level in ["ERROR", "ALERT"]:
+    # Optional Telegram alert for high-severity
+    if TELEGRAM_ASSISTANT_CHAT_ID and level.upper() in ["ERROR", "ALERT"]:
         asyncio.create_task(send_assistant_log(msg))
 
 def write_log(message, level="INFO"):
     """
-    Writes logs to trading_bot_activity.log in persistent volume.
+    Writes logs to persistent file.
     """
     timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    with open(LOG_FILE, "a") as f:
-        f.write(f"[{timestamp}] [{level}] {message}\n")
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] [{level.upper()}] {message}\n")
 
 async def send_assistant_log(message):
+    """
+    Sends error logs to assistant Telegram channel.
+    """
     if not message.strip():
         return
 
@@ -50,6 +58,8 @@ async def send_assistant_log(message):
 
     try:
         async with aiohttp.ClientSession() as session:
-            await session.post(url, data=payload)
+            async with session.post(url, data=payload) as resp:
+                if resp.status != 200:
+                    print(f"[Logger] Telegram response status: {resp.status}")
     except Exception as e:
         print(f"[Logger] Failed to send assistant log: {e}")
