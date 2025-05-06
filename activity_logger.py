@@ -64,3 +64,36 @@ def log_trade_to_file(
             })
     except Exception as e:
         write_log(f"❌ Failed to log trade: {e}", level="ERROR")
+
+def update_trade_result(symbol, result_value):
+    """
+    Update the result field of the most recent open trade for a given symbol.
+    """
+    try:
+        if not os.path.exists(TRADE_LOG_CSV):
+            return
+
+        rows = []
+        with open(TRADE_LOG_CSV, mode="r", newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        updated = False
+        for row in reversed(rows):
+            if row["symbol"] == symbol and row["result"] == "open":
+                row["result"] = result_value
+                updated = True
+                break
+
+        if updated:
+            with open(TRADE_LOG_CSV, mode="w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+            write_log(f"✅ Trade result updated: {symbol} → {result_value}")
+        else:
+            write_log(f"⚠️ No open trade found for {symbol} to update", level="WARNING")
+
+    except Exception as e:
+        write_log(f"❌ Failed to update result for {symbol}: {e}", level="ERROR")
+
