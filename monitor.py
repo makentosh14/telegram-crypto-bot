@@ -95,7 +95,7 @@ async def monitor_trades(live_candles):
             write_log(f"MONITOR ERROR: {symbol} candle fetch failed: {e}", level="ERROR")
             continue
 
-        score, tf_scores, _ = score_symbol(symbol, candles_by_tf)
+        score, tf_scores, _, _, _ = score_symbol(symbol, candles_by_tf)
         trade["score_history"].append(score)
         trade["cycles"] += 1
 
