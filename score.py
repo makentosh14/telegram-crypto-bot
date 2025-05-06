@@ -88,14 +88,21 @@ def score_symbol(symbol, candles_by_timeframe):
 
         tf_scores[tf] = score
 
-    if short_score >= mid_score and short_score >= long_score:
-        return short_score, tf_scores, "Scalp", indicator_scores, list(used_indicators)
-    elif mid_score >= short_score and mid_score >= long_score:
-        return mid_score, tf_scores, "Intraday", indicator_scores, list(used_indicators)
+    # 🔴 Additional Check: If more than half of timeframes have negative score, and total is negative, force Short
+    total_score = short_score + mid_score + long_score
+    if sum(1 for s in tf_scores.values() if s < 0) > len(tf_scores) // 2 and total_score < 0:
+        direction_override = "Short"
     else:
-        return long_score, tf_scores, "Swing", indicator_scores, list(used_indicators)
+        direction_override = None
 
-def determine_direction(tf_scores):
+    best_score = max(short_score, mid_score, long_score)
+    best_type = "Scalp" if best_score == short_score else ("Intraday" if best_score == mid_score else "Swing")
+
+    return best_score, tf_scores, best_type, indicator_scores, list(used_indicators), direction_override
+
+def determine_direction(tf_scores, direction_override=None):
+    if direction_override:
+        return direction_override
     values = list(tf_scores.values())
     negative_count = sum(1 for v in values if v < 0)
     total = sum(values)
