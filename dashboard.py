@@ -1,3 +1,4 @@
+
 import pandas as pd
 import streamlit as st
 import os
@@ -87,6 +88,10 @@ def main():
     st.title("🚀 Crypto Trading Bot Dashboard")
 
     df = load_data()
+
+    # 🛠 DEBUG PRINT TO CONFIRM LOADED ROWS
+    st.write("✅ Loaded trade setups:", df.shape)
+
     if df.empty:
         st.warning("No trade data found yet.")
         return
