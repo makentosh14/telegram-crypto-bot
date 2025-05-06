@@ -174,9 +174,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 score=score,
                 trade_type=trade_type,
                 confidence=confidence,
+                tf_scores=signal_data.get("tf_scores", {}),
                 indicator_scores=indicator_scores,
                 used_indicators=used_indicators,
-                timestamp=datetime.utcnow().isoformat()
+                pattern_detected=signal_data.get("pattern"),
+                whale_signal=signal_data.get("whale", False),
+                volume_spike=signal_data.get("volume_spike", False),
+                sl_strategy=f"ATR-{trade_type}"
             )
 
             await send_telegram_message(
