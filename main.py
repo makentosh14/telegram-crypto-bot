@@ -29,8 +29,6 @@ MIN_SCALP_SCORE = 6
 MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 8
 
-# ... [imports remain the same] ...
-
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
 
@@ -51,8 +49,8 @@ async def scan_for_new_signals(symbols):
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
 
-        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
-        direction = determine_direction(tf_scores)
+        score, tf_scores, trade_type, indicator_scores, used_indicators, direction_override = score_symbol(symbol, candles_by_tf)
+        direction = determine_direction(tf_scores, direction_override)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
         leverage = DEFAULT_LEVERAGE
@@ -99,8 +97,8 @@ async def scan_for_new_signals(symbols):
 
         if not is_duplicate_signal(symbol):
             await asyncio.sleep(2)
-            re_score, re_tf_scores, re_type, _, _ = score_symbol(symbol, candles_by_tf)
-            re_direction = determine_direction(re_tf_scores)
+            re_score, re_tf_scores, re_type, _, _, re_dir_override = score_symbol(symbol, candles_by_tf)
+            re_direction = determine_direction(re_tf_scores, re_dir_override)
             if re_score < score or re_type != trade_type or re_direction != direction:
                 continue
 
@@ -168,7 +166,6 @@ async def scan_for_new_signals(symbols):
                     indicator_scores=indicator_scores,
                     used_indicators=used_indicators
                 )
-
 
 async def monitor_loop():
     while True:
