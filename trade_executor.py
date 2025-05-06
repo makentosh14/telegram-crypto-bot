@@ -4,9 +4,10 @@ from config import DEFAULT_LEVERAGE
 from logger import log
 from error_handler import send_telegram_message, send_error_to_telegram
 from atr import calculate_atr
-from activity_logger import write_log
+from activity_logger import write_log, log_trade_to_file  # ✅ Add trade logging
 from symbol_info import round_qty, symbol_precisions
-from score import score_symbol, determine_direction, calculate_confidence  # ✅ Ensure direction logic is accurate
+from score import score_symbol, determine_direction, calculate_confidence
+from datetime import datetime
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -118,7 +119,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "category": category
         })
 
-        # Place Market Entry Order
         order_payload = {
             "category": category,
             "symbol": symbol,
@@ -134,8 +134,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
 
-            # Place TP1
-            tp_result = await signed_request("POST", "/v5/order/create", {
+            await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": tp_side,
@@ -146,8 +145,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # ✅ Place SL with orderFilter: "Stop"
-            sl_result = await signed_request("POST", "/v5/order/create", {
+            await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": sl_side,
@@ -161,18 +159,25 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderFilter": "Stop"
             })
 
-            if tp_result.get("retCode") != 0:
-                await send_telegram_message(
-                    f"⚠️ <b>TP1 Order Warning</b> for {symbol}\nCould not place TP1. Response: {tp_result.get('retMsg')}"
-                )
-
-            if sl_result.get("retCode") != 0:
-                await send_telegram_message(
-                    f"⚠️ <b>SL Order Warning</b> for {symbol}\nCould not place SL. Response: {sl_result.get('retMsg')}"
-                )
-
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
+
+            # ✅ Log full setup to CSV
+            log_trade_to_file(
+                symbol=symbol,
+                direction=direction,
+                entry=price,
+                sl=sl,
+                tp1=tp1,
+                tp2=tp2,
+                result="open",
+                score=score,
+                trade_type=trade_type,
+                confidence=confidence,
+                indicator_scores=indicator_scores,
+                used_indicators=used_indicators,
+                timestamp=datetime.utcnow().isoformat()
+            )
 
             await send_telegram_message(
                 f"📣 <b>{trade_type} {direction} Executed</b>\n"
