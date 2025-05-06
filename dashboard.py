@@ -38,6 +38,11 @@ def display_summary_stats(df):
 
 def display_indicator_details(df):
     st.write("### Indicator Breakdown for Most Recent Trade")
+    
+    if df.empty:
+        st.warning("No data available to display indicator details.")
+        return
+
     latest = df.iloc[0]
 
     if "indicator_scores" in latest and pd.notna(latest["indicator_scores"]):
@@ -84,6 +89,11 @@ def main():
         return
 
     df = filter_data(df)
+
+    if df.empty:
+        st.warning("No data matches the selected filters.")
+        return
+
     display_summary_stats(df)
     display_trade_table(df)
     display_indicator_details(df)
