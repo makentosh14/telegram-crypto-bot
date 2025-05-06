@@ -29,6 +29,8 @@ MIN_SCALP_SCORE = 6
 MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 8
 
+# ... [imports remain the same] ...
+
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
 
@@ -49,7 +51,7 @@ async def scan_for_new_signals(symbols):
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
 
-        score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
+        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
@@ -57,7 +59,7 @@ async def scan_for_new_signals(symbols):
         risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
-        log(f"\U0001f4ca [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
+        log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
         sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence
@@ -97,7 +99,7 @@ async def scan_for_new_signals(symbols):
 
         if not is_duplicate_signal(symbol):
             await asyncio.sleep(2)
-            re_score, re_tf_scores, re_type = score_symbol(symbol, candles_by_tf)
+            re_score, re_tf_scores, re_type, _, _ = score_symbol(symbol, candles_by_tf)
             re_direction = determine_direction(re_tf_scores)
             if re_score < score or re_type != trade_type or re_direction != direction:
                 continue
@@ -136,6 +138,8 @@ async def scan_for_new_signals(symbols):
                 "score": score,
                 "confidence": confidence,
                 "candles": candles_by_tf,
+                "indicator_scores": indicator_scores,
+                "used_indicators": used_indicators
             })
 
             if trade:
@@ -161,9 +165,10 @@ async def scan_for_new_signals(symbols):
                     score=score,
                     trade_type=trade_type,
                     confidence=confidence,
-                    indicator_scores=trade.get("indicator_scores", {}),
-                    used_indicators=trade.get("used_indicators", [])
+                    indicator_scores=indicator_scores,
+                    used_indicators=used_indicators
                 )
+
 
 async def monitor_loop():
     while True:
