@@ -27,9 +27,9 @@ active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
 
-MIN_SCALP_SCORE = 6
-MIN_INTRADAY_SCORE = 7
-MIN_SWING_SCORE = 8
+MIN_SCALP_SCORE = 5.5
+MIN_INTRADAY_SCORE = 6.5
+MIN_SWING_SCORE = 7.0
 
 
 def extract_last_pattern(candles_by_tf):
