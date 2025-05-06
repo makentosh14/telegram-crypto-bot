@@ -1,10 +1,10 @@
-# ✅ Updated dashboard.py to include indicator score breakdown
+# ✅ Synced dashboard.py for structured indicator parsing + clean UI
 
 import pandas as pd
 import streamlit as st
 import os
 from datetime import datetime
-import ast
+import json
 
 LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 
@@ -18,7 +18,7 @@ def load_data():
         return pd.DataFrame()
 
 def display_trade_table(df):
-    st.write("### Trade Log Table")
+    st.write("### 📋 Trade Log Table")
     st.dataframe(df, use_container_width=True)
 
 def display_summary_stats(df):
@@ -37,8 +37,8 @@ def display_summary_stats(df):
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
 
 def display_indicator_details(df):
-    st.write("### Indicator Breakdown for Most Recent Trade")
-    
+    st.write("### 🧠 Indicator Breakdown — Most Recent Trade")
+
     if df.empty:
         st.warning("No data available to display indicator details.")
         return
@@ -47,16 +47,16 @@ def display_indicator_details(df):
 
     if "indicator_scores" in latest and pd.notna(latest["indicator_scores"]):
         try:
-            scores = ast.literal_eval(latest["indicator_scores"])
-            st.write("**Indicator Scores:**")
+            scores = json.loads(latest["indicator_scores"])
+            st.subheader("📊 Indicator Scores")
             st.json(scores)
         except Exception as e:
             st.error(f"Error parsing indicator scores: {e}")
 
     if "used_indicators" in latest and pd.notna(latest["used_indicators"]):
         try:
-            indicators = ast.literal_eval(latest["used_indicators"])
-            st.write("**Used Indicators:**")
+            indicators = json.loads(latest["used_indicators"])
+            st.subheader("✅ Used Indicators")
             st.markdown(", ".join(indicators))
         except Exception as e:
             st.error(f"Error parsing used indicators: {e}")
@@ -67,7 +67,7 @@ def filter_data(df):
     directions = df.direction.unique().tolist()
 
     with st.sidebar:
-        st.write("## Filters")
+        st.write("## 🔍 Filters")
         selected_symbols = st.multiselect("Symbols", symbols, default=symbols)
         selected_types = st.multiselect("Trade Types", trade_types, default=trade_types)
         selected_directions = st.multiselect("Direction", directions, default=directions)
