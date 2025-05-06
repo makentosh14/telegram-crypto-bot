@@ -11,10 +11,13 @@ LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 def load_data():
     if os.path.exists(LOG_PATH):
         df = pd.read_csv(LOG_PATH, engine="python", quotechar='"', skip_blank_lines=True, on_bad_lines='skip')
+        st.write("✅ CSV LOADED", df.shape)
+        st.dataframe(df.head())
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         df = df.sort_values(by="timestamp", ascending=False)
         return df
     else:
+        st.error("🚫 CSV file not found.")
         return pd.DataFrame()
 
 def display_trade_table(df):
