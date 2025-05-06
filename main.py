@@ -165,8 +165,11 @@ async def scan_for_new_signals(symbols):
                     initial_score=score,
                     entry_price=price,
                     direction=direction,
-                    trailing_pct=trade.get("trailing_pct")
+                    trailing_pct=trade.get("trailing_pct"),
+                    tp2=trade.get("tp2"),
+                    sl=trade.get("sl")
                 )
+
 
 
 async def monitor_loop():
