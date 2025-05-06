@@ -109,7 +109,7 @@ async def monitor_trades(live_candles):
         trailing_pct = trade.get("trailing_pct")
 
         # ✅ SL Hit
-        if not trade.get("tp1_hit") and trade.get("original_sl"):
+        if trade.get("original_sl"):
             sl_price = trade["original_sl"]
             if (direction == "Long" and current_price <= sl_price) or (direction == "Short" and current_price >= sl_price):
                 trade["exited"] = True
@@ -131,7 +131,7 @@ async def monitor_trades(live_candles):
                 new_sl = entry_price
                 trade["trailing_sl"] = new_sl
                 await send_telegram_message(
-                    f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b>\n<b>Break-even SL activated</b> at {new_sl:.4f}"
+                    f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b>\n<b>Break-even SL activated</b> at {new_sl:.4f}"
                 )
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
 
@@ -140,12 +140,15 @@ async def monitor_trades(live_candles):
             tp2 = trade["tp2"]
             if (direction == "Long" and current_price >= tp2) or (direction == "Short" and current_price <= tp2):
                 trade["tp2_hit"] = True
+                trade["exited"] = True
                 await send_telegram_message(
-                    f"🏁 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}"
+                    f"🏊 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}"
                 )
                 write_log(f"TP2 HIT: {symbol} | Reached: {current_price}")
                 log_trade_result(symbol, tf_scores, "win")
                 log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0)
+                save_active_trades()
+                continue
 
         # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
@@ -162,6 +165,20 @@ async def monitor_trades(live_candles):
                 )
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
+
+        # ✅ Trailing SL Hit
+        if trade.get("tp1_hit") and trade.get("trailing_sl"):
+            trailing_sl = trade["trailing_sl"]
+            if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
+                trade["exited"] = True
+                await send_telegram_message(
+                    f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}"
+                )
+                write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
+                log_trade_result(symbol, tf_scores, "breakeven")
+                log_trade_to_file(symbol, direction, entry_price, trailing_sl, None, trade.get("tp2"), "breakeven", score, trade_type, 0)
+                save_active_trades()
+                continue
 
         # ✅ Score-based Exit
         if score < get_exit_threshold(trade_type):
