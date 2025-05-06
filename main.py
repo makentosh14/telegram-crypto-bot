@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence
@@ -14,10 +15,11 @@ from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
 from activity_logger import write_log, log_trade_to_file
 from monitor import track_active_trade, monitor_trades, load_active_trades
-from pattern_discovery import pattern_discovery_scan
-from pattern_matcher import pattern_match_scan
-import traceback
+from pattern_detector import detect_pattern
+from volume import is_volume_spike
+from whale_detector import detect_whale_activity
 from ai_memory import load_memory
+
 load_memory()
 
 TIMEFRAMES = SUPPORTED_INTERVALS
@@ -28,6 +30,15 @@ EXIT_COOLDOWN = 10
 MIN_SCALP_SCORE = 6
 MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 8
+
+
+def extract_last_pattern(candles_by_tf):
+    for tf in sorted(candles_by_tf, key=lambda x: int(x)):
+        pattern = detect_pattern(candles_by_tf[tf])
+        if pattern:
+            return pattern
+    return None
+
 
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
@@ -49,8 +60,8 @@ async def scan_for_new_signals(symbols):
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
 
-        score, tf_scores, trade_type, indicator_scores, used_indicators, direction_override = score_symbol(symbol, candles_by_tf)
-        direction = determine_direction(tf_scores, direction_override)
+        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
+        direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
         leverage = DEFAULT_LEVERAGE
@@ -97,8 +108,8 @@ async def scan_for_new_signals(symbols):
 
         if not is_duplicate_signal(symbol):
             await asyncio.sleep(2)
-            re_score, re_tf_scores, re_type, _, _, re_dir_override = score_symbol(symbol, candles_by_tf)
-            re_direction = determine_direction(re_tf_scores, re_dir_override)
+            re_score, re_tf_scores, re_type, _, _ = score_symbol(symbol, candles_by_tf)
+            re_direction = determine_direction(re_tf_scores)
             if re_score < score or re_type != trade_type or re_direction != direction:
                 continue
 
@@ -137,7 +148,11 @@ async def scan_for_new_signals(symbols):
                 "confidence": confidence,
                 "candles": candles_by_tf,
                 "indicator_scores": indicator_scores,
-                "used_indicators": used_indicators
+                "used_indicators": used_indicators,
+                "tf_scores": tf_scores,
+                "pattern": extract_last_pattern(candles_by_tf),
+                "whale": detect_whale_activity(candles_by_tf.get("5", [])),
+                "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5)
             })
 
             if trade:
@@ -152,20 +167,7 @@ async def scan_for_new_signals(symbols):
                     direction=direction,
                     trailing_pct=trade.get("trailing_pct")
                 )
-                log_trade_to_file(
-                    symbol=symbol,
-                    direction=direction,
-                    entry=price,
-                    sl=sl,
-                    tp1=tp1,
-                    tp2=tp2,
-                    result="open",
-                    score=score,
-                    trade_type=trade_type,
-                    confidence=confidence,
-                    indicator_scores=indicator_scores,
-                    used_indicators=used_indicators
-                )
+
 
 async def monitor_loop():
     while True:
@@ -176,6 +178,7 @@ async def monitor_loop():
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(5)
 
+
 async def pattern_discovery_loop(symbols):
     while True:
         try:
@@ -184,6 +187,7 @@ async def pattern_discovery_loop(symbols):
             log(f"❌ Error in pattern discovery loop: {e}", level="ERROR")
         await asyncio.sleep(60)
 
+
 async def pattern_match_loop(symbols):
     while True:
         try:
@@ -191,6 +195,7 @@ async def pattern_match_loop(symbols):
         except Exception as e:
             log(f"❌ Error in pattern match loop: {e}")
         await asyncio.sleep(60)
+
 
 async def pattern_summary_loop():
     while True:
@@ -205,6 +210,7 @@ async def pattern_summary_loop():
         pattern_stats['scans'] = 0
         pattern_stats['matches'] = 0
         pattern_stats['trades'] = 0
+
 
 async def run_bot():
     log("🚀 Bot starting...")
@@ -230,6 +236,7 @@ async def run_bot():
             write_log(f"MAIN LOOP ERROR: {str(e)}", level="ERROR")
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(0.5)
+
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
