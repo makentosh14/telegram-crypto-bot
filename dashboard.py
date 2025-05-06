@@ -35,8 +35,12 @@ def display_summary_stats(df):
 def display_trade_table(df):
     st.write("### 📋 Trade Log Table")
 
-    columns_to_display = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
-    df_display = df[columns_to_display].copy()
+    # Define all possible useful columns
+    preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
+
+    # Only use columns that exist in the DataFrame
+    existing_columns = [col for col in preferred_columns if col in df.columns]
+    df_display = df[existing_columns].copy()
 
     def highlight_result(val):
         if val == "win":
@@ -49,7 +53,11 @@ def display_trade_table(df):
             return "background-color: #cce5ff"
         return ""
 
-    st.dataframe(df_display.style.applymap(highlight_result, subset=["result"]), use_container_width=True)
+    if "result" in df_display.columns:
+        st.dataframe(df_display.style.applymap(highlight_result, subset=["result"]), use_container_width=True)
+    else:
+        st.dataframe(df_display, use_container_width=True)
+
 
 def display_result_breakdown(df):
     st.write("### 📊 Trade Result Breakdown")
