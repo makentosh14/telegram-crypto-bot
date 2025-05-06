@@ -4,7 +4,7 @@ from config import DEFAULT_LEVERAGE
 from logger import log
 from error_handler import send_telegram_message, send_error_to_telegram
 from atr import calculate_atr
-from activity_logger import write_log, log_trade_to_file  # ✅ Add trade logging
+from activity_logger import write_log, log_trade_to_file
 from symbol_info import round_qty, symbol_precisions
 from score import score_symbol, determine_direction, calculate_confidence
 from datetime import datetime
@@ -134,17 +134,35 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
 
+            qty_half = round(qty / 2, 6)
+            if qty_half <= 0:
+                qty_half = qty
+
+            # ✅ TP1
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": tp_side,
                 "orderType": "Limit",
-                "qty": str(qty),
+                "qty": str(qty_half),
                 "price": str(tp1),
                 "timeInForce": "GTC",
                 "reduceOnly": True
             })
 
+            # ✅ TP2
+            await signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": tp_side,
+                "orderType": "Limit",
+                "qty": str(qty_half),
+                "price": str(tp2),
+                "timeInForce": "GTC",
+                "reduceOnly": True
+            })
+
+            # ✅ SL
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -162,7 +180,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
 
-            # ✅ Log full setup to CSV
             log_trade_to_file(
                 symbol=symbol,
                 direction=direction,
@@ -186,7 +203,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             await send_telegram_message(
                 f"📣 <b>{trade_type} {direction} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
-                f"Qty: {qty} | SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1} | TP2: {tp2}\n"
+                f"Qty: {qty} (TP1/TP2 split)\n"
+                f"SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1} | TP2: {tp2}\n"
                 f"Trailing SL activates after TP1 hit ({trailing_pct:.2f}% base)"
             )
 
@@ -206,6 +224,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "indicator_scores": indicator_scores,
                 "used_indicators": used_indicators
             }
+
         else:
             error_msg = order_result.get("retMsg", "Unknown error")
             await send_telegram_message(
