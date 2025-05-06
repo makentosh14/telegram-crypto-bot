@@ -1,4 +1,3 @@
-
 import pandas as pd
 import streamlit as st
 import os
@@ -16,16 +15,13 @@ def load_data():
     else:
         return pd.DataFrame()
 
-def display_trade_table(df):
-    st.write("### 📋 Trade Log Table")
-    st.dataframe(df, use_container_width=True)
-
 def display_summary_stats(df):
     total = len(df)
     wins = len(df[df.result == "win"])
     losses = len(df[df.result == "loss"])
     breakeven = len(df[df.result == "breakeven"])
     open_trades = len(df[df.result == "open"])
+
     win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
     avg_score = df.score.mean() if total else 0
     avg_conf = df.confidence.mean() if total else 0
@@ -35,6 +31,39 @@ def display_summary_stats(df):
     col2.metric("Win Rate", f"{win_rate:.1f}%")
     col3.metric("Avg Score", f"{avg_score:.2f}")
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
+
+def display_trade_table(df):
+    st.write("### 📋 Trade Log Table")
+
+    columns_to_display = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
+    df_display = df[columns_to_display].copy()
+
+    def highlight_result(val):
+        if val == "win":
+            return "background-color: #b7f7b0"
+        elif val == "loss":
+            return "background-color: #f8b8b8"
+        elif val == "breakeven":
+            return "background-color: #f5f5a0"
+        elif val == "open":
+            return "background-color: #cce5ff"
+        return ""
+
+    st.dataframe(df_display.style.applymap(highlight_result, subset=["result"]), use_container_width=True)
+
+def display_result_breakdown(df):
+    st.write("### 📊 Trade Result Breakdown")
+
+    tp2_hits = len(df[(df.result == "win") & df.tp2.notna()])
+    tp1_only = len(df[(df.result == "breakeven") & df.tp1.notna() & df.tp2.isna()])
+    sl_hits = len(df[df.result == "loss"])
+    open_trades = len(df[df.result == "open"])
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("TP2 Wins", tp2_hits)
+    col2.metric("TP1 Only", tp1_only)
+    col3.metric("SL Hits", sl_hits)
+    col4.metric("Open Trades", open_trades)
 
 def display_indicator_details(df):
     st.write("### 🧠 Indicator Breakdown — Most Recent Trade")
@@ -88,10 +117,6 @@ def main():
     st.title("🚀 Crypto Trading Bot Dashboard")
 
     df = load_data()
-
-    # 🛠 DEBUG PRINT TO CONFIRM LOADED ROWS
-    st.write("✅ Loaded trade setups:", df.shape)
-
     if df.empty:
         st.warning("No trade data found yet.")
         return
@@ -103,6 +128,7 @@ def main():
         return
 
     display_summary_stats(df)
+    display_result_breakdown(df)
     display_trade_table(df)
     display_indicator_details(df)
 
