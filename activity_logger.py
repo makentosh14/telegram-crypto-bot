@@ -12,6 +12,15 @@ TRADE_LOG_CSV = os.path.join(TRADE_LOG_PATH, "trade_setups.csv")
 os.makedirs(LOG_PATH, exist_ok=True)
 os.makedirs(TRADE_LOG_PATH, exist_ok=True)
 
+def write_log(message, level="INFO"):
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{now}] [{level.upper()}] {message}\n"
+    try:
+        with open("/mnt/data/bot_logs/trading_bot_activity.log", "a") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"Logging error: {e}")
+
 def log_trade_to_file(
     symbol, direction, entry, sl, tp1, tp2, result, score, trade_type, confidence,
     tf_scores=None, indicator_scores=None, used_indicators=None,
