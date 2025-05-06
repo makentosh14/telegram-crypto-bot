@@ -95,7 +95,7 @@ async def monitor_trades(live_candles):
             write_log(f"MONITOR ERROR: {symbol} candle fetch failed: {e}", level="ERROR")
             continue
 
-        score, tf_scores, _, _, _ = score_symbol(symbol, candles_by_tf)
+        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
         trade["score_history"].append(score)
         trade["cycles"] += 1
 
@@ -113,7 +113,7 @@ async def monitor_trades(live_candles):
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                 log_exit(symbol, score)
                 log_trade_result(symbol, tf_scores, "loss")
-                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0, indicator_scores, used_indicators)
                 save_active_trades()
                 continue
 
@@ -135,11 +135,11 @@ async def monitor_trades(live_candles):
             if (direction == "Long" and current_price >= tp2) or (direction == "Short" and current_price <= tp2):
                 trade["tp2_hit"] = True
                 await send_telegram_message(
-                    f"🏁 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}"
+                    f"🏑 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}"
                 )
                 write_log(f"TP2 HIT: {symbol} | Reached: {current_price}")
                 log_trade_result(symbol, tf_scores, "win")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0, indicator_scores, used_indicators)
 
         # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
@@ -168,7 +168,7 @@ async def monitor_trades(live_candles):
                 write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
                 log_exit(symbol, score)
                 log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0, indicator_scores, used_indicators)
                 save_active_trades()
                 continue
 
@@ -206,7 +206,7 @@ async def monitor_trades(live_candles):
         closes = [float(c['close']) for c in candles_by_tf['1'][-5:]]
         if max(closes) - min(closes) < float(closes[-1]) * 0.002:
             await send_telegram_message(
-                f"😴 <b>Flat Price Action</b> on {symbol}\n<i>Low volatility detected.</i>"
+                f"😭 <b>Flat Price Action</b> on {symbol}\n<i>Low volatility detected.</i>"
             )
             write_log(f"FLAT PRICE: {symbol} | Low volatility detected")
 
