@@ -116,19 +116,18 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
-            "category": category
+            "category": category,
+            "symbol": symbol
         })
 
-        order_payload = {
+        order_result = await signed_request("POST", "/v5/order/create", {
             "category": category,
             "symbol": symbol,
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
             "qty": str(qty),
-            "timeInForce": "IOC",
-        }
-
-        order_result = await signed_request("POST", "/v5/order/create", order_payload)
+            "timeInForce": "IOC"
+        })
 
         if order_result.get("retCode") == 0:
             sl_side = "Sell" if direction == "Long" else "Buy"
@@ -138,19 +137,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if qty_half <= 0:
                 qty_half = qty
 
-            # ✅ TP1
+            # ✅ SL + TP1 via tpslOrder
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
-                "side": tp_side,
-                "orderType": "Limit",
-                "qty": str(qty_half),
-                "price": str(tp1),
-                "timeInForce": "GTC",
-                "reduceOnly": True
+                "orderFilter": "tpslOrder",
+                "positionIdx": 0,
+                "takeProfit": str(tp1),
+                "stopLoss": str(sl),
+                "tpTriggerBy": "LastPrice",
+                "slTriggerBy": "LastPrice"
             })
 
-            # ✅ TP2
+            # ✅ TP2 as separate limit order
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -160,21 +159,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "price": str(tp2),
                 "timeInForce": "GTC",
                 "reduceOnly": True
-            })
-
-            # ✅ SL — using correct format for Bybit V5 API
-            await signed_request("POST", "/v5/order/create", {
-                "category": category,
-                "symbol": symbol,
-                "side": sl_side,
-                "orderType": "Market",
-                "triggerPrice": str(sl),
-                "triggerDirection": 1 if direction == "Long" else 2,
-                "triggerBy": "LastPrice",
-                "qty": str(qty),
-                "reduceOnly": True,
-                "timeInForce": "GTC",
-                "orderFilter": "Stop"
             })
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
