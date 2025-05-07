@@ -93,15 +93,13 @@ async def send_pump_alert(symbol, pump_score, volume_spike_pct, price_change_pct
 @dp.message_handler(commands=["active"])
 async def handle_active_trades(message: types.Message):
     from monitor import active_trades  # ⬅️ Lazy import avoids circular import
-    if not active_trades:
+    active = {k: v for k, v in active_trades.items() if not v.get("exited")}
+    if not active:
         await message.reply("📭 No active trades currently being monitored.")
         return
 
     msg = "📡 <b>Active Trade Setups:</b>\n"
-    for symbol, trade in active_trades.items():
-        if trade.get("exited"):
-            continue
-
+    for symbol, trade in active.items():
         trade_type = trade.get("trade_type", "N/A")
         entry = trade.get("entry_price", "?")
         direction = trade.get("direction", "?")
