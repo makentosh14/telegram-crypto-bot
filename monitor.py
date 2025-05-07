@@ -180,20 +180,20 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ✅ Score-based Exit
-        if score < get_exit_threshold(trade_type):
-            if trade["cycles"] >= get_exit_cycles(trade_type):
-                trade["exited"] = True
-                await send_telegram_message(
-                    f"⚠️ <b>Exit Signal Triggered</b>\n<b>{symbol}</b> | Score: {score} after {trade['cycles']} cycles."
-                )
-                log(f"📉 Score drop exit triggered for {symbol}")
-                write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
-                log_exit(symbol, score)
-                log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0)
-                save_active_trades()
-                continue
+        # ❌ Score-based Exit — Disabled
+        # if score < get_exit_threshold(trade_type):
+        #     if trade["cycles"] >= get_exit_cycles(trade_type):
+        #         trade["exited"] = True
+        #         await send_telegram_message(
+        #             f"⚠️ <b>Exit Signal Triggered</b>\n<b>{symbol}</b> | Score: {score} after {trade['cycles']} cycles."
+        #         )
+        #         log(f"📉 Score drop exit triggered for {symbol}")
+        #         write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
+        #         log_exit(symbol, score)
+        #         log_trade_result(symbol, tf_scores, "breakeven")
+        #         log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0)
+        #         save_active_trades()
+        #         continue
 
         if should_reenter(symbol, score):
             await handle_reentry(symbol, score)
