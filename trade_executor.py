@@ -8,6 +8,7 @@ from activity_logger import write_log, log_trade_to_file
 from symbol_info import round_qty, symbol_precisions
 from score import score_symbol, determine_direction, calculate_confidence
 from datetime import datetime
+import asyncio
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -116,18 +117,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
-            "category": category,
-            "symbol": symbol
+            "category": category
         })
 
-        order_result = await signed_request("POST", "/v5/order/create", {
+        order_payload = {
             "category": category,
             "symbol": symbol,
             "side": "Buy" if direction == "Long" else "Sell",
             "orderType": "Market",
             "qty": str(qty),
-            "timeInForce": "IOC"
-        })
+            "timeInForce": "IOC",
+        }
+
+        order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
             sl_side = "Sell" if direction == "Long" else "Buy"
@@ -137,20 +139,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if qty_half <= 0:
                 qty_half = qty
 
-            # ✅ SL + TP1 via tpslOrder
-            await signed_request("POST", "/v5/order/create", {
+            # ✅ Parallel async order placement
+            tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
-                "orderFilter": "tpslOrder",
-                "positionIdx": 0,
-                "takeProfit": str(tp1),
-                "stopLoss": str(sl),
-                "tpTriggerBy": "LastPrice",
-                "slTriggerBy": "LastPrice"
+                "side": tp_side,
+                "orderType": "Limit",
+                "qty": str(qty_half),
+                "price": str(tp1),
+                "timeInForce": "GTC",
+                "reduceOnly": True
             })
 
-            # ✅ TP2 as separate limit order
-            await signed_request("POST", "/v5/order/create", {
+            tp2_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": tp_side,
@@ -160,6 +161,25 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "timeInForce": "GTC",
                 "reduceOnly": True
             })
+
+            sl_task = signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": sl_side,
+                "orderType": "Market",
+                "triggerPrice": str(sl),
+                "triggerDirection": 1 if direction == "Long" else 2,
+                "triggerBy": "LastPrice",
+                "qty": str(qty),
+                "reduceOnly": True,
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"
+            })
+
+            tp1_result, tp2_result, sl_result = await asyncio.gather(tp1_task, tp2_task, sl_task)
+            log(f"📤 TP1 response: {tp1_result}")
+            log(f"📤 TP2 response: {tp2_result}")
+            log(f"📤 SL response: {sl_result}")
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
