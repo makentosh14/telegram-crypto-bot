@@ -138,6 +138,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if qty_half <= 0:
                 qty_half = qty
 
+            # ✅ TP1
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -149,6 +150,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
+            # ✅ TP2
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -160,6 +162,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
+            # ✅ SL — using correct format for Bybit V5 API
             await signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
