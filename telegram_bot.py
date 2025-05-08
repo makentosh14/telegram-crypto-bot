@@ -5,11 +5,16 @@ import aiohttp
 import traceback
 import os
 import time
+import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InputFile
 from logger import LOG_FILE
 from error_handler import send_error_to_telegram  # ✅ Use only from external file
+
+# === Global message rate limit ===
+_last_send_time = 0
+MIN_MESSAGE_DELAY = 1.0  # seconds
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -21,8 +26,9 @@ async def send_telegram_message(message):
 
     now = time.time()
     elapsed = now - _last_send_time
-    if elapsed < _rate_limit_interval:
-        await asyncio.sleep(_rate_limit_interval - elapsed)
+
+    if elapsed < MIN_MESSAGE_DELAY:
+        await asyncio.sleep(MIN_MESSAGE_DELAY - elapsed)
 
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
