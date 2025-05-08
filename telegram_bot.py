@@ -4,6 +4,7 @@ from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 import traceback
 import os
+import time
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InputFile
@@ -16,6 +17,13 @@ dp = Dispatcher(bot)
 
 
 async def send_telegram_message(message):
+    global _last_send_time
+
+    now = time.time()
+    elapsed = now - _last_send_time
+    if elapsed < _rate_limit_interval:
+        await asyncio.sleep(_rate_limit_interval - elapsed)
+
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
@@ -24,6 +32,7 @@ async def send_telegram_message(message):
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(BOT_URL, data=payload) as resp:
+                _last_send_time = time.time()
                 return await resp.text()
         except Exception as e:
             print(f"❌ Telegram send error: {e}")
