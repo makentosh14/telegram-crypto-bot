@@ -32,13 +32,9 @@ def display_summary_stats(df):
     col3.metric("Avg Score", f"{avg_score:.2f}")
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
 
-def display_trade_table(df):
-    st.write("### 📋 Trade Log Table")
-
-    # Define all possible useful columns
+def display_trade_table(df, title):
+    st.write(f"### 📋 {title}")
     preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
-
-    # Only use columns that exist in the DataFrame
     existing_columns = [col for col in preferred_columns if col in df.columns]
     df_display = df[existing_columns].copy()
 
@@ -57,7 +53,6 @@ def display_trade_table(df):
         st.dataframe(df_display.style.applymap(highlight_result, subset=["result"]), use_container_width=True)
     else:
         st.dataframe(df_display, use_container_width=True)
-
 
 def display_result_breakdown(df):
     st.write("### 📊 Trade Result Breakdown")
@@ -129,16 +124,20 @@ def main():
         st.warning("No trade data found yet.")
         return
 
-    df = filter_data(df)
+    df_filtered = filter_data(df)
+    df_open = df_filtered[df_filtered.result == "open"]
+    df_closed = df_filtered[df_filtered.result != "open"]
 
-    if df.empty:
-        st.warning("No data matches the selected filters.")
-        return
+    display_summary_stats(df_filtered)
+    display_result_breakdown(df_filtered)
 
-    display_summary_stats(df)
-    display_result_breakdown(df)
-    display_trade_table(df)
-    display_indicator_details(df)
+    if not df_open.empty:
+        display_trade_table(df_open, "Active Trades")
+
+    if not df_closed.empty:
+        display_trade_table(df_closed, "Completed Trades")
+
+    display_indicator_details(df_filtered)
 
 if __name__ == "__main__":
     main()
