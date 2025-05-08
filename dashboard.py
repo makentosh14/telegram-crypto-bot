@@ -50,7 +50,7 @@ def display_trade_table(df, title):
         return ""
 
     if "result" in df_display.columns:
-        styled_df = df_display.style.map({"result": highlight_result})
+        styled_df = df_display.style.map(highlight_result, subset=["result"])
         st.dataframe(styled_df, use_container_width=True)
     else:
         st.dataframe(df_display, use_container_width=True)
