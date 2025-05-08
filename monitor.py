@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime, timedelta
 from score import score_symbol
 from pattern_detector import detect_pattern
 from volume import get_average_volume
@@ -25,11 +26,26 @@ def load_active_trades():
     global active_trades
     if os.path.exists(PERSIST_PATH):
         try:
+            now = datetime.utcnow()
             with open(PERSIST_PATH, 'r') as f:
-                active_trades = json.load(f)
-                for symbol in active_trades:
-                    active_trades[symbol]["exited"] = False
-            log("🔁 Loaded active trades from disk")
+                loaded_trades = json.load(f)
+
+            for symbol, trade in loaded_trades.items():
+                trade_time = trade.get("timestamp")
+                if trade.get("exited"):
+                    continue
+                if trade_time:
+                    try:
+                        trade_dt = datetime.strptime(trade_time, "%Y-%m-%d %H:%M:%S")
+                        if now - trade_dt > timedelta(hours=24):
+                            continue
+                    except:
+                        continue
+                trade["exited"] = False
+                active_trades[symbol] = trade
+
+            log(f"🔁 Loaded {len(active_trades)} active trades from disk")
+
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
@@ -46,7 +62,8 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "original_sl": sl,
         "tp1_hit": False,
         "tp2_hit": False,
-        "tp2": tp2
+        "tp2": tp2,
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")  # ✅ Track time
     }
     save_active_trades()
 
@@ -55,22 +72,8 @@ def remove_trade(symbol):
         del active_trades[symbol]
         save_active_trades()
 
-def get_exit_threshold(trade_type):
-    return {
-        "Scalp": 6,
-        "Intraday": 6,
-        "Swing": 5
-    }.get(trade_type, 6)
-
-def get_exit_cycles(trade_type):
-    return {
-        "Scalp": 2,
-        "Intraday": 3,
-        "Swing": 4
-    }.get(trade_type, 3)
-
 async def monitor_trades(live_candles):
-    from telegram_bot import send_telegram_message  # ✅ Lazy import to fix circular import
+    from telegram_bot import send_telegram_message
     update_exit_cooldowns()
 
     if time.time() - startup_time < 120:
