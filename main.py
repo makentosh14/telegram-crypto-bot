@@ -107,6 +107,7 @@ async def scan_for_new_signals(symbols):
             continue
 
         if not is_duplicate_signal(symbol):
+            log(f"🔍 Checking new signal for {symbol} | Score: {score:.2f} | Direction: {direction} | Type: {trade_type}")
             await asyncio.sleep(2)
             re_score, re_tf_scores, re_type, _, _ = score_symbol(symbol, candles_by_tf)
             re_direction = determine_direction(re_tf_scores)
