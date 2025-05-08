@@ -16,7 +16,7 @@ def write_log(message, level="INFO"):
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{now}] [{level.upper()}] {message}\n"
     try:
-        with open("/mnt/data/bot_logs/trading_bot_activity.log", "a") as f:
+        with open(LOG_FILE, "a") as f:
             f.write(line)
     except Exception as e:
         print(f"Logging error: {e}")
@@ -32,13 +32,13 @@ def log_trade_to_file(
     """
     file_exists = os.path.isfile(TRADE_LOG_CSV)
     try:
-        with open(TRADE_LOG_CSV, mode='a', newline='') as f:
+        with open(TRADE_LOG_CSV, mode='a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=[
                 "timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2",
                 "result", "score", "trade_type", "confidence",
                 "tf_scores", "indicator_scores", "used_indicators",
                 "pattern_detected", "whale_signal", "volume_spike", "sl_strategy"
-            ])
+            ], quoting=csv.QUOTE_ALL)
             if not file_exists:
                 writer.writeheader()
 
@@ -54,9 +54,9 @@ def log_trade_to_file(
                 "score": score,
                 "trade_type": trade_type,
                 "confidence": confidence,
-                "tf_scores": json.dumps(tf_scores or {}),
-                "indicator_scores": json.dumps(indicator_scores or {}),
-                "used_indicators": json.dumps(used_indicators or []),
+                "tf_scores": json.dumps(tf_scores or {}, ensure_ascii=False),
+                "indicator_scores": json.dumps(indicator_scores or {}, ensure_ascii=False),
+                "used_indicators": json.dumps(used_indicators or [], ensure_ascii=False),
                 "pattern_detected": pattern_detected,
                 "whale_signal": whale_signal,
                 "volume_spike": volume_spike,
@@ -74,7 +74,7 @@ def update_trade_result(symbol, result_value):
             return
 
         rows = []
-        with open(TRADE_LOG_CSV, mode="r", newline="") as f:
+        with open(TRADE_LOG_CSV, mode="r", newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
 
@@ -86,8 +86,8 @@ def update_trade_result(symbol, result_value):
                 break
 
         if updated:
-            with open(TRADE_LOG_CSV, mode="w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            with open(TRADE_LOG_CSV, mode="w", newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys(), quoting=csv.QUOTE_ALL)
                 writer.writeheader()
                 writer.writerows(rows)
             write_log(f"✅ Trade result updated: {symbol} → {result_value}")
