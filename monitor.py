@@ -180,53 +180,8 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ❌ Score-based Exit — Disabled
-        # if score < get_exit_threshold(trade_type):
-        #     if trade["cycles"] >= get_exit_cycles(trade_type):
-        #         trade["exited"] = True
-        #         await send_telegram_message(
-        #             f"⚠️ <b>Exit Signal Triggered</b>\n<b>{symbol}</b> | Score: {score} after {trade['cycles']} cycles."
-        #         )
-        #         log(f"📉 Score drop exit triggered for {symbol}")
-        #         write_log(f"EXIT: {symbol} | Score: {score} | Cycles: {trade['cycles']} | Reason: Score drop")
-        #         log_exit(symbol, score)
-        #         log_trade_result(symbol, tf_scores, "breakeven")
-        #         log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, trade.get("tp2"), "breakeven", score, trade_type, 0)
-        #         save_active_trades()
-        #         continue
-
         if should_reenter(symbol, score):
             await handle_reentry(symbol, score)
-
-        if len(trade["score_history"]) >= 3:
-            if trade["score_history"][-3] < get_exit_threshold(trade_type) and score >= get_exit_threshold(trade_type) + 2:
-                await send_telegram_message(
-                    f"🔁 <b>Score Recovery Alert</b>\n<b>{symbol}</b> | Score rebound to {score}"
-                )
-                write_log(f"SCORE RECOVERY: {symbol} | Score rebounded to {score}")
-
-        last_candles = candles_by_tf['1'][-2:]
-        pattern = detect_pattern(last_candles)
-        if pattern in ["bearish_engulfing", "inverted_hammer"]:
-            await send_telegram_message(
-                f"⚠️ <b>Bearish Reversal Pattern</b> on {symbol}\n<i>Pattern: {pattern}</i>"
-            )
-            write_log(f"BEARISH PATTERN: {symbol} | Pattern: {pattern}")
-
-        recent_vol = float(candles_by_tf['1'][-1]['volume'])
-        avg_vol = get_average_volume(candles_by_tf['1'], window=20)
-        if recent_vol < avg_vol * 0.5:
-            await send_telegram_message(
-                f"⚠️ <b>Volume Drop</b> on {symbol}\nLatest volume below 50% avg."
-            )
-            write_log(f"VOLUME DROP: {symbol} | Volume {recent_vol:.2f} < 50% avg {avg_vol:.2f}")
-
-        closes = [float(c['close']) for c in candles_by_tf['1'][-5:]]
-        if max(closes) - min(closes) < float(closes[-1]) * 0.002:
-            await send_telegram_message(
-                f"😴 <b>Flat Price Action</b> on {symbol}\n<i>Low volatility detected.</i>"
-            )
-            write_log(f"FLAT PRICE: {symbol} | Low volatility detected")
 
     save_active_trades()
 
