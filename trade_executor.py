@@ -169,7 +169,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": 1 if direction == "Long" else 2,
-                "triggerBy": "LastPrice",
+                "triggerBy": "MarkPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
@@ -180,6 +180,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 TP2 response: {tp2_result}")
             log(f"📤 SL response: {sl_result}")
+
+            write_log(f"SL ORDER PAYLOAD: {sl_task}")
+            write_log(f"SL ORDER RESPONSE: {sl_result}")
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
