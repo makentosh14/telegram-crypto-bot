@@ -75,10 +75,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             )
             return None
 
-        candles_by_tf = signal_data.get("candles")
-        latest_price_data = candles_by_tf['1'][-1]
-        price = float(latest_price_data['close'])  # ✅ Refresh price before order
-
+        price = float(signal_data.get("price", 1.0))
         leverage = DEFAULT_LEVERAGE
         risk_amount = usdt_balance * max_risk
         position_value = risk_amount * leverage
@@ -102,13 +99,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
+        candles_by_tf = signal_data.get("candles")
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", [])
-
-        sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
-            candles_by_tf, price, trade_type, direction, score, confidence
-        )
-        log(f"📏 Final qty = {qty} (type: {type(qty)})")
 
         if category != "spot":
             await signed_request("POST", "/v5/position/set-leverage", {
@@ -134,9 +127,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         order_result = await signed_request("POST", "/v5/order/create", order_payload)
 
         if order_result.get("retCode") == 0:
+            executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+            sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct = calculate_dynamic_sl_tp(
+                candles_by_tf, executed_entry, trade_type, direction, score, confidence
+            )
+
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
-
             qty_half = round(qty / 2, 6)
             if qty_half <= 0:
                 qty_half = qty
@@ -188,7 +185,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log_trade_to_file(
                 symbol=symbol,
                 direction=direction,
-                entry=price,
+                entry=executed_entry,
                 sl=sl,
                 tp1=tp1,
                 tp2=tp2,
@@ -214,7 +211,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             )
 
             return {
-                "entry": price,
+                "entry": executed_entry,
                 "sl": sl,
                 "tp1": tp1,
                 "tp2": tp2,
@@ -252,3 +249,4 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         write_log(f"BALANCE ERROR: No available USDT for {symbol}", level="WARNING")
 
     return None
+
