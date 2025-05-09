@@ -75,7 +75,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             )
             return None
 
-        price = float(signal_data.get("price", 1.0))
+        candles_by_tf = signal_data.get("candles")
+        latest_price_data = candles_by_tf['1'][-1]
+        price = float(latest_price_data['close'])  # ✅ Refresh price before order
+
         leverage = DEFAULT_LEVERAGE
         risk_amount = usdt_balance * max_risk
         position_value = risk_amount * leverage
@@ -99,7 +102,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         score = signal_data.get("score", 5)
         confidence = signal_data.get("confidence", 60)
-        candles_by_tf = signal_data.get("candles")
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", [])
 
@@ -139,7 +141,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if qty_half <= 0:
                 qty_half = qty
 
-            # ✅ Parallel async order placement
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -169,7 +170,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": 1 if direction == "Long" else 2,
-                "triggerBy": "MarkPrice",
+                "triggerBy": "LastPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
@@ -180,9 +181,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 TP2 response: {tp2_result}")
             log(f"📤 SL response: {sl_result}")
-
-            write_log(f"SL ORDER PAYLOAD: {sl_task}")
-            write_log(f"SL ORDER RESPONSE: {sl_result}")
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
