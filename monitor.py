@@ -50,26 +50,26 @@ def load_active_trades():
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
 
-def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
-   active_trades[symbol] = {
-      "score_history": [initial_score],
-      "trade_type": trade_type,
-      "entry_price": entry_price,
-      "direction": direction,
-      "cycles": 0,
-      "exited": False,
-      "trailing_pct": trailing_pct,
-      "trailing_sl": None,
-      "original_sl": sl,
-      "tp1_hit": False,
-      "tp2_hit": False,
-      "tp2": tp2,
-      "tp1_partial_exit": False,
-      "sl_order_id": sl_order_id,         # ✅ injected from trade_executor
-      "qty": qty,                         # ✅ also needed for SL re-placement logic
-      "break_even_triggered": False,
-      "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-  }
+ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
+    active_trades[symbol] = {
+       "score_history": [initial_score],
+       "trade_type": trade_type,
+       "entry_price": entry_price,
+       "direction": direction,
+       "cycles": 0,
+       "exited": False,
+       "trailing_pct": trailing_pct,
+       "trailing_sl": None,
+       "original_sl": sl,
+       "tp1_hit": False,
+       "tp2_hit": False,
+       "tp2": tp2,
+       "tp1_partial_exit": False,
+       "sl_order_id": sl_order_id,         # ✅ injected from trade_executor
+       "qty": qty,                         # ✅ also needed for SL re-placement logic
+       "break_even_triggered": False,
+       "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+   }
 
 
     save_active_trades()
