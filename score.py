@@ -4,7 +4,7 @@ from supertrend import calculate_supertrend_signal
 from ema import detect_ema_crossover
 from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
-from volume import is_volume_spike
+from volume import is_volume_spike, calculate_average_volume
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 from error_handler import send_error_to_telegram
@@ -53,6 +53,12 @@ def score_symbol(symbol, candles_by_timeframe):
         tf_label = f"{tf}m"
 
         try:
+            if not is_volume_spike(candles, 2.5):
+                avg_vol = calculate_average_volume(candles)
+                if avg_vol and avg_vol < 1000:
+                    tf_scores[tf] = -99.0
+                    continue
+
             if tf in TRADE_TYPE_TF["Scalp"]:
                 macd = detect_macd_cross(candles)
                 ema = detect_ema_crossover(candles)
@@ -195,13 +201,11 @@ def score_symbol(symbol, candles_by_timeframe):
 
     return round(best_score, 2), tf_scores, best_type, indicator_scores, list(used_indicators)
 
-
 def determine_direction(tf_scores):
     values = list(tf_scores.values())
     negative_count = sum(1 for v in values if v < 0)
     total = sum(values)
     return "Short" if negative_count >= len(tf_scores) // 2 and total < 0 else "Long"
-
 
 def calculate_confidence(score, tf_scores, trend_context, trade_type):
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
