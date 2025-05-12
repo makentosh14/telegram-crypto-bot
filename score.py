@@ -4,7 +4,7 @@ from supertrend import calculate_supertrend_signal
 from ema import detect_ema_crossover
 from bollinger import calculate_bollinger_bands
 from pattern_detector import detect_pattern
-from volume import is_volume_spike, calculate_average_volume
+from volume import is_volume_spike, get_average_volume
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 from error_handler import send_error_to_telegram
