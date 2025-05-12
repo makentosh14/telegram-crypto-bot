@@ -129,9 +129,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
-            qty_half = round(qty / 2, 6)
-            if qty_half <= 0:
-                qty_half = qty
+            min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+            qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
