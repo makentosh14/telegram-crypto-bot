@@ -162,19 +162,18 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
             sl_task = signed_request("POST", "/v5/order/create", {
-                "category": category,
-                "symbol": symbol,
-                "side": sl_side,
-                "orderType": "Limit",
-                "price": str(sl),
-                "triggerPrice": str(sl),
-                "triggerDirection": 1 if direction == "Long" else 2,
-                "triggerBy": "LastPrice",
-                "qty": str(qty),
-                "reduceOnly": True,
-                "timeInForce": "GTC",
-                "orderFilter": "Stop"
-            })
+               "category": category,
+               "symbol": symbol,
+               "side": sl_side,
+               "orderType": "Market",  # ✅ Changed from Limit to Market
+               "triggerPrice": str(sl),  # ✅ Keep this — it's still required for stop orders
+               "triggerDirection": 1 if direction == "Long" else 2,
+               "triggerBy": "LastPrice",
+               "qty": str(qty),
+               "reduceOnly": True,
+               "timeInForce": "GTC",
+               "orderFilter": "Stop"
+           })
 
             tp1_result, tp2_result, sl_result = await asyncio.gather(tp1_task, tp2_task, sl_task)
             log(f"📤 TP1 response: {tp1_result}")
