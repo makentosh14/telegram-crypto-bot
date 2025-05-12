@@ -66,6 +66,7 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "tp2": tp2,
         "tp1_partial_exit": False,
         "sl_order_id": None,
+        "break_even_triggered": False,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
     save_active_trades()
@@ -173,11 +174,12 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ✅ TP1 Hit
+        # ✅ TP1 Hit (force run before TP2 check)
         if not trade.get("tp1_hit") and direction and entry_price:
             tp1_level = entry_price * (1.018 if direction == "Long" else 0.982)
             if (direction == "Long" and current_price >= tp1_level) or (direction == "Short" and current_price <= tp1_level):
                 trade["tp1_hit"] = True
+                trade["break_even_triggered"] = True
                 new_sl = entry_price
                 trade["trailing_sl"] = new_sl
                 await send_telegram_message(
@@ -185,6 +187,7 @@ async def monitor_trades(live_candles):
                 )
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
 
+        # ✅ Partial Exit Log (only if TP1 was hit)
         if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
             trade["tp1_partial_exit"] = True
             await send_telegram_message(
@@ -192,6 +195,7 @@ async def monitor_trades(live_candles):
             )
             write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price}")
 
+        # ✅ TP2 Hit
         if trade.get("tp2") and not trade.get("tp2_hit"):
             tp2 = trade["tp2"]
             if (direction == "Long" and current_price >= tp2) or (direction == "Short" and current_price <= tp2):
@@ -206,6 +210,7 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
+        # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
             new_sl = should_trail_stop(
                 symbol, entry_price, current_price, direction.lower(),
@@ -221,6 +226,7 @@ async def monitor_trades(live_candles):
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
+        # ✅ Trailing SL Hit
         if trade.get("tp1_hit") and trade.get("trailing_sl"):
             trailing_sl = trade["trailing_sl"]
             if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
