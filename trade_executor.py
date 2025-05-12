@@ -178,6 +178,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 TP2 response: {tp2_result}")
             log(f"📤 SL response: {sl_result}")
 
+            sl_order_id = sl_result.get("result", {}).get("orderId")
+
             if sl_result.get("retCode") != 0:
                 log(f"❌ SL order failed: {sl_result}", level="ERROR")
                 await send_telegram_message(
@@ -229,7 +231,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "tp2_pct": tp2_pct,
                 "trailing_pct": trailing_pct,
                 "indicator_scores": indicator_scores,
-                "used_indicators": used_indicators
+                "used_indicators": used_indicators,
+                "sl_order_id": sl_order_id  # ✅ New for SL monitoring
             }
 
         else:
