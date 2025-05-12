@@ -16,14 +16,12 @@ PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
 startup_time = time.time()
 
-
 def save_active_trades():
     try:
         with open(PERSIST_PATH, 'w') as f:
             json.dump(active_trades, f, indent=2)
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
-
 
 def load_active_trades():
     global active_trades
@@ -49,7 +47,6 @@ def load_active_trades():
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
-
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -72,12 +69,10 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     }
     save_active_trades()
 
-
 def remove_trade(symbol):
     if symbol in active_trades:
         del active_trades[symbol]
         save_active_trades()
-
 
 async def check_and_restore_sl(symbol, trade):
     from telegram_bot import send_telegram_message
@@ -117,7 +112,6 @@ async def check_and_restore_sl(symbol, trade):
             save_active_trades()
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
-
 
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
@@ -187,6 +181,7 @@ async def monitor_trades(live_candles):
                     f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b>\n<b>Break-even SL activated</b> at {new_sl:.4f}"
                 )
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), tp1_level, None, "tp1", score, trade_type, 0)
 
         # ✅ Partial Exit Log (only if TP1 was hit)
         if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
@@ -245,6 +240,5 @@ async def monitor_trades(live_candles):
             await handle_reentry(symbol, score)
 
     save_active_trades()
-
 
 load_active_trades()
