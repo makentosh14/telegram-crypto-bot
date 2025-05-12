@@ -180,6 +180,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             sl_order_id = sl_result.get("result", {}).get("orderId")
 
+            if direction == "Short" and sl <= executed_entry:
+                trigger_direction = 2  # Force fallback to prevent rejection
+            elif direction == "Long" and sl >= executed_entry:
+                trigger_direction = 2
+
             if sl_result.get("retCode") != 0:
                 log(f"❌ SL order failed: {sl_result}", level="ERROR")
                 await send_telegram_message(
