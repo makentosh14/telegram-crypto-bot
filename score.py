@@ -54,7 +54,7 @@ def score_symbol(symbol, candles_by_timeframe):
 
         try:
             if not is_volume_spike(candles, 2.5):
-                avg_vol = calculate_average_volume(candles)
+                avg_vol = get_average_volume(candles)
                 if avg_vol and avg_vol < 1000:
                     tf_scores[tf] = -99.0
                     continue
