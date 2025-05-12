@@ -9,11 +9,13 @@ from logger import log, write_log
 from exit_manager import should_trail_stop
 from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
 from ai_memory import log_trade_result
-from activity_logger import log_trade_to_file  # ✅ NEW
+from activity_logger import log_trade_to_file
+from bybit_api import signed_request
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
-startup_time = time.time()  # ⏳ Track bot start time
+startup_time = time.time()
+
 
 def save_active_trades():
     try:
@@ -22,6 +24,7 @@ def save_active_trades():
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
 
+
 def load_active_trades():
     global active_trades
     if os.path.exists(PERSIST_PATH):
@@ -29,7 +32,6 @@ def load_active_trades():
             now = datetime.utcnow()
             with open(PERSIST_PATH, 'r') as f:
                 loaded_trades = json.load(f)
-
             for symbol, trade in loaded_trades.items():
                 trade_time = trade.get("timestamp")
                 if trade.get("exited"):
@@ -43,11 +45,10 @@ def load_active_trades():
                         continue
                 trade["exited"] = False
                 active_trades[symbol] = trade
-
             log(f"🔁 Loaded {len(active_trades)} active trades from disk")
-
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
+
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None):
     active_trades[symbol] = {
@@ -64,14 +65,57 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "tp2_hit": False,
         "tp2": tp2,
         "tp1_partial_exit": False,
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")  # ✅ Track time
+        "sl_order_id": None,
+        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
     save_active_trades()
+
 
 def remove_trade(symbol):
     if symbol in active_trades:
         del active_trades[symbol]
         save_active_trades()
+
+
+async def check_and_restore_sl(symbol, trade):
+    from telegram_bot import send_telegram_message
+    if not trade.get("sl_order_id"):
+        return
+    try:
+        response = await signed_request("GET", "/v5/order/realtime", {
+            "symbol": symbol,
+            "category": "linear",
+        })
+        active_orders = response.get("result", {}).get("list", [])
+        sl_order_id = trade.get("sl_order_id")
+        sl_exists = any(order.get("orderId") == sl_order_id for order in active_orders)
+        if not sl_exists:
+            direction = trade.get("direction")
+            qty = trade.get("qty")
+            sl = trade.get("original_sl")
+            side = "Sell" if direction == "Long" else "Buy"
+            trigger_direction = 1 if direction == "Long" else 2
+            sl_resp = await signed_request("POST", "/v5/order/create", {
+                "category": "linear",
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "triggerPrice": str(sl),
+                "triggerDirection": trigger_direction,
+                "triggerBy": "MarkPrice",
+                "qty": str(qty),
+                "reduceOnly": True,
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"
+            })
+            await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
+            write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
+            log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
+            trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
+            save_active_trades()
+    except Exception as e:
+        log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
+
 
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
@@ -112,6 +156,8 @@ async def monitor_trades(live_candles):
         current_price = float(candles_by_tf['1'][-1]['close'])
         trailing_pct = trade.get("trailing_pct")
 
+        await check_and_restore_sl(symbol, trade)
+
         # ✅ SL Hit
         if trade.get("original_sl") and not trade.get("tp1_hit"):
             sl_price = trade["original_sl"]
@@ -139,7 +185,6 @@ async def monitor_trades(live_candles):
                 )
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
 
-        # ✅ Partial TP Exit on TP1 if not yet done
         if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
             trade["tp1_partial_exit"] = True
             await send_telegram_message(
@@ -147,7 +192,6 @@ async def monitor_trades(live_candles):
             )
             write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price}")
 
-        # ✅ TP2 Hit
         if trade.get("tp2") and not trade.get("tp2_hit"):
             tp2 = trade["tp2"]
             if (direction == "Long" and current_price >= tp2) or (direction == "Short" and current_price <= tp2):
@@ -162,7 +206,6 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
             new_sl = should_trail_stop(
                 symbol, entry_price, current_price, direction.lower(),
@@ -178,7 +221,6 @@ async def monitor_trades(live_candles):
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
-        # ✅ Trailing SL Hit
         if trade.get("tp1_hit") and trade.get("trailing_sl"):
             trailing_sl = trade["trailing_sl"]
             if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
@@ -196,5 +238,6 @@ async def monitor_trades(live_candles):
             await handle_reentry(symbol, score)
 
     save_active_trades()
+
 
 load_active_trades()
