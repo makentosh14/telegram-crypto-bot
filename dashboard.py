@@ -34,11 +34,10 @@ def display_summary_stats(df):
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
-    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators"]
-    existing_columns = [col for col in preferred_columns if col in df.columns]
+    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators", "top_indicator"]
     df_display = df.copy()
 
-    # Add indicators preview column
+    # Add indicator preview
     if "indicator_scores" in df_display.columns:
         def simplify_scores(raw):
             try:
@@ -48,6 +47,16 @@ def display_trade_table(df, title):
                 return ""
         df_display["indicators"] = df_display["indicator_scores"].apply(simplify_scores)
 
+        def top_indicator(raw):
+            try:
+                scores = json.loads(raw)
+                sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
+                return sorted_items[0][0] if sorted_items else ""
+            except:
+                return ""
+        df_display["top_indicator"] = df_display["indicator_scores"].apply(top_indicator)
+
+    existing_columns = [col for col in preferred_columns if col in df_display.columns]
     df_display = df_display[existing_columns]
 
     def highlight_result(val):
@@ -107,6 +116,28 @@ def display_indicator_details(df):
         except Exception as e:
             st.error(f"Error parsing used indicators: {e}")
 
+def display_trade_drilldown(df):
+    st.write("### 🧬 Per-Trade Deep Analysis")
+    df = df.sort_values("timestamp", ascending=False)
+    trade_options = df["symbol"] + " | " + df["timestamp"].astype(str)
+    selected_row = st.selectbox("Select a trade to analyze", trade_options)
+
+    if selected_row:
+        try:
+            symbol = selected_row.split(" | ")[0]
+            row = df[df.symbol == symbol].iloc[0]
+            st.markdown(f"#### 🧾 Trade: {row['symbol']} — {row['direction']} ({row['result']})")
+            st.markdown(f"- **Entry**: {row['entry_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
+            st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Top Indicator**: {row.get('top_indicator', '')}")
+            if pd.notna(row["indicator_scores"]):
+                st.markdown("**📊 Indicator Scores:**")
+                st.json(json.loads(row["indicator_scores"]))
+            if pd.notna(row["used_indicators"]):
+                st.markdown("**✅ Used Indicators:**")
+                st.json(json.loads(row["used_indicators"]))
+        except Exception as e:
+            st.error(f"Failed to display trade drilldown: {e}")
+
 def filter_data(df):
     symbols = df.symbol.unique().tolist()
     trade_types = df.trade_type.unique().tolist()
@@ -153,6 +184,7 @@ def main():
         display_trade_table(df_closed, "Completed Trades")
 
     display_indicator_details(df_filtered)
+    display_trade_drilldown(df_filtered)
 
 if __name__ == "__main__":
     main()
