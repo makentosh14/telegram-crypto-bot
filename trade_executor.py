@@ -159,6 +159,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             trigger_direction = 1 if (direction == "Long" and sl > executed_entry) or (direction == "Short" and sl < executed_entry) else 2
 
+            if direction == "Short" and sl <= executed_entry:
+                trigger_direction = 2  # Force fallback to prevent rejection
+            elif direction == "Long" and sl >= executed_entry:
+                trigger_direction = 2
+
             sl_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
@@ -179,11 +184,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 SL response: {sl_result}")
 
             sl_order_id = sl_result.get("result", {}).get("orderId")
-
-            if direction == "Short" and sl <= executed_entry:
-                trigger_direction = 2  # Force fallback to prevent rejection
-            elif direction == "Long" and sl >= executed_entry:
-                trigger_direction = 2
 
             if sl_result.get("retCode") != 0:
                 log(f"❌ SL order failed: {sl_result}", level="ERROR")
