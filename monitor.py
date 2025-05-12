@@ -71,7 +71,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
       "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
   }
 
+
     save_active_trades()
+
 
 def remove_trade(symbol):
     if symbol in active_trades:
