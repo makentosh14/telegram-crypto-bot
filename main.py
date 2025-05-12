@@ -171,6 +171,7 @@ async def scan_for_new_signals(symbols):
                     trailing_pct=trade.get("trailing_pct"),
                     tp2=trade.get("tp2"),
                     sl=trade.get("sl"),
+                    qty=trade.get("qty"),
                     sl_order_id=trade.get("sl_order_id")  # ✅ ADD THIS LINE
                 )
 
