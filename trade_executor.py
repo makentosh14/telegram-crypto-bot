@@ -112,8 +112,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
-            "category": category,
-            "symbol": symbol
+            "category": category
         })
 
         order_payload = {
@@ -133,8 +132,17 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
+            # ✅ Adjust SL if it's invalid
+            if direction == "Long" and sl >= executed_entry:
+                log(f"⚠️ SL for Long is above entry! Adjusting...")
+                sl = round(executed_entry * 0.99, 6)
+            elif direction == "Short" and sl <= executed_entry:
+                log(f"⚠️ SL for Short is below entry! Adjusting...")
+                sl = round(executed_entry * 1.01, 6)
+
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
+
             qty_half = round(qty / 2, 6)
             if qty_half <= 0:
                 qty_half = qty
@@ -162,18 +170,18 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
             sl_task = signed_request("POST", "/v5/order/create", {
-               "category": category,
-               "symbol": symbol,
-               "side": sl_side,
-               "orderType": "Market",  # ✅ Changed from Limit to Market
-               "triggerPrice": str(sl),  # ✅ Keep this — it's still required for stop orders
-               "triggerDirection": 1 if direction == "Long" else 2,
-               "triggerBy": "LastPrice",
-               "qty": str(qty),
-               "reduceOnly": True,
-               "timeInForce": "GTC",
-               "orderFilter": "Stop"
-           })
+                "category": category,
+                "symbol": symbol,
+                "side": sl_side,
+                "orderType": "Market",
+                "triggerPrice": str(sl),
+                "triggerDirection": 1 if direction == "Long" else 2,
+                "triggerBy": "LastPrice",
+                "qty": str(qty),
+                "reduceOnly": True,
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"
+            })
 
             tp1_result, tp2_result, sl_result = await asyncio.gather(tp1_task, tp2_task, sl_task)
             log(f"📤 TP1 response: {tp1_result}")
