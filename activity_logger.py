@@ -34,7 +34,7 @@ def log_trade_to_file(
     try:
         with open(TRADE_LOG_CSV, mode='a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=[
-                "timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2",
+                "timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2",
                 "result", "score", "trade_type", "confidence",
                 "tf_scores", "indicator_scores", "used_indicators",
                 "pattern_detected", "whale_signal", "volume_spike", "sl_strategy"
@@ -46,7 +46,7 @@ def log_trade_to_file(
                 "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "symbol": symbol,
                 "direction": direction,
-                "entry": entry,
+                "entry_price": entry,
                 "sl": sl,
                 "tp1": tp1,
                 "tp2": tp2,
