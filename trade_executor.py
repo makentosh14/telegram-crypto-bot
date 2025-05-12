@@ -10,6 +10,7 @@ from score import score_symbol, determine_direction, calculate_confidence
 from datetime import datetime
 import asyncio
 
+
 def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
@@ -18,6 +19,7 @@ def calculate_quantity(symbol, raw_qty):
     if rounded_qty < min_qty:
         return 0
     return rounded_qty
+
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -51,6 +53,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp2 = round(price * (1 - tp2_pct / 100), 6)
 
     return sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct
+
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
@@ -154,7 +157,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # ✅ Adjust triggerDirection based on SL vs current price
             trigger_direction = 1 if (direction == "Long" and sl > executed_entry) or (direction == "Short" and sl < executed_entry) else 2
 
             sl_task = signed_request("POST", "/v5/order/create", {
@@ -252,4 +254,3 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         write_log(f"BALANCE ERROR: No available USDT for {symbol}", level="WARNING")
 
     return None
-
