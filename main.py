@@ -31,14 +31,12 @@ MIN_SCALP_SCORE = 6.5
 MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 7.5
 
-
 def extract_last_pattern(candles_by_tf):
     for tf in sorted(candles_by_tf, key=lambda x: int(x)):
         pattern = detect_pattern(candles_by_tf[tf])
         if pattern:
             return pattern
     return None
-
 
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
@@ -61,6 +59,10 @@ async def scan_for_new_signals(symbols):
             continue
 
         score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
+        if score <= -50:  # ✅ Reject extremely low scoring coins (e.g., low volume filtered)
+            log(f"❌ Skipping {symbol} — filtered due to low score ({score})")
+            continue
+
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
@@ -170,7 +172,6 @@ async def scan_for_new_signals(symbols):
                     tp2=trade.get("tp2"),
                     sl=trade.get("sl")
                 )
-
 
 
 async def monitor_loop():
