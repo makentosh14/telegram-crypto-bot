@@ -34,7 +34,7 @@ def display_summary_stats(df):
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
-    preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
+    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
     existing_columns = [col for col in preferred_columns if col in df.columns]
     df_display = df[existing_columns].copy()
 
