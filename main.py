@@ -59,7 +59,7 @@ async def scan_for_new_signals(symbols):
             continue
 
         score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
-        if score <= -50:  # ✅ Reject extremely low scoring coins (e.g., low volume filtered)
+        if score <= -50:
             log(f"❌ Skipping {symbol} — filtered due to low score ({score})")
             continue
 
