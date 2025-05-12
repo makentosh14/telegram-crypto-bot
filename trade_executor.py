@@ -112,7 +112,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             })
 
         await signed_request("POST", "/v5/order/cancel-all", {
-            "category": category
+            "category": category,
+            "symbol": symbol
         })
 
         order_payload = {
@@ -164,8 +165,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "category": category,
                 "symbol": symbol,
                 "side": sl_side,
-                "orderType": "Limit",  # <-- changed from Market
-                "price": str(sl),      # <-- price is required for Limit Stop
+                "orderType": "Limit",
+                "price": str(sl),
                 "triggerPrice": str(sl),
                 "triggerDirection": 1 if direction == "Long" else 2,
                 "triggerBy": "LastPrice",
@@ -179,11 +180,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 TP2 response: {tp2_result}")
             log(f"📤 SL response: {sl_result}")
-        if sl_result.get("retCode") != 0:
-            log(f"❌ SL order failed: {sl_result}", level="ERROR")
-            await send_telegram_message(
-                f"❗️<b>SL Order Failed</b> for {symbol}\nReason: {sl_result.get('retMsg')}"
-            )
+
+            if sl_result.get("retCode") != 0:
+                log(f"❌ SL order failed: {sl_result}", level="ERROR")
+                await send_telegram_message(
+                    f"❗️<b>SL Order Failed</b> for {symbol}\nReason: {sl_result.get('retMsg')}"
+                )
 
             log(f"✅ {direction.upper()} Order placed for {symbol} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2}")
             write_log(f"TRADE EXECUTED: {symbol} | {direction} | Qty: {qty} | SL: {sl} | TP1: {tp1} | TP2: {tp2} | Type: {trade_type}")
