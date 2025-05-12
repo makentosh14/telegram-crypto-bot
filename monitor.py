@@ -63,6 +63,7 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "tp1_hit": False,
         "tp2_hit": False,
         "tp2": tp2,
+        "tp1_partial_exit": False,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")  # ✅ Track time
     }
     save_active_trades()
@@ -137,6 +138,14 @@ async def monitor_trades(live_candles):
                     f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b>\n<b>Break-even SL activated</b> at {new_sl:.4f}"
                 )
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
+
+        # ✅ Partial TP Exit on TP1 if not yet done
+        if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
+            trade["tp1_partial_exit"] = True
+            await send_telegram_message(
+                f"📤 <b>Partial TP1 Exit</b> on {symbol} | Booked partial profits. Holding for TP2."
+            )
+            write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price}")
 
         # ✅ TP2 Hit
         if trade.get("tp2") and not trade.get("tp2_hit"):
