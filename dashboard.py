@@ -34,9 +34,21 @@ def display_summary_stats(df):
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
-    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence"]
+    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators"]
     existing_columns = [col for col in preferred_columns if col in df.columns]
-    df_display = df[existing_columns].copy()
+    df_display = df.copy()
+
+    # Add indicators preview column
+    if "indicator_scores" in df_display.columns:
+        def simplify_scores(raw):
+            try:
+                scores = json.loads(raw)
+                return ", ".join(f"{k}:{v}" for k, v in list(scores.items())[:3])
+            except:
+                return ""
+        df_display["indicators"] = df_display["indicator_scores"].apply(simplify_scores)
+
+    df_display = df_display[existing_columns]
 
     def highlight_result(val):
         if val == "win":
