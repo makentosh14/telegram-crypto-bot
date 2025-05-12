@@ -35,29 +35,8 @@ def display_summary_stats(df):
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
     preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators", "top_indicator"]
-    df_display = df.copy()
-
-    # Add indicator preview and top indicator
-    if "indicator_scores" in df_display.columns:
-        def simplify_scores(raw):
-            try:
-                scores = json.loads(raw)
-                return ", ".join(f"{k}:{v}" for k, v in list(scores.items())[:3])
-            except:
-                return ""
-        df_display["indicators"] = df_display["indicator_scores"].apply(simplify_scores)
-
-        def top_indicator(raw):
-            try:
-                scores = json.loads(raw)
-                sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
-                return sorted_items[0][0] if sorted_items else ""
-            except:
-                return ""
-        df_display["top_indicator"] = df_display["indicator_scores"].apply(top_indicator)
-
-    existing_columns = [col for col in preferred_columns if col in df_display.columns]
-    df_display = df_display[existing_columns]
+    existing_columns = [col for col in preferred_columns if col in df.columns]
+    df_display = df[existing_columns].copy()
 
     def highlight_result(val):
         if val == "win":
@@ -171,6 +150,27 @@ def main():
         return
 
     df_filtered = filter_data(df)
+
+    # ✅ Compute indicators & top_indicator once, for all trades
+    if "indicator_scores" in df_filtered.columns:
+        def simplify_scores(raw):
+            try:
+                scores = json.loads(raw)
+                return ", ".join(f"{k}:{v}" for k, v in list(scores.items())[:3])
+            except:
+                return ""
+        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(simplify_scores)
+
+        def top_indicator(raw):
+            try:
+                scores = json.loads(raw)
+                sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
+                return sorted_items[0][0] if sorted_items else ""
+            except:
+                return ""
+        df_filtered["top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
+
+    # Split correctly between active and completed
     df_open = df_filtered[df_filtered.result == "open"]
     df_closed = df_filtered[df_filtered.result != "open"]
 
