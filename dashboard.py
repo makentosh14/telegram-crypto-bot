@@ -34,10 +34,10 @@ def display_summary_stats(df):
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
-    preferred_columns = ["timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators", "top_indicator"]
+    preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators", "top_indicator"]
     df_display = df.copy()
 
-    # Add indicator preview
+    # Add indicator preview and top indicator
     if "indicator_scores" in df_display.columns:
         def simplify_scores(raw):
             try:
@@ -127,7 +127,7 @@ def display_trade_drilldown(df):
             symbol = selected_row.split(" | ")[0]
             row = df[df.symbol == symbol].iloc[0]
             st.markdown(f"#### 🧾 Trade: {row['symbol']} — {row['direction']} ({row['result']})")
-            st.markdown(f"- **Entry**: {row['entry_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
+            st.markdown(f"- **Entry**: {row['entry']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
             st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Top Indicator**: {row.get('top_indicator', '')}")
             if pd.notna(row["indicator_scores"]):
                 st.markdown("**📊 Indicator Scores:**")
