@@ -10,18 +10,14 @@ from score import score_symbol, determine_direction, calculate_confidence
 from datetime import datetime
 import asyncio
 
-
 def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
-
     min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
     rounded_qty = round_qty(symbol, raw_qty)
-
     if rounded_qty < min_qty:
         return 0
     return rounded_qty
-
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -55,7 +51,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp2 = round(price * (1 - tp2_pct / 100), 6)
 
     return sl, tp1, tp2, sl_pct, trailing_pct, tp1_pct, tp2_pct
-
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
@@ -101,7 +96,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         confidence = signal_data.get("confidence", 60)
         candles_by_tf = signal_data.get("candles")
         indicator_scores = signal_data.get("indicator_scores", {})
-        used_indicators = signal_data.get("used_indicators", [])
+        used_indicators = signal_data.get("used_indicators", {})
 
         if category != "spot":
             await signed_request("POST", "/v5/position/set-leverage", {
@@ -132,17 +127,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
-            # ✅ Adjust SL if it's invalid
-            if direction == "Long" and sl >= executed_entry:
-                log(f"⚠️ SL for Long is above entry! Adjusting...")
-                sl = round(executed_entry * 0.99, 6)
-            elif direction == "Short" and sl <= executed_entry:
-                log(f"⚠️ SL for Short is below entry! Adjusting...")
-                sl = round(executed_entry * 1.01, 6)
-
             sl_side = "Sell" if direction == "Long" else "Buy"
             tp_side = sl_side
-
             qty_half = round(qty / 2, 6)
             if qty_half <= 0:
                 qty_half = qty
@@ -169,13 +155,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
+            # ✅ Adjust triggerDirection based on SL vs current price
+            trigger_direction = 1 if (direction == "Long" and sl > executed_entry) or (direction == "Short" and sl < executed_entry) else 2
+
             sl_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
                 "symbol": symbol,
                 "side": sl_side,
                 "orderType": "Market",
                 "triggerPrice": str(sl),
-                "triggerDirection": 1 if direction == "Long" else 2,
+                "triggerDirection": trigger_direction,
                 "triggerBy": "LastPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
