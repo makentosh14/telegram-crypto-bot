@@ -154,7 +154,6 @@ async def monitor_trades(live_candles):
 
         await check_and_restore_sl(symbol, trade)
 
-        # ✅ SL Hit
         if trade.get("original_sl") and not trade.get("tp1_hit"):
             sl_price = trade["original_sl"]
             if (direction == "Long" and current_price <= sl_price) or (direction == "Short" and current_price >= sl_price):
@@ -169,7 +168,6 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ✅ TP1 Hit (force run before TP2 check)
         if not trade.get("tp1_hit") and direction and entry_price:
             tp1_level = entry_price * (1.018 if direction == "Long" else 0.982)
             if (direction == "Long" and current_price >= tp1_level) or (direction == "Short" and current_price <= tp1_level):
@@ -183,7 +181,6 @@ async def monitor_trades(live_candles):
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
                 log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), tp1_level, None, "tp1", score, trade_type, 0)
 
-        # ✅ Partial Exit Log (only if TP1 was hit)
         if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
             trade["tp1_partial_exit"] = True
             await send_telegram_message(
@@ -191,7 +188,6 @@ async def monitor_trades(live_candles):
             )
             write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price}")
 
-        # ✅ TP2 Hit
         if trade.get("tp2") and not trade.get("tp2_hit"):
             tp2 = trade["tp2"]
             if (direction == "Long" and current_price >= tp2) or (direction == "Short" and current_price <= tp2):
@@ -206,7 +202,6 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        # ✅ Trailing SL
         if trade.get("tp1_hit") and trailing_pct:
             new_sl = should_trail_stop(
                 symbol, entry_price, current_price, direction.lower(),
@@ -221,8 +216,8 @@ async def monitor_trades(live_candles):
                 )
                 log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                 write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
+                log_trade_to_file(symbol, direction, entry_price, new_sl, None, trade.get("tp2"), "trailing_updated", score, trade_type, 0)
 
-        # ✅ Trailing SL Hit
         if trade.get("tp1_hit") and trade.get("trailing_sl"):
             trailing_sl = trade["trailing_sl"]
             if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
