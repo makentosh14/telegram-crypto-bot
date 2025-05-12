@@ -19,7 +19,7 @@ def display_summary_stats(df):
     total = len(df)
     wins = len(df[df.result == "win"])
     losses = len(df[df.result == "loss"])
-    breakeven = len(df[df.result == "breakeven"])
+    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
     open_trades = len(df[df.result == "open"])
 
     win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
@@ -47,6 +47,8 @@ def display_trade_table(df, title):
             return "background-color: #f5f5a0"
         elif val == "open":
             return "background-color: #cce5ff"
+        elif val in ["tp1", "tp1-partial"]:
+            return "background-color: #d4eaff"
         return ""
 
     if "result" in df_display.columns:
@@ -59,7 +61,7 @@ def display_result_breakdown(df):
     st.write("### 📊 Trade Result Breakdown")
 
     tp2_hits = len(df[(df.result == "win") & df.tp2.notna()])
-    tp1_only = len(df[(df.result == "breakeven") & df.tp1.notna() & df.tp2.isna()])
+    tp1_only = len(df[df.result.isin(["tp1", "tp1-partial", "breakeven"])])
     sl_hits = len(df[df.result == "loss"])
     open_trades = len(df[df.result == "open"])
 
