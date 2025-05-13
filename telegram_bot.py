@@ -78,7 +78,7 @@ def format_trade_signal(
         f"<b>TF Breakdown:</b> {filtered_tf_scores}\n\n"
         f"<b>Entry:</b> {entry_price}\n"
         f"<b>SL:</b> {sl}" + (f" ({sl_pct:.2f}%)" if sl_pct is not None else "") + "\n"
-        f"<b>TP1:</b> {tp1}\n\n"
+        f"<b>TP1:</b> {tp1} (Trigger only)\n\n"
         f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
         f"📈 <b>Leverage:</b> {leverage}x\n"
         f"📉 <b>Smart Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
@@ -120,13 +120,12 @@ async def handle_active_trades(message: types.Message):
         direction = trade.get("direction", "?")
         trailing_sl = trade.get("trailing_sl", "Not set")
         tp1_hit = "✅" if trade.get("tp1_hit") else "❌"
-        tp2_hit = "✅" if trade.get("tp2_hit") else "❌"
 
         msg += (
             f"\n<b>{symbol}</b> | {direction} ({trade_type})\n"
             f"• Entry: {entry}\n"
             f"• Trailing SL: {trailing_sl}\n"
-            f"• TP1 Hit: {tp1_hit} | TP2 Hit: {tp2_hit}\n"
+            f"• TP1 Hit: {tp1_hit}\n"
         )
 
     await message.reply(msg, parse_mode="HTML")
