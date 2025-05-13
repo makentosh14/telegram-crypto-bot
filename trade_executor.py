@@ -157,17 +157,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # Dynamically adjust SL triggerDirection and triggerPrice to prevent API rejection
-            if direction == "Long":
-                trigger_direction = 2 if sl >= executed_entry else 1
-                # Ensure SL is slightly below entry
-                if sl >= executed_entry:
-                    sl = round(executed_entry * 0.998, 6)  # fallback
-            else:  # Short
-                trigger_direction = 2 if sl <= executed_entry else 1
-                # Ensure SL is slightly above entry
-                if sl <= executed_entry:
-                    sl = round(executed_entry * 1.002, 6)  # fallback
+            trigger_direction = 2 if direction == "Long" else 1
 
             sl_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
@@ -176,7 +166,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": trigger_direction,
-                "triggerBy": "LastPrice",
+                "triggerBy": "MarkPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
@@ -242,7 +232,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "trailing_pct": trailing_pct,
                 "indicator_scores": indicator_scores,
                 "used_indicators": used_indicators,
-                "sl_order_id": sl_order_id  # ✅ New for SL monitoring
+                "sl_order_id": sl_order_id
             }
 
         else:
