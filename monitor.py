@@ -16,9 +16,10 @@ PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
 startup_time = time.time()
 
-POST_EXIT_CANDLE_COUNT = 5  # Number of candles to evaluate after exit
-TP1_PUMP_CANDLE_LOOKAHEAD = 4  # Candles to look for pump after TP1
-TP1_PUMP_THRESHOLD = 1.2  # % move after TP1 for smart pump tracker
+POST_EXIT_CANDLE_COUNT = 5
+TP1_PUMP_CANDLE_LOOKAHEAD = 4
+TP1_PUMP_THRESHOLD = 1.2
+
 
 def save_active_trades():
     try:
@@ -26,6 +27,7 @@ def save_active_trades():
             json.dump(active_trades, f, indent=2)
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
+
 
 def load_active_trades():
     global active_trades
@@ -51,6 +53,7 @@ def load_active_trades():
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
+
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -74,10 +77,12 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     }
     save_active_trades()
 
+
 def remove_trade(symbol):
     if symbol in active_trades:
         del active_trades[symbol]
         save_active_trades()
+
 
 async def check_and_restore_sl(symbol, trade):
     from telegram_bot import send_telegram_message
@@ -117,6 +122,7 @@ async def check_and_restore_sl(symbol, trade):
             save_active_trades()
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
+
 
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
@@ -167,5 +173,6 @@ async def monitor_trades(live_candles):
                 write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
 
     save_active_trades()
+
 
 load_active_trades()
