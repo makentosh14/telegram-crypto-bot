@@ -158,15 +158,24 @@ async def monitor_trades(live_candles):
         await check_and_restore_sl(symbol, trade)
 
         if trade.get("tp1_hit") and trailing_pct:
-            new_sl = should_trail_stop(symbol, entry_price, current_price, direction.lower(),
-                                       candles=candles_by_tf['1'],
-                                       trigger_pct=trailing_pct * 2,
-                                       trail_pct=trailing_pct)
-            if new_sl and new_sl != trade.get("trailing_sl"):
-                trade["trailing_sl"] = new_sl
-                await send_telegram_message(f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}")
-                log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
-                write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
+           current_trailing_sl = trade.get("trailing_sl")
+           new_sl = should_trail_stop(
+               symbol=symbol,
+               entry_price=entry_price,
+               current_price=current_price,
+               direction=direction.lower(),
+               candles=candles_by_tf['1'],
+               trigger_pct=trailing_pct * 2,
+               trail_pct=trailing_pct,
+               current_trailing_sl=current_trailing_sl  # ✅ Pass it in
+           )
+           if new_sl and (current_trailing_sl is None or
+                          (direction == "Long" and new_sl > current_trailing_sl) or
+                          (direction == "Short" and new_sl < current_trailing_sl)):
+               trade["trailing_sl"] = new_sl
+               await send_telegram_message(f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}")
+               log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
+               write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
         if trade.get("tp1_hit") and trade.get("trailing_sl"):
             trailing_sl = trade["trailing_sl"]
