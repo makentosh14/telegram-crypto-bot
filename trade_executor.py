@@ -141,12 +141,22 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": trigger_direction,
-                "triggerBy": "LastPrice",
+                "triggerBy": "MarkPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
                 "orderFilter": "Stop"
             })
+
+            if direction == "Long":
+     trigger_direction = 1  # falling
+    if sl >= executed_entry:
+        sl = round(executed_entry * 0.9975, 6)  # Ensure SL is slightly lower
+else:
+    trigger_direction = 2  # rising
+    if sl <= executed_entry:
+        sl = round(executed_entry * 1.0025, 6)  # Ensure SL is slightly higher
+
 
             tp1_result, sl_result = await asyncio.gather(tp1_task, sl_task)
             log(f"📤 TP1 response: {tp1_result}")
