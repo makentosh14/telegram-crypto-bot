@@ -230,8 +230,6 @@ def display_summary_stats(df):
     col3.metric("Avg Score", f"{avg_score:.2f}")
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
 
-    display_result_breakdown(df_filtered)
-
     if not df_open.empty:
         display_trade_table(df_open, "Active Trades")
 
