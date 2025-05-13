@@ -56,17 +56,33 @@ def classify_signal(row):
 
 def format_indicator_scores(raw):
     try:
-        scores = json.loads(raw)
-        readable = [f"{INDICATOR_MAP.get(str(k), k)}: {v}" for k, v in scores.items() if float(v) > 0]
+        if isinstance(raw, str):
+            data = json.loads(raw)
+        else:
+            data = raw
+
+        if isinstance(data, dict):
+            readable = [f"{INDICATOR_MAP.get(str(k), k)}: {v}" for k, v in data.items() if float(v) > 0]
+        elif isinstance(data, list):
+            readable = [str(item) for item in data if item]  # fallback
+        else:
+            readable = []
+
         return "\n".join(readable) if readable else "—"
-    except:
+    except Exception:
         return "—"
 
 def top_indicator(raw):
     try:
-        scores = json.loads(raw)
-        sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
-        return INDICATOR_MAP.get(sorted_items[0][0], sorted_items[0][0]) if sorted_items else ""
+        if isinstance(raw, str):
+            data = json.loads(raw)
+        else:
+            data = raw
+
+        if isinstance(data, dict):
+            sorted_items = sorted(data.items(), key=lambda x: float(x[1]), reverse=True)
+            return INDICATOR_MAP.get(sorted_items[0][0], sorted_items[0][0]) if sorted_items else ""
+        return ""
     except:
         return ""
 
