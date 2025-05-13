@@ -16,14 +16,12 @@ PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
 startup_time = time.time()
 
-
 def save_active_trades():
     try:
         with open(PERSIST_PATH, 'w') as f:
             json.dump(active_trades, f, indent=2)
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
-
 
 def load_active_trades():
     global active_trades
@@ -49,7 +47,6 @@ def load_active_trades():
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
-
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -72,12 +69,10 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     }
     save_active_trades()
 
-
 def remove_trade(symbol):
     if symbol in active_trades:
         del active_trades[symbol]
         save_active_trades()
-
 
 async def check_and_restore_sl(symbol, trade):
     from telegram_bot import send_telegram_message
@@ -118,7 +113,6 @@ async def check_and_restore_sl(symbol, trade):
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
 
-
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
     update_exit_cooldowns()
@@ -151,7 +145,7 @@ async def monitor_trades(live_candles):
             write_log(f"MONITOR ERROR: {symbol} candle fetch failed: {e}", level="ERROR")
             continue
 
-        score, tf_scores, _, _, _ = score_symbol(symbol, candles_by_tf)
+        score, tf_scores, _, _, used_list = score_symbol(symbol, candles_by_tf)
         trade["score_history"].append(score)
         trade["cycles"] += 1
 
@@ -168,7 +162,7 @@ async def monitor_trades(live_candles):
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                 log_exit(symbol, score)
                 log_trade_result(symbol, tf_scores, "loss")
-                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
                 save_active_trades()
                 continue
 
@@ -181,13 +175,13 @@ async def monitor_trades(live_candles):
                 trade["trailing_sl"] = new_sl
                 await send_telegram_message(f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b>\n<b>Break-even SL activated</b> at {new_sl:.4f}")
                 write_log(f"TP1 HIT: {symbol} | Break-even SL set at {new_sl}")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
 
         if trade.get("tp1_hit") and not trade.get("tp1_partial_exit"):
             trade["tp1_partial_exit"] = True
             await send_telegram_message(f"📤 <b>Partial TP1 Exit</b> on {symbol} | Booked partial profits. Holding for TP2.")
             write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price}")
-            log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1-partial", score, trade_type, 0)
+            log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1-partial", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
 
         if trade.get("tp2") and not trade.get("tp2_hit"):
             tp2 = trade["tp2"]
@@ -197,7 +191,7 @@ async def monitor_trades(live_candles):
                 await send_telegram_message(f"🏁 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}")
                 write_log(f"TP2 HIT: {symbol} | Reached: {current_price}")
                 log_trade_result(symbol, tf_scores, "win")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
                 save_active_trades()
                 continue
 
@@ -219,7 +213,7 @@ async def monitor_trades(live_candles):
                 await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
                 write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
                 log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trailing_sl, None, trade.get("tp2"), "breakeven", score, trade_type, 0)
+                log_trade_to_file(symbol, direction, entry_price, trailing_sl, None, trade.get("tp2"), "breakeven", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
                 save_active_trades()
                 continue
 
@@ -227,6 +221,5 @@ async def monitor_trades(live_candles):
             await handle_reentry(symbol, score)
 
     save_active_trades()
-
 
 load_active_trades()
