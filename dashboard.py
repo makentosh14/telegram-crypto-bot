@@ -103,7 +103,7 @@ def display_result_breakdown(df):
     st.write("### 📊 Trade Result Breakdown")
 
     tp2_hits = len(df[(df.result == "win") & df.tp2.notna()])
-    tp1_only = len(df[df.result.isin(["tp1", "tp1-partial", "breakeven"])]))
+    tp1_only = len(df[df.result.isin(["tp1", "tp1-partial", "breakeven"])])
     sl_hits = len(df[df.result == "loss"])
     open_trades = len(df[df.result == "open"])
 
