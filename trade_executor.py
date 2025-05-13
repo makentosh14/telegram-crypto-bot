@@ -114,15 +114,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # ⛔️ FIX SL PRICE for trigger direction mismatch
+            # ✅ Enforce correct triggerDirection and SL distance
             if direction == "Long":
-                trigger_direction = 1  # falling
                 if sl >= executed_entry:
                     sl = round(executed_entry * 0.9975, 6)
+                trigger_direction = 1  # price falling triggers SL
             else:
-                trigger_direction = 2  # rising
                 if sl <= executed_entry:
                     sl = round(executed_entry * 1.0025, 6)
+                trigger_direction = 2  # price rising triggers SL
 
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
