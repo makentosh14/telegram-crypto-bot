@@ -31,7 +31,7 @@ def load_data():
         df = df.sort_values(by="timestamp", ascending=False)
 
         df["exit_price"] = df.apply(lambda row: row["tp2"] if row["result"] == "win" else (row["tp1"] if "tp1" in str(row["result"]) else row["sl"]), axis=1)
-        df["move_pct"] = ((df["exit_price"] - df["entry"]) / df["entry"] * 100).round(2)
+        df["move_pct"] = ((df["exit_price"] - df["entry_price"]) / df["entry_price"] * 100).round(2)
         df["score_delta"] = df["score"] - df["confidence"]
         df["signal_tag"] = df.apply(classify_signal, axis=1)
         return df
