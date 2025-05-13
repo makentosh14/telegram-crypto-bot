@@ -6,13 +6,26 @@ import json
 
 LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 
+# Map of indicator short keys to readable names
+INDICATOR_MAP = {
+    "1": "RSI",
+    "2": "MACD",
+    "3": "EMA",
+    "4": "Supertrend",
+    "5": "Bollinger",
+    "6": "Pattern",
+    "7": "Volume",
+    "8": "Whale",
+    "9": "Divergence",
+    "10": "Breakout"
+}
+
 def load_data():
     if os.path.exists(LOG_PATH):
         df = pd.read_csv(LOG_PATH, engine="python", quotechar='"', skip_blank_lines=True, on_bad_lines='skip')
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         df = df.sort_values(by="timestamp", ascending=False)
 
-        # Compute additional columns
         df["exit_price"] = df.apply(lambda row: row["tp2"] if row["result"] == "win" else (row["tp1"] if "tp1" in str(row["result"]) else row["sl"]), axis=1)
         df["move_pct"] = ((df["exit_price"] - df["entry"]) / df["entry"] * 100).round(2)
         df["score_delta"] = df["score"] - df["confidence"]
@@ -51,6 +64,22 @@ def display_summary_stats(df):
     col2.metric("Win Rate", f"{win_rate:.1f}%")
     col3.metric("Avg Score", f"{avg_score:.2f}")
     col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
+
+def format_indicator_scores(raw):
+    try:
+        scores = json.loads(raw)
+        readable = [f"{INDICATOR_MAP.get(str(k), k)}: {v}" for k, v in scores.items() if float(v) > 0]
+        return "\n".join(readable) if readable else "—"
+    except:
+        return "—"
+
+def top_indicator(raw):
+    try:
+        scores = json.loads(raw)
+        sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
+        return INDICATOR_MAP.get(sorted_items[0][0], sorted_items[0][0]) if sorted_items else ""
+    except:
+        return ""
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
@@ -107,7 +136,8 @@ def display_indicator_details(df):
         try:
             scores = json.loads(latest["indicator_scores"])
             st.subheader("📊 Indicator Scores")
-            st.json(scores)
+            readable = {INDICATOR_MAP.get(k, k): v for k, v in scores.items()}
+            st.json(readable)
         except Exception as e:
             st.error(f"Error parsing indicator scores: {e}")
 
@@ -115,7 +145,7 @@ def display_indicator_details(df):
         try:
             indicators = json.loads(latest["used_indicators"])
             st.subheader("✅ Used Indicators")
-            st.markdown(", ".join(indicators))
+            st.markdown(", ".join([INDICATOR_MAP.get(i, i) for i in indicators]))
         except Exception as e:
             st.error(f"Error parsing used indicators: {e}")
 
@@ -135,10 +165,13 @@ def display_trade_drilldown(df):
             st.markdown(f"- **Signal Tag**: {row['signal_tag']}")
             if pd.notna(row["indicator_scores"]):
                 st.markdown("**📊 Indicator Scores:**")
-                st.json(json.loads(row["indicator_scores"]))
+                scores = json.loads(row["indicator_scores"])
+                readable = {INDICATOR_MAP.get(k, k): v for k, v in scores.items()}
+                st.json(readable)
             if pd.notna(row["used_indicators"]):
                 st.markdown("**✅ Used Indicators:**")
-                st.json(json.loads(row["used_indicators"]))
+                indicators = json.loads(row["used_indicators"])
+                st.json([INDICATOR_MAP.get(i, i) for i in indicators])
         except Exception as e:
             st.error(f"Failed to display trade drilldown: {e}")
 
@@ -177,22 +210,7 @@ def main():
     df_filtered = filter_data(df)
 
     if "indicator_scores" in df_filtered.columns:
-        def simplify_scores(raw):
-            try:
-                scores = json.loads(raw)
-                return ", ".join(f"{k}:{v}" for k, v in list(scores.items())[:3])
-            except:
-                return ""
-
-        def top_indicator(raw):
-            try:
-                scores = json.loads(raw)
-                sorted_items = sorted(scores.items(), key=lambda x: float(x[1]), reverse=True)
-                return sorted_items[0][0] if sorted_items else ""
-            except:
-                return ""
-
-        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(simplify_scores)
+        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(format_indicator_scores)
         df_filtered["top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
 
     df_open = df_filtered[df_filtered.result == "open"]
