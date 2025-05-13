@@ -32,6 +32,8 @@ def load_data():
 
         df["exit_price"] = df.apply(lambda row: row["tp2"] if row["result"] == "win" else (row["tp1"] if "tp1" in str(row["result"]) else row["sl"]), axis=1)
         df["move_pct"] = ((df["exit_price"] - df["entry_price"]) / df["entry_price"] * 100).round(2)
+        df["score"] = pd.to_numeric(df["score"], errors="coerce")
+        df["confidence"] = pd.to_numeric(df["confidence"], errors="coerce")
         df["score_delta"] = df["score"] - df["confidence"]
         df["signal_tag"] = df.apply(classify_signal, axis=1)
         return df
