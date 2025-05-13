@@ -16,6 +16,8 @@ PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
 startup_time = time.time()
 
+POST_EXIT_CANDLE_COUNT = 5  # Number of candles to evaluate after exit
+
 def save_active_trades():
     try:
         with open(PERSIST_PATH, 'w') as f:
@@ -113,6 +115,15 @@ async def check_and_restore_sl(symbol, trade):
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
 
+def calculate_post_exit_movement(symbol, candles, entry_price):
+    highs = [float(candle["high"]) for candle in candles[-POST_EXIT_CANDLE_COUNT:]]
+    lows = [float(candle["low"]) for candle in candles[-POST_EXIT_CANDLE_COUNT:]]
+    max_up = max(highs)
+    min_down = min(lows)
+    missed_upside = round((max_up - entry_price) / entry_price * 100, 2)
+    pullback_after = round((min_down - entry_price) / entry_price * 100, 2)
+    return missed_upside, pullback_after
+
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
     update_exit_cooldowns()
@@ -150,11 +161,14 @@ async def monitor_trades(live_candles):
         trade["cycles"] += 1
 
         entry_score = trade["score_history"][0]
-
         current_price = float(candles_by_tf['1'][-1]['close'])
         trailing_pct = trade.get("trailing_pct")
 
         await check_and_restore_sl(symbol, trade)
+
+        def finalize_trade(result_label, exit_price):
+            missed, pullback = calculate_post_exit_movement(symbol, candles_by_tf['1'], entry_price)
+            log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, exit_price, result_label, entry_score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list, missed_upside=missed, pullback_after=pullback)
 
         if trade.get("original_sl") and not trade.get("tp1_hit"):
             sl_price = trade["original_sl"]
@@ -164,7 +178,7 @@ async def monitor_trades(live_candles):
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                 log_exit(symbol, score)
                 log_trade_result(symbol, tf_scores, "loss")
-                log_trade_to_file(symbol, direction, entry_price, sl_price, None, None, "loss", entry_score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                finalize_trade("loss", sl_price)
                 save_active_trades()
                 continue
 
@@ -193,7 +207,7 @@ async def monitor_trades(live_candles):
                 await send_telegram_message(f"🏁 <b>TP2 Target Hit</b> on <b>{symbol}</b>\nTarget: {tp2:.4f} | Current: {current_price:.4f}")
                 write_log(f"TP2 HIT: {symbol} | Reached: {current_price}")
                 log_trade_result(symbol, tf_scores, "win")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, tp2, "win", entry_score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                finalize_trade("win", tp2)
                 save_active_trades()
                 continue
 
@@ -215,7 +229,7 @@ async def monitor_trades(live_candles):
                 await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
                 write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
                 log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trailing_sl, None, trade.get("tp2"), "breakeven", entry_score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                finalize_trade("breakeven", trailing_sl)
                 save_active_trades()
                 continue
 
