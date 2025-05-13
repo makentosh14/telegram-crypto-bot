@@ -80,7 +80,8 @@ def display_trade_table(df, title):
     preferred_columns = [
         "timestamp", "symbol", "direction", "entry", "exit_price", "move_pct",
         "score", "confidence", "score_delta", "signal_tag",
-        "result", "trade_type", "tf_scores", "indicators", "top_indicator"
+        "result", "trade_type", "tf_scores", "indicators", "top_indicator",
+        "missed_upside", "pullback_after"
     ]
     existing_columns = [col for col in preferred_columns if col in df.columns]
     df_display = df[existing_columns].copy()
@@ -152,6 +153,7 @@ def display_trade_drilldown(df):
             st.markdown(f"- **Entry**: {row['entry']}, **Exit**: {row['exit_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
             st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Move %**: {row['move_pct']}%")
             st.markdown(f"- **Signal Tag**: {row['signal_tag']}, **Top Indicator**: {row.get('top_indicator', '')}")
+            st.markdown(f"- **Missed Upside**: {row.get('missed_upside', '–')}%, **Pullback After Exit**: {row.get('pullback_after', '–')}%")
             if pd.notna(row.get("tf_scores")):
                 st.markdown("**📈 TF Scores:**")
                 st.markdown(format_tf_scores(row["tf_scores"]))
@@ -194,7 +196,7 @@ def display_summary_stats(df):
     total = len(df)
     wins = len(df[df.result == "win"])
     losses = len(df[df.result == "loss"])
-    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
+    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])]))
     open_trades = len(df[df.result == "open"])
 
     win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
