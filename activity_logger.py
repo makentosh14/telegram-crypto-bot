@@ -25,10 +25,10 @@ def log_trade_to_file(symbol, direction, entry, sl, tp1, tp2, result, score, tra
                       tf_scores=None, indicator_scores=None, used_indicators=None,
                       pattern_detected=None, whale_signal=None, volume_spike=None, sl_strategy=None,
                       missed_upside=None, pullback_after=None):
-
     """
     Log a structured trade result to CSV for later analysis.
-    Includes scoring breakdowns, indicators, pattern/volume/whale flags, and SL strategy.
+    Includes scoring breakdowns, indicators, pattern/volume/whale flags, SL strategy,
+    and missed upside/pullback values post-exit.
     """
     file_exists = os.path.isfile(TRADE_LOG_CSV)
     try:
@@ -37,7 +37,8 @@ def log_trade_to_file(symbol, direction, entry, sl, tp1, tp2, result, score, tra
                 "timestamp", "symbol", "direction", "entry_price", "sl", "tp1", "tp2",
                 "result", "score", "trade_type", "confidence",
                 "tf_scores", "indicator_scores", "used_indicators",
-                "pattern_detected", "whale_signal", "volume_spike", "sl_strategy"
+                "pattern_detected", "whale_signal", "volume_spike", "sl_strategy",
+                "missed_upside", "pullback_after"
             ], quoting=csv.QUOTE_ALL)
             if not file_exists:
                 writer.writeheader()
@@ -60,7 +61,9 @@ def log_trade_to_file(symbol, direction, entry, sl, tp1, tp2, result, score, tra
                 "pattern_detected": pattern_detected,
                 "whale_signal": whale_signal,
                 "volume_spike": volume_spike,
-                "sl_strategy": sl_strategy
+                "sl_strategy": sl_strategy,
+                "missed_upside": missed_upside,
+                "pullback_after": pullback_after
             })
     except Exception as e:
         write_log(f"❌ Failed to log trade: {e}", level="ERROR")
