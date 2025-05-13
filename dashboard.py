@@ -11,9 +11,29 @@ def load_data():
         df = pd.read_csv(LOG_PATH, engine="python", quotechar='"', skip_blank_lines=True, on_bad_lines='skip')
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors='coerce')
         df = df.sort_values(by="timestamp", ascending=False)
+
+        # Compute additional columns
+        df["exit_price"] = df.apply(lambda row: row["tp2"] if row["result"] == "win" else (row["tp1"] if "tp1" in str(row["result"]) else row["sl"]), axis=1)
+        df["move_pct"] = ((df["exit_price"] - df["entry"]) / df["entry"] * 100).round(2)
+        df["score_delta"] = df["score"] - df["confidence"]
+        df["signal_tag"] = df.apply(classify_signal, axis=1)
         return df
     else:
         return pd.DataFrame()
+
+def classify_signal(row):
+    try:
+        if row.get("whale_signal"):
+            return "🐳 Whale Entry"
+        if row.get("confidence", 0) >= 85:
+            return "🔥 Prime Setup"
+        if row.get("volume_spike") == False:
+            return "💤 Low Volume"
+        if row.get("score", 0) < 6.5:
+            return "⚠️ Weak Setup"
+        return "✅ Confirmed"
+    except:
+        return "🧪 Unknown"
 
 def display_summary_stats(df):
     total = len(df)
@@ -34,7 +54,11 @@ def display_summary_stats(df):
 
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
-    preferred_columns = ["timestamp", "symbol", "direction", "entry", "sl", "tp1", "tp2", "result", "score", "trade_type", "confidence", "indicators", "top_indicator"]
+    preferred_columns = [
+        "timestamp", "symbol", "direction", "entry", "exit_price", "move_pct",
+        "score", "confidence", "score_delta", "signal_tag",
+        "result", "trade_type", "indicators", "top_indicator"
+    ]
     existing_columns = [col for col in preferred_columns if col in df.columns]
     df_display = df[existing_columns].copy()
 
@@ -106,8 +130,9 @@ def display_trade_drilldown(df):
             symbol = selected_row.split(" | ")[0]
             row = df[df.symbol == symbol].iloc[0]
             st.markdown(f"#### 🧾 Trade: {row['symbol']} — {row['direction']} ({row['result']})")
-            st.markdown(f"- **Entry**: {row['entry']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
-            st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Top Indicator**: {row.get('top_indicator', '')}")
+            st.markdown(f"- **Entry**: {row['entry']}, **Exit**: {row['exit_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
+            st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Top Indicator**: {row.get('top_indicator', '')}, **Move %**: {row['move_pct']}%")
+            st.markdown(f"- **Signal Tag**: {row['signal_tag']}")
             if pd.notna(row["indicator_scores"]):
                 st.markdown("**📊 Indicator Scores:**")
                 st.json(json.loads(row["indicator_scores"]))
@@ -151,7 +176,6 @@ def main():
 
     df_filtered = filter_data(df)
 
-    # ✅ Compute indicators & top_indicator once, for all trades
     if "indicator_scores" in df_filtered.columns:
         def simplify_scores(raw):
             try:
@@ -159,7 +183,6 @@ def main():
                 return ", ".join(f"{k}:{v}" for k, v in list(scores.items())[:3])
             except:
                 return ""
-        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(simplify_scores)
 
         def top_indicator(raw):
             try:
@@ -168,9 +191,10 @@ def main():
                 return sorted_items[0][0] if sorted_items else ""
             except:
                 return ""
+
+        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(simplify_scores)
         df_filtered["top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
 
-    # Split correctly between active and completed
     df_open = df_filtered[df_filtered.result == "open"]
     df_closed = df_filtered[df_filtered.result != "open"]
 
