@@ -56,15 +56,15 @@ def classify_signal(row):
 
 def format_indicator_scores(raw):
     try:
-        if isinstance(raw, str):
+        if isinstance(raw, str) and raw.strip():
             data = json.loads(raw)
         else:
             data = raw
 
         if isinstance(data, dict):
-            readable = [f"{INDICATOR_MAP.get(str(k), k)}: {v}" for k, v in data.items() if float(v) > 0]
+            readable = [f"{k}: {v}" for k, v in data.items() if float(v) > 0]
         elif isinstance(data, list):
-            readable = [str(item) for item in data if item]  # fallback
+            readable = [str(item) for item in data if item]
         else:
             readable = []
 
