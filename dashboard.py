@@ -190,6 +190,23 @@ def filter_data(df):
 
     return df_filtered
 
+def display_summary_stats(df):
+    total = len(df)
+    wins = len(df[df.result == "win"])
+    losses = len(df[df.result == "loss"])
+    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
+    open_trades = len(df[df.result == "open"])
+
+    win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
+    avg_score = df.score.mean() if total else 0
+    avg_conf = df.confidence.mean() if total else 0
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Trades", total)
+    col2.metric("Win Rate", f"{win_rate:.1f}%")
+    col3.metric("Avg Score", f"{avg_score:.2f}")
+    col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
+
 def main():
     st.set_page_config(page_title="Crypto Bot Dashboard", layout="wide")
     st.title("🚀 Crypto Trading Bot Dashboard")
@@ -212,23 +229,7 @@ def main():
     df_closed = df_filtered[df_filtered.result != "open"]
 
     display_summary_stats(df_filtered)
-    
-def display_summary_stats(df):
-    total = len(df)
-    wins = len(df[df.result == "win"])
-    losses = len(df[df.result == "loss"])
-    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
-    open_trades = len(df[df.result == "open"])
-
-    win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
-    avg_score = df.score.mean() if total else 0
-    avg_conf = df.confidence.mean() if total else 0
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Trades", total)
-    col2.metric("Win Rate", f"{win_rate:.1f}%")
-    col3.metric("Avg Score", f"{avg_score:.2f}")
-    col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
+    display_result_breakdown(df_filtered)
 
     if not df_open.empty:
         display_trade_table(df_open, "Active Trades")
