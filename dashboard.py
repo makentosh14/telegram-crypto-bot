@@ -78,7 +78,7 @@ def format_tf_scores(raw):
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
     preferred_columns = [
-        "timestamp", "symbol", "direction", "entry", "exit_price", "move_pct",
+        "timestamp", "symbol", "direction", "entry_price", "exit_price", "move_pct",
         "score", "confidence", "score_delta", "signal_tag",
         "result", "trade_type", "tf_scores", "indicators", "top_indicator",
         "missed_upside", "pullback_after"
@@ -150,7 +150,7 @@ def display_trade_drilldown(df):
             symbol = selected_row.split(" | ")[0]
             row = df[df.symbol == symbol].iloc[0]
             st.markdown(f"#### 🧾 Trade: {row['symbol']} — {row['direction']} ({row['result']})")
-            st.markdown(f"- **Entry**: {row['entry']}, **Exit**: {row['exit_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
+            st.markdown(f"- **Entry**: {row['entry_price']}, **Exit**: {row['exit_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
             st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Move %**: {row['move_pct']}%")
             st.markdown(f"- **Signal Tag**: {row['signal_tag']}, **Top Indicator**: {row.get('top_indicator', '')}")
             st.markdown(f"- **Missed Upside**: {row.get('missed_upside', '–')}%, **Pullback After Exit**: {row.get('pullback_after', '–')}%")
