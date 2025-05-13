@@ -157,12 +157,17 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            trigger_direction = 1 if (direction == "Long" and sl > executed_entry) or (direction == "Short" and sl < executed_entry) else 2
-
-            if direction == "Short" and sl <= executed_entry:
-                trigger_direction = 2  # Force fallback to prevent rejection
-            elif direction == "Long" and sl >= executed_entry:
-                trigger_direction = 2
+            # Dynamically adjust SL triggerDirection and triggerPrice to prevent API rejection
+            if direction == "Long":
+                trigger_direction = 2 if sl >= executed_entry else 1
+                # Ensure SL is slightly below entry
+                if sl >= executed_entry:
+                    sl = round(executed_entry * 0.998, 6)  # fallback
+            else:  # Short
+                trigger_direction = 2 if sl <= executed_entry else 1
+                # Ensure SL is slightly above entry
+                if sl <= executed_entry:
+                    sl = round(executed_entry * 1.002, 6)  # fallback
 
             sl_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
