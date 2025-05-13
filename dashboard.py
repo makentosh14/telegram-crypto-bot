@@ -223,11 +223,11 @@ def main():
     df_filtered = filter_data(df)
 
     if "indicator_scores" in df_filtered.columns:
-        df_filtered["indicators"] = df_filtered["indicator_scores"].apply(format_indicator_scores)
-        df_filtered["top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
+        df_filtered.loc[:, "indicators"] = df_filtered["indicator_scores"].apply(format_indicator_scores)
+        df_filtered.loc[:, "top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
 
     if "tf_scores" in df_filtered.columns:
-        df_filtered["tf_scores"] = df_filtered["tf_scores"].apply(format_tf_scores)
+        df_filtered.loc[:, "tf_scores"] = df_filtered["tf_scores"].apply(format_tf_scores)
 
     df_open = df_filtered[df_filtered.result == "open"]
     df_closed = df_filtered[df_filtered.result != "open"]
