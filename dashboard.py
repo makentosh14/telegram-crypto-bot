@@ -20,6 +20,10 @@ INDICATOR_MAP = {
     "10": "Breakout"
 }
 
+TF_LABELS = {
+    "1": "1m", "3": "3m", "5": "5m", "15": "15m", "30": "30m", "60": "1h", "240": "4h"
+}
+
 def load_data():
     if os.path.exists(LOG_PATH):
         df = pd.read_csv(LOG_PATH, engine="python", quotechar='"', skip_blank_lines=True, on_bad_lines='skip')
@@ -48,23 +52,6 @@ def classify_signal(row):
     except:
         return "🧪 Unknown"
 
-def display_summary_stats(df):
-    total = len(df)
-    wins = len(df[df.result == "win"])
-    losses = len(df[df.result == "loss"])
-    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
-    open_trades = len(df[df.result == "open"])
-
-    win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
-    avg_score = df.score.mean() if total else 0
-    avg_conf = df.confidence.mean() if total else 0
-
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Trades", total)
-    col2.metric("Win Rate", f"{win_rate:.1f}%")
-    col3.metric("Avg Score", f"{avg_score:.2f}")
-    col4.metric("Avg Confidence", f"{avg_conf:.2f}%")
-
 def format_indicator_scores(raw):
     try:
         scores = json.loads(raw)
@@ -81,27 +68,29 @@ def top_indicator(raw):
     except:
         return ""
 
+def format_tf_scores(raw):
+    try:
+        scores = json.loads(raw)
+        return ", ".join(f"{TF_LABELS.get(tf, tf)}: {val}" for tf, val in scores.items())
+    except:
+        return "—"
+
 def display_trade_table(df, title):
     st.write(f"### 📋 {title}")
     preferred_columns = [
         "timestamp", "symbol", "direction", "entry", "exit_price", "move_pct",
         "score", "confidence", "score_delta", "signal_tag",
-        "result", "trade_type", "indicators", "top_indicator"
+        "result", "trade_type", "tf_scores", "indicators", "top_indicator"
     ]
     existing_columns = [col for col in preferred_columns if col in df.columns]
     df_display = df[existing_columns].copy()
 
     def highlight_result(val):
-        if val == "win":
-            return "background-color: #b7f7b0"
-        elif val == "loss":
-            return "background-color: #f8b8b8"
-        elif val == "breakeven":
-            return "background-color: #f5f5a0"
-        elif val == "open":
-            return "background-color: #cce5ff"
-        elif val in ["tp1", "tp1-partial"]:
-            return "background-color: #d4eaff"
+        if val == "win": return "background-color: #b7f7b0"
+        elif val == "loss": return "background-color: #f8b8b8"
+        elif val == "breakeven": return "background-color: #f5f5a0"
+        elif val == "open": return "background-color: #cce5ff"
+        elif val in ["tp1", "tp1-partial"]: return "background-color: #d4eaff"
         return ""
 
     if "result" in df_display.columns:
@@ -114,7 +103,7 @@ def display_result_breakdown(df):
     st.write("### 📊 Trade Result Breakdown")
 
     tp2_hits = len(df[(df.result == "win") & df.tp2.notna()])
-    tp1_only = len(df[df.result.isin(["tp1", "tp1-partial", "breakeven"])])
+    tp1_only = len(df[df.result.isin(["tp1", "tp1-partial", "breakeven"])]))
     sl_hits = len(df[df.result == "loss"])
     open_trades = len(df[df.result == "open"])
 
@@ -161,12 +150,15 @@ def display_trade_drilldown(df):
             row = df[df.symbol == symbol].iloc[0]
             st.markdown(f"#### 🧾 Trade: {row['symbol']} — {row['direction']} ({row['result']})")
             st.markdown(f"- **Entry**: {row['entry']}, **Exit**: {row['exit_price']}, **SL**: {row['sl']}, **TP1**: {row['tp1']}, **TP2**: {row['tp2']}")
-            st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Top Indicator**: {row.get('top_indicator', '')}, **Move %**: {row['move_pct']}%")
-            st.markdown(f"- **Signal Tag**: {row['signal_tag']}")
+            st.markdown(f"- **Score**: {row['score']}, **Confidence**: {row['confidence']}%, **Type**: {row['trade_type']}, **Move %**: {row['move_pct']}%")
+            st.markdown(f"- **Signal Tag**: {row['signal_tag']}, **Top Indicator**: {row.get('top_indicator', '')}")
+            if pd.notna(row.get("tf_scores")):
+                st.markdown("**📈 TF Scores:**")
+                st.markdown(format_tf_scores(row["tf_scores"]))
             if pd.notna(row["indicator_scores"]):
-                st.markdown("**📊 Indicator Scores:**")
                 scores = json.loads(row["indicator_scores"])
                 readable = {INDICATOR_MAP.get(k, k): v for k, v in scores.items()}
+                st.markdown("**📊 Indicator Scores:**")
                 st.json(readable)
             if pd.notna(row["used_indicators"]):
                 st.markdown("**✅ Used Indicators:**")
@@ -212,6 +204,9 @@ def main():
     if "indicator_scores" in df_filtered.columns:
         df_filtered["indicators"] = df_filtered["indicator_scores"].apply(format_indicator_scores)
         df_filtered["top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
+
+    if "tf_scores" in df_filtered.columns:
+        df_filtered["tf_scores"] = df_filtered["tf_scores"].apply(format_tf_scores)
 
     df_open = df_filtered[df_filtered.result == "open"]
     df_closed = df_filtered[df_filtered.result != "open"]
