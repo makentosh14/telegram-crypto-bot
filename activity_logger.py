@@ -21,11 +21,11 @@ def write_log(message, level="INFO"):
     except Exception as e:
         print(f"Logging error: {e}")
 
-def log_trade_to_file(
-    symbol, direction, entry, sl, tp1, tp2, result, score, trade_type, confidence,
-    tf_scores=None, indicator_scores=None, used_indicators=None,
-    pattern_detected=None, whale_signal=False, volume_spike=False, sl_strategy=None
-):
+def log_trade_to_file(symbol, direction, entry, sl, tp1, tp2, result, score, trade_type, confidence,
+                      tf_scores=None, indicator_scores=None, used_indicators=None,
+                      pattern_detected=None, whale_signal=None, volume_spike=None, sl_strategy=None,
+                      missed_upside=None, pullback_after=None):
+
     """
     Log a structured trade result to CSV for later analysis.
     Includes scoring breakdowns, indicators, pattern/volume/whale flags, and SL strategy.
