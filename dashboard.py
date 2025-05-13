@@ -196,7 +196,7 @@ def display_summary_stats(df):
     total = len(df)
     wins = len(df[df.result == "win"])
     losses = len(df[df.result == "loss"])
-    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])]))
+    breakeven = len(df[df.result.isin(["breakeven", "tp1", "tp1-partial"])])
     open_trades = len(df[df.result == "open"])
 
     win_rate = (wins / (wins + losses) * 100) if (wins + losses) else 0
