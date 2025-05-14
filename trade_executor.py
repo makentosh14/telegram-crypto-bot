@@ -111,7 +111,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
-            # Adjust SL if entry < planned
+            # Adjust SL if entry differs from planned
             if direction == "Long" and executed_entry < planned_entry:
                 diff_pct = (planned_entry - executed_entry) / planned_entry
                 sl = round(sl * (1 - diff_pct), 6)
@@ -123,11 +123,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             else:
                 log("✅ No SL adjustment needed based on entry slippage")
 
+            # Enforce SL buffer to satisfy Bybit's trigger logic
+            MIN_SL_BUFFER = 0.0025  # 0.25%
             side = "Sell" if direction == "Long" else "Buy"
-            min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
-            qty_half = max(round_qty(symbol, qty / 2), min_qty)
-
-            # Determine triggerDirection
             mark_price = executed_entry
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
@@ -138,13 +136,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if direction == "Long":
                 trigger_direction = 1
                 if sl >= mark_price:
-                    sl = round(mark_price * 0.998, 6)
+                    sl = round(mark_price * (1 - MIN_SL_BUFFER), 6)
             else:
                 trigger_direction = 2
                 if sl <= mark_price:
-                    sl = round(mark_price * 1.002, 6)
+                    sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
 
-            log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
+            log(f"🧪 SL Debug | Symbol: {symbol} | Planned Entry: {planned_entry} | Executed: {executed_entry} | Mark: {mark_price} | Final SL: {sl} | TriggerDir: {trigger_direction}")
+
+            min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+            qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
