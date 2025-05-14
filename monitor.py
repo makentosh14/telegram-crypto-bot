@@ -20,6 +20,8 @@ POST_EXIT_CANDLE_COUNT = 5
 TP1_PUMP_CANDLE_LOOKAHEAD = 4
 TP1_PUMP_THRESHOLD = 1.2
 
+MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
+
 def save_active_trades():
     try:
         with open(PERSIST_PATH, 'w') as f:
@@ -95,16 +97,13 @@ async def check_and_restore_sl(symbol, trade):
             sl = trade.get("original_sl")
             entry = trade.get("entry_price")
             side = "Sell" if direction == "Long" else "Buy"
+            trigger_direction = 1 if direction == "Long" else 2
 
-            # ✅ Match SL correction logic from trade_executor
+            # SL safety buffer
             if direction == "Long" and sl >= entry:
-                sl = round(entry * 0.9975, 6)
-                trigger_direction = 1
+                sl = round(entry * (1 - MIN_SL_BUFFER), 6)
             elif direction == "Short" and sl <= entry:
-                sl = round(entry * 1.0025, 6)
-                trigger_direction = 2
-            else:
-                trigger_direction = 1 if direction == "Long" else 2
+                sl = round(entry * (1 + MIN_SL_BUFFER), 6)
 
             sl_resp = await signed_request("POST", "/v5/order/create", {
                 "category": "linear",
@@ -127,6 +126,8 @@ async def check_and_restore_sl(symbol, trade):
             save_active_trades()
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
+        
+# (Rest of monitor_trades remains unchanged — already compatible with SL logic)
 
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
