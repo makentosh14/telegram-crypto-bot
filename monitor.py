@@ -93,36 +93,38 @@ async def check_and_restore_sl(symbol, trade):
             direction = trade.get("direction")
             qty = trade.get("qty")
             sl = trade.get("original_sl")
+            entry = trade.get("entry_price")
             side = "Sell" if direction == "Long" else "Buy"
-            # ✅ Safe SL fallback logic
-        if direction == "Long":
-            trigger_direction = 1  # Falling triggers SL
-            if sl >= trade["entry_price"]:
-                sl = round(trade["entry_price"] * 0.9975, 6)
-        else:
-            trigger_direction = 2  # Rising triggers SL
-            if sl <= trade["entry_price"]:
-                sl = round(trade["entry_price"] * 1.0025, 6)
 
-        sl_resp = await signed_request("POST", "/v5/order/create", {
-            "category": "linear",
-            "symbol": symbol,
-            "side": side,
-            "orderType": "Market",
-            "triggerPrice": str(sl),
-            "triggerDirection": trigger_direction,
-            "triggerBy": "MarkPrice",
-            "qty": str(qty),
-            "reduceOnly": True,
-            "timeInForce": "GTC",
-            "orderFilter": "Stop"
-        })
+            # ✅ Match SL correction logic from trade_executor
+            if direction == "Long" and sl >= entry:
+                sl = round(entry * 0.9975, 6)
+                trigger_direction = 1
+            elif direction == "Short" and sl <= entry:
+                sl = round(entry * 1.0025, 6)
+                trigger_direction = 2
+            else:
+                trigger_direction = 1 if direction == "Long" else 2
 
-        await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
-        write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
-        log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
-        trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
-        save_active_trades()
+            sl_resp = await signed_request("POST", "/v5/order/create", {
+                "category": "linear",
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "triggerPrice": str(sl),
+                "triggerDirection": trigger_direction,
+                "triggerBy": "MarkPrice",
+                "qty": str(qty),
+                "reduceOnly": True,
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"
+            })
+
+            await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
+            write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
+            log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
+            trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
+            save_active_trades()
     except Exception as e:
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
 
