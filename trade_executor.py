@@ -9,6 +9,7 @@ from symbol_info import round_qty, symbol_precisions
 from datetime import datetime
 import asyncio
 
+
 def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
@@ -17,6 +18,7 @@ def calculate_quantity(symbol, raw_qty):
     if rounded_qty < min_qty:
         return 0
     return rounded_qty
+
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -47,6 +49,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
+
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
@@ -111,20 +114,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # Set initial SL and direction
-            mark_price = float(candles_by_tf['1'][-1]['close'])
-
+            # ✅ Improved SL Logic
             if direction == "Long":
-                trigger_direction = 1  # falling
-                if sl >= mark_price:
-                    sl = round(mark_price * 0.9975, 6)  # Force SL below
-            elif direction == "Short":
-                trigger_direction = 2  # rising
-                if sl <= mark_price:
-                    sl = round(mark_price * 1.0025, 6)  # Force SL above
+                if sl >= executed_entry:
+                    sl = round(executed_entry * 0.9975, 6)
+                trigger_direction = 1
+            else:
+                if sl <= executed_entry:
+                    sl = round(executed_entry * 1.0025, 6)
+                trigger_direction = 2
 
-            # Log for debug
-            log(f"🧪 SL Finalized | Symbol: {symbol} | SL: {sl} | MarkPrice: {mark_price} | TriggerDir: {trigger_direction}")
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
             tp1_task = signed_request("POST", "/v5/order/create", {
