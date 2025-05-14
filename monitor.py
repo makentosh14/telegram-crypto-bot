@@ -94,20 +94,30 @@ async def check_and_restore_sl(symbol, trade):
             qty = trade.get("qty")
             sl = trade.get("original_sl")
             side = "Sell" if direction == "Long" else "Buy"
-            trigger_direction = 1 if direction == "Long" else 2
-            sl_resp = await signed_request("POST", "/v5/order/create", {
-                "category": "linear",
-                "symbol": symbol,
-                "side": side,
-                "orderType": "Market",
-                "triggerPrice": str(sl),
-                "triggerDirection": trigger_direction,
-                "triggerBy": "MarkPrice",
-                "qty": str(qty),
-                "reduceOnly": True,
-                "timeInForce": "GTC",
-                "orderFilter": "Stop"
-            })
+            # ✅ Safe SL fallback logic
+        if direction == "Long":
+            trigger_direction = 1  # Falling triggers SL
+            if sl >= trade["entry_price"]:
+                sl = round(trade["entry_price"] * 0.9975, 6)
+        else:
+            trigger_direction = 2  # Rising triggers SL
+            if sl <= trade["entry_price"]:
+                sl = round(trade["entry_price"] * 1.0025, 6)
+
+        sl_resp = await signed_request("POST", "/v5/order/create", {
+            "category": "linear",
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Market",
+            "triggerPrice": str(sl),
+            "triggerDirection": trigger_direction,
+            "triggerBy": "MarkPrice",
+            "qty": str(qty),
+            "reduceOnly": True,
+            "timeInForce": "GTC",
+            "orderFilter": "Stop"
+        })
+
             await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
             write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
             log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
