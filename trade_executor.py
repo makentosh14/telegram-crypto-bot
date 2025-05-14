@@ -111,16 +111,20 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # ✅ Final SL Logic — handles triggerDirection, offset, and rounding
-            if direction == "Long":
-                if sl >= executed_entry:
-                    sl = round(executed_entry * 0.9975, 6)  # ensure SL is below
-                trigger_direction = 1  # falling triggers SL
-            else:
-                if sl <= executed_entry:
-                    sl = round(executed_entry * 1.0025, 6)  # ensure SL is above
-                trigger_direction = 2  # rising triggers SL
+            # Set initial SL and direction
+            mark_price = float(candles_by_tf['1'][-1]['close'])
 
+            if direction == "Long":
+                trigger_direction = 1  # falling
+                if sl >= mark_price:
+                    sl = round(mark_price * 0.9975, 6)  # Force SL below
+            elif direction == "Short":
+                trigger_direction = 2  # rising
+                if sl <= mark_price:
+                    sl = round(mark_price * 1.0025, 6)  # Force SL above
+
+            # Log for debug
+            log(f"🧪 SL Finalized | Symbol: {symbol} | SL: {sl} | MarkPrice: {mark_price} | TriggerDir: {trigger_direction}")
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
             tp1_task = signed_request("POST", "/v5/order/create", {
