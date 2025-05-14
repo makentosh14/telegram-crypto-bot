@@ -119,6 +119,7 @@ async def check_and_restore_sl(symbol, trade):
         })
 
             await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
+        
             write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
             log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
             trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
