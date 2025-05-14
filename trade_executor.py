@@ -68,6 +68,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         price = float(signal_data.get("price", 1.0))
+        planned_entry = price
         leverage = DEFAULT_LEVERAGE
         risk_amount = usdt_balance * max_risk
         position_value = risk_amount * leverage
@@ -110,15 +111,28 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
+            # Adjust SL if entry < planned
+            if direction == "Long" and executed_entry < planned_entry:
+                diff_pct = (planned_entry - executed_entry) / planned_entry
+                sl = round(sl * (1 - diff_pct), 6)
+                log(f"🔧 Adjusted SL down by {diff_pct:.4f} for lower-than-expected entry")
+            elif direction == "Short" and executed_entry > planned_entry:
+                diff_pct = (executed_entry - planned_entry) / planned_entry
+                sl = round(sl * (1 + diff_pct), 6)
+                log(f"🔧 Adjusted SL up by {diff_pct:.4f} for higher-than-expected short entry")
+            else:
+                log("✅ No SL adjustment needed based on entry slippage")
+
             side = "Sell" if direction == "Long" else "Buy"
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
+            # Determine triggerDirection
+            mark_price = executed_entry
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
             except:
-                mark_price = executed_entry
                 log("⚠️ Failed to fetch markPrice, using entry price")
 
             if direction == "Long":
@@ -130,7 +144,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 if sl <= mark_price:
                     sl = round(mark_price * 1.002, 6)
 
-            log(f"🧪 SL Debug | {symbol} | Entry: {executed_entry} | Mark: {mark_price} | SL: {sl} | TriggerDir: {trigger_direction}")
+            log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
