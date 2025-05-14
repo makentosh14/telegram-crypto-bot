@@ -114,15 +114,23 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # ✅ Improved SL Logic
+            # Get live mark price if needed (optional)
+            mark_price = executed_entry  # fallback
+            try:
+                ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
+                mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
+            except:
+                log("⚠️ Failed to fetch markPrice, using entry price")
+
+            # Final SL logic to ensure it works
             if direction == "Long":
-                if sl >= executed_entry:
-                    sl = round(executed_entry * 0.9975, 6)
-                trigger_direction = 1
+                trigger_direction = 1  # falling
+                if sl >= mark_price:
+                    sl = round(mark_price * 0.998, 6)
             else:
-                if sl <= executed_entry:
-                    sl = round(executed_entry * 1.0025, 6)
-                trigger_direction = 2
+                trigger_direction = 2  # rising
+                if sl <= mark_price:
+                    sl = round(mark_price * 1.002, 6)
 
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
