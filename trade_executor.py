@@ -114,25 +114,23 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # Get live mark price if needed (optional)
-            mark_price = executed_entry  # fallback
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
             except:
+                mark_price = executed_entry
                 log("⚠️ Failed to fetch markPrice, using entry price")
 
-            # Final SL logic to ensure it works
             if direction == "Long":
-                trigger_direction = 1  # falling
+                trigger_direction = 1
                 if sl >= mark_price:
                     sl = round(mark_price * 0.998, 6)
             else:
-                trigger_direction = 2  # rising
+                trigger_direction = 2
                 if sl <= mark_price:
                     sl = round(mark_price * 1.002, 6)
 
-            log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
+            log(f"🧪 SL Debug | {symbol} | Entry: {executed_entry} | Mark: {mark_price} | SL: {sl} | TriggerDir: {trigger_direction}")
 
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
