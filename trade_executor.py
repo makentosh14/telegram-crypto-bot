@@ -9,7 +9,6 @@ from symbol_info import round_qty, symbol_precisions
 from datetime import datetime
 import asyncio
 
-
 def calculate_quantity(symbol, raw_qty):
     if raw_qty <= 0:
         return 0
@@ -18,7 +17,6 @@ def calculate_quantity(symbol, raw_qty):
     if rounded_qty < min_qty:
         return 0
     return rounded_qty
-
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -49,7 +47,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
-
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
@@ -116,12 +113,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             # ✅ Final SL Logic — handles triggerDirection, offset, and rounding
             if direction == "Long":
-                if sl >= price:
-                    sl = round(price * 0.9975, 6)  # ensure SL is below
+                if sl >= executed_entry:
+                    sl = round(executed_entry * 0.9975, 6)  # ensure SL is below
                 trigger_direction = 1  # falling triggers SL
             else:
-                if sl <= price:
-                    sl = round(price * 1.0025, 6)  # ensure SL is above
+                if sl <= executed_entry:
+                    sl = round(executed_entry * 1.0025, 6)  # ensure SL is above
                 trigger_direction = 2  # rising triggers SL
 
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
@@ -144,7 +141,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": trigger_direction,
-                "triggerBy": "MarkPrice",  # ✅ More stable than MarkPrice
+                "triggerBy": "MarkPrice",
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
