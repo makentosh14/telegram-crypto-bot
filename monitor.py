@@ -177,14 +177,13 @@ async def monitor_trades(live_candles):
                log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
                write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
 
-        if trade.get("tp1_hit") and trade.get("trailing_sl"):
-            trailing_sl = trade["trailing_sl"]
-            if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
-                trade["exited"] = True
-                await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
-                write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
-                log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, current_price, "breakeven", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+        if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("tp1_pump_alert_sent"):
+            recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
+            pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
+            if pump_move >= TP1_PUMP_THRESHOLD:
+                await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
+                write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
+                trade["tp1_pump_alert_sent"] = True
                 save_active_trades()
                 continue
 
