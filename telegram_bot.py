@@ -1,5 +1,3 @@
-# telegram_bot.py
-
 from config import TELEGRAM_CHAT_ID, TELEGRAM_BOT_TOKEN
 import aiohttp
 import traceback
@@ -12,21 +10,28 @@ from aiogram.types import InputFile
 from logger import LOG_FILE
 from error_handler import send_error_to_telegram  # ✅ Use only from external file
 
-# === Global message rate limit ===
+# === Global message rate limit and flood protection ===
 _last_send_time = 0
-MIN_MESSAGE_DELAY = 1.0  # seconds
+MIN_MESSAGE_DELAY = 1.5  # seconds
+MAX_MESSAGES_PER_MIN = 20
+SEND_HISTORY = []
 
 BOT_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher(bot)
 
 
-async def send_telegram_message(message):
-    global _last_send_time
-
+async def send_telegram_message(message, retries=3):
+    global _last_send_time, SEND_HISTORY
     now = time.time()
-    elapsed = now - _last_send_time
+    SEND_HISTORY = [t for t in SEND_HISTORY if now - t < 60]  # Keep only last 60 sec
 
+    if len(SEND_HISTORY) >= MAX_MESSAGES_PER_MIN:
+        print("⏳ Telegram flood limit hit, delaying message...")
+        await asyncio.sleep(5)
+        return
+
+    elapsed = now - _last_send_time
     if elapsed < MIN_MESSAGE_DELAY:
         await asyncio.sleep(MIN_MESSAGE_DELAY - elapsed)
 
@@ -35,12 +40,17 @@ async def send_telegram_message(message):
         "text": message,
         "parse_mode": "HTML"
     }
-    async with aiohttp.ClientSession() as session:
+    for attempt in range(retries):
         try:
-            async with session.post(BOT_URL, data=payload) as resp:
-                _last_send_time = time.time()
-                return await resp.text()
+            async with aiohttp.ClientSession() as session:
+                async with session.post(BOT_URL, data=payload) as resp:
+                    _last_send_time = time.time()
+                    SEND_HISTORY.append(_last_send_time)
+                    return await resp.text()
         except Exception as e:
+            if attempt < retries - 1:
+                await asyncio.sleep(2)
+                continue
             print(f"❌ Telegram send error: {e}")
             await send_error_to_telegram(f"Telegram Error: {str(e)}")
             return None
