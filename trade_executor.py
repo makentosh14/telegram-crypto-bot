@@ -114,15 +114,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # ✅ Enforce correct triggerDirection and SL distance
+            # ✅ Final SL Logic — handles triggerDirection, offset, and rounding
             if direction == "Long":
-                if sl >= executed_entry:
-                    sl = round(executed_entry * 0.9975, 6)
-                trigger_direction = 1  # price falling triggers SL
+                if sl >= price:
+                    sl = round(price * 0.9975, 6)  # ensure SL is below
+                trigger_direction = 1  # falling triggers SL
             else:
-                if sl <= executed_entry:
-                    sl = round(executed_entry * 1.0025, 6)
-                trigger_direction = 2  # price rising triggers SL
+                if sl <= price:
+                    sl = round(price * 1.0025, 6)  # ensure SL is above
+                trigger_direction = 2  # rising triggers SL
 
             log(f"🧪 SL Debug | Symbol: {symbol} | SL: {sl} | Entry: {executed_entry} | TriggerDir: {trigger_direction}")
 
@@ -144,7 +144,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "orderType": "Market",
                 "triggerPrice": str(sl),
                 "triggerDirection": trigger_direction,
-                "triggerBy": "LastPrice",  # ✅ More stable than MarkPrice
+                "triggerBy": "MarkPrice",  # ✅ More stable than MarkPrice
                 "qty": str(qty),
                 "reduceOnly": True,
                 "timeInForce": "GTC",
