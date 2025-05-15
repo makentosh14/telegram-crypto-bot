@@ -176,7 +176,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 log(f"❌ Initial SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
                 log(f"🪵 SL Payload (1st try): {sl_payload}", level="ERROR")
 
-                # 🔁 Retry fallback
                 try:
                     ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                     mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
@@ -184,7 +183,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                     mark_price = executed_entry
                     log("⚠️ Failed to fetch markPrice during SL retry, using entry price again")
 
-                if direction == "Long":
+                if direction.lower() == "long":
                     trigger_direction = 1
                     sl = round(mark_price * (1 - 0.005), 6)
                     reason = "Long: SL must be BELOW markPrice"
@@ -193,11 +192,21 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                     sl = round(mark_price * (1 + 0.005), 6)
                     reason = "Short: SL must be ABOVE markPrice"
 
-                sl_payload["triggerBy"] = "LastPrice"
-                sl_payload["triggerPrice"] = str(sl)
-                sl_payload["triggerDirection"] = trigger_direction
+                sl_payload = {
+                    "category": category,
+                    "symbol": symbol,
+                    "side": "Sell" if direction == "Long" else "Buy",
+                    "orderType": "Market",
+                    "triggerPrice": str(sl),
+                    "triggerDirection": trigger_direction,
+                    "triggerBy": "LastPrice",
+                    "qty": str(qty),
+                    "reduceOnly": True,
+                    "timeInForce": "GTC",
+                    "orderFilter": "Stop"
+                }
 
-                log(f"🔁 Retrying SL | Symbol: {symbol} | Direction: {direction} | SL: {sl} | MarkPrice: {mark_price} | TriggerBy: LastPrice | TriggerDir: {trigger_direction} | Reason: {reason}")
+                log(f"🔁 Retrying SL | Symbol: {symbol} | Direction: {direction} | SL: {sl} | MarkPrice: {mark_price} | TriggerDir: {trigger_direction} | Reason: {reason}")
 
                 sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
                 log(f"🔁 Retry SL response: {sl_result}")
