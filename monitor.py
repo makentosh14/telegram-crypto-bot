@@ -225,12 +225,14 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-        if trade.get("tp1_hit") and trade.get("tp1_price"):
-            recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
-            pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
-            if pump_move >= TP1_PUMP_THRESHOLD:
-                await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
-                write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
+                if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("smart_pump_alerted"):
+                    recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
+                    pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
+                    if pump_move >= TP1_PUMP_THRESHOLD:
+                        trade["smart_pump_alerted"] = True
+                        await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
+                        write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
+
 
     save_active_trades()
 
