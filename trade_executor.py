@@ -124,11 +124,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             MIN_SL_BUFFER = 0.0035
             side = "Sell" if direction == "Long" else "Buy"
-            mark_price = executed_entry
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
             except:
+                mark_price = executed_entry
                 log("⚠️ Failed to fetch markPrice, using entry price")
 
             if direction == "Long":
@@ -140,7 +140,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 if sl <= mark_price:
                     sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
 
-            log(f"🧪 SL Debug | Symbol: {symbol} | Entry: {executed_entry} | Mark: {mark_price} | SL: {sl} | Dir: {trigger_direction}")
+            log(f"🧪 SL Debug [1st Attempt] | {symbol} | Dir: {direction} | Entry: {executed_entry} | SL: {sl} | Mark: {mark_price} | TriggerDir: {trigger_direction}")
 
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
@@ -176,8 +176,14 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 log(f"❌ Initial SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
                 log(f"🪵 SL Payload (1st try): {sl_payload}", level="ERROR")
 
-                # Retry fallback with correct SL direction
-                sl_payload["triggerBy"] = "LastPrice"
+                # 🔁 Retry fallback: Re-fetch markPrice, recalculate SL and direction
+                try:
+                    ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
+                    mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
+                except:
+                    mark_price = executed_entry
+                    log("⚠️ Failed to fetch markPrice during SL retry, using entry price again")
+
                 if direction == "Long":
                     sl = round(mark_price * (1 - 0.005), 6)
                     trigger_direction = 1
@@ -185,10 +191,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                     sl = round(mark_price * (1 + 0.005), 6)
                     trigger_direction = 2
 
+                sl_payload["triggerBy"] = "LastPrice"
                 sl_payload["triggerPrice"] = str(sl)
                 sl_payload["triggerDirection"] = trigger_direction
 
-                log(f"🔁 Retrying SL | Dir: {direction} | New SL: {sl} | TriggerBy: LastPrice | Mark: {mark_price}")
+                log(f"🔁 Retrying SL | Dir: {direction} | SL: {sl} | Mark: {mark_price} | TriggerBy: LastPrice | TriggerDir: {trigger_direction}")
 
                 sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
                 log(f"🔁 Retry SL response: {sl_result}")
@@ -196,7 +203,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             tp1_result = await tp1_task
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 SL response: {sl_result}")
-
 
             sl_order_id = sl_result.get("result", {}).get("orderId")
 
