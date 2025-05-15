@@ -111,7 +111,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
-            # Adjust SL if entry differs from planned
             if direction == "Long" and executed_entry < planned_entry:
                 diff_pct = (planned_entry - executed_entry) / planned_entry
                 sl = round(sl * (1 - diff_pct), 6)
@@ -123,8 +122,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             else:
                 log("✅ No SL adjustment needed based on entry slippage")
 
-            # Enforce SL buffer to satisfy Bybit's trigger logic
-            MIN_SL_BUFFER = 0.0025  # 0.25%
+            MIN_SL_BUFFER = 0.0035
             side = "Sell" if direction == "Long" else "Buy"
             mark_price = executed_entry
             try:
@@ -142,7 +140,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 if sl <= mark_price:
                     sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
 
-            log(f"🧪 SL Debug | Symbol: {symbol} | Planned Entry: {planned_entry} | Executed: {executed_entry} | Mark: {mark_price} | Final SL: {sl} | TriggerDir: {trigger_direction}")
+            log(f"🧪 SL Debug | Symbol: {symbol} | Entry: {executed_entry} | Mark: {mark_price} | SL: {sl} | Dir: {trigger_direction}")
 
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
@@ -158,7 +156,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            sl_task = signed_request("POST", "/v5/order/create", {
+            sl_payload = {
                 "category": category,
                 "symbol": symbol,
                 "side": side,
@@ -170,9 +168,22 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True,
                 "timeInForce": "GTC",
                 "orderFilter": "Stop"
-            })
+            }
 
-            tp1_result, sl_result = await asyncio.gather(tp1_task, sl_task)
+            sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
+
+            if sl_result.get("retCode") != 0:
+                log(f"❌ Initial SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
+                log(f"🪵 SL Payload: {sl_payload}", level="ERROR")
+
+                sl_payload["triggerBy"] = "LastPrice"
+                sl = round(sl * (1 - 0.005) if direction == "Long" else sl * (1 + 0.005), 6)
+                sl_payload["triggerPrice"] = str(sl)
+
+                sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
+                log(f"🔁 Retry SL response: {sl_result}")
+
+            tp1_result = await tp1_task
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 SL response: {sl_result}")
 
