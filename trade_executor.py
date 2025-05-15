@@ -174,11 +174,21 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
             if sl_result.get("retCode") != 0:
                 log(f"❌ Initial SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
-                log(f"🪵 SL Payload: {sl_payload}", level="ERROR")
+                log(f"🪵 SL Payload (1st try): {sl_payload}", level="ERROR")
 
+                # Retry fallback with correct SL direction
                 sl_payload["triggerBy"] = "LastPrice"
-                sl = round(sl * (1 - 0.005) if direction == "Long" else sl * (1 + 0.005), 6)
+                if direction == "Long":
+                    sl = round(mark_price * (1 - 0.005), 6)
+                    trigger_direction = 1
+                else:
+                    sl = round(mark_price * (1 + 0.005), 6)
+                    trigger_direction = 2
+
                 sl_payload["triggerPrice"] = str(sl)
+                sl_payload["triggerDirection"] = trigger_direction
+
+                log(f"🔁 Retrying SL | Dir: {direction} | New SL: {sl} | TriggerBy: LastPrice | Mark: {mark_price}")
 
                 sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
                 log(f"🔁 Retry SL response: {sl_result}")
@@ -186,6 +196,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             tp1_result = await tp1_task
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 SL response: {sl_result}")
+
 
             sl_order_id = sl_result.get("result", {}).get("orderId")
 
