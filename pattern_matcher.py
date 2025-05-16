@@ -106,12 +106,6 @@ async def pattern_match_scan(symbols):
                     if trade_result:
                         pattern_stats["trades"] += 1
                     
-        except ValueError as e:
-            # Handle specific value error gracefully
-            if "too many values to unpack" in str(e):
-                log(f"❌ Pattern match failed for {symbol}: {e}", level="ERROR")
-                # Fix: Check function return values in analyze_pattern_context or calculate_context_similarity
-                continue
         except Exception as e:
             log(f"❌ Pattern match error for {symbol}: {e}", level="ERROR")
             continue
@@ -121,8 +115,6 @@ def analyze_pattern_context(candles):
     Extract context features from candles to compare with stored patterns.
     Returns a dictionary of normalized pattern context metrics.
     """
-    # Fix: This function should return only a dictionary of metrics
-    
     try:
         if len(candles) < 20:
             return {
