@@ -7,6 +7,7 @@ from atr import calculate_atr
 from activity_logger import write_log, log_trade_to_file
 from symbol_info import round_qty, symbol_precisions
 from datetime import datetime
+from volume import get_average_volume
 import asyncio
 import json
 import traceback
@@ -57,11 +58,49 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
+
+async def twap_execute_trade(symbol, qty, direction, category, slices=3, delay_sec=5):
+    slice_qty = round(qty / slices, 6)
+    side = "Buy" if direction == "long" else "Sell"
+    entries = []
+
+    log(f"🚀 Starting TWAP execution for {symbol} in {slices} slices...")
+
+    for i in range(slices):
+        log(f"📤 TWAP Slice {i+1}/{slices}: {slice_qty} {side}")
+        try:
+            result = await signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "qty": str(slice_qty),
+                "timeInForce": "IOC"
+            })
+            log(f"✅ TWAP Order Result: {result}")
+            if result.get("retCode") == 0:
+                price = float(result["result"].get("avgPrice") or 0)
+                if price > 0:
+                    entries.append(price)
+        except Exception as e:
+            log(f"❌ TWAP Slice Error: {e}", level="ERROR")
+
+        await asyncio.sleep(delay_sec)
+
+    if entries:
+        avg_entry = round(sum(entries) / len(entries), 6)
+        log(f"🎯 Final TWAP Entry Price: {avg_entry}")
+        return avg_entry
+    else:
+        log(f"❌ All TWAP slices failed for {symbol}")
+        return None
+
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
     trade_type = signal_data.get("trade_type", "Intraday")
     direction = signal_data.get("direction", "Long").strip().lower()
+    regime = signal_data.get("regime", "trending")
 
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
@@ -87,7 +126,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         log(f"📈 Trade calculation: Risk {max_risk*100}% of {usdt_balance} USDT = {risk_amount} USDT risk")
         log(f"📈 Position value: {position_value} USDT ({risk_amount} × {leverage})")
         log(f"📈 Raw quantity: {raw_qty} units ({position_value} ÷ {price})")
-        
         qty = calculate_quantity(symbol, raw_qty)
         log(f"📈 Final quantity after rounding: {qty}")
 
@@ -101,6 +139,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", {})
 
+        candles_1m = candles_by_tf.get("1", [])
+        avg_vol = get_average_volume(candles_1m) if candles_1m else 0
+        if avg_vol < 10_000_000:
+            log(f"⚠️ Skipping {symbol}: avg 1m volume too low (${avg_vol:,.0f})")
+            await send_telegram_message(f"⚠️ <b>{symbol}</b> skipped due to low volume (${avg_vol:,.0f})")
+            return None
+
         await signed_request("POST", "/v5/position/set-leverage", {
             "category": category,
             "symbol": symbol,
@@ -110,21 +155,33 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         await signed_request("POST", "/v5/order/cancel-all", {"category": category, "symbol": symbol})
 
-        order_payload = {
-            "category": category,
-            "symbol": symbol,
-            "side": "Buy" if direction == "long" else "Sell",
-            "orderType": "Market",
-            "qty": str(qty),
-            "timeInForce": "IOC"
-        }
+        executed_entry = None
+        if regime == "volatile":
+            executed_entry = await twap_execute_trade(symbol, qty, direction, category)
+            if not executed_entry:
+                await send_telegram_message(f"❌ <b>{symbol}</b> TWAP failed.")
+                return None
+        else:
+            order_payload = {
+                "category": category,
+                "symbol": symbol,
+                "side": "Buy" if direction == "long" else "Sell",
+                "orderType": "Market",
+                "qty": str(qty),
+                "timeInForce": "IOC"
+            }
         
-        log(f"📤 Sending market order: {order_payload}")
-        order_result = await signed_request("POST", "/v5/order/create", order_payload)
-        log(f"📥 Order result: {order_result}")
+            log(f"📤 Sending market order: {order_payload}")
+            order_result = await signed_request("POST", "/v5/order/create", order_payload)
+            log(f"📥 Order result: {order_result}")
 
         if order_result.get("retCode") == 0:
             executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+            slippage = abs(executed_entry - planned_entry) / planned_entry
+            if slippage > 0.0035:
+                await send_telegram_message(f"⚠️ <b>{symbol}</b> skipped — slippage > 0.35%")
+                return None
+                
             sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
