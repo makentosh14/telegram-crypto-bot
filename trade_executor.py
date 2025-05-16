@@ -41,7 +41,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     tp1_pct = sl_pct * 1.8
     trailing_pct = sl_pct * 0.5
 
-    if direction == "Long":
+    if direction.lower() == "long":
         sl = round(price * (1 - sl_pct / 100), 6)
         tp1 = round(price * (1 + tp1_pct / 100), 6)
     else:
@@ -62,9 +62,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     try:
         usdt_balance = await get_futures_available_balance()
         if usdt_balance <= 0:
-            await send_telegram_message(
-                f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Futures available balance is 0."
-            )
+            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Futures available balance is 0.")
             return None
 
         price = float(signal_data.get("price", 1.0))
@@ -97,7 +95,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         order_payload = {
             "category": category,
             "symbol": symbol,
-            "side": "Buy" if direction == "Long" else "Sell",
+            "side": "Buy" if direction.lower() == "long" else "Sell",
             "orderType": "Market",
             "qty": str(qty),
             "timeInForce": "IOC"
@@ -111,11 +109,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
-            if direction == "Long" and executed_entry < planned_entry:
+            if direction.lower() == "long" and executed_entry < planned_entry:
                 diff_pct = (planned_entry - executed_entry) / planned_entry
                 sl = round(sl * (1 - diff_pct), 6)
                 log(f"🔧 Adjusted SL down by {diff_pct:.4f} for lower-than-expected entry")
-            elif direction == "Short" and executed_entry > planned_entry:
+            elif direction.lower() == "short" and executed_entry > planned_entry:
                 diff_pct = (executed_entry - planned_entry) / planned_entry
                 sl = round(sl * (1 + diff_pct), 6)
                 log(f"🔧 Adjusted SL up by {diff_pct:.4f} for higher-than-expected short entry")
@@ -123,7 +121,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 log("✅ No SL adjustment needed based on entry slippage")
 
             MIN_SL_BUFFER = 0.0035
-            side = "Sell" if direction == "Long" else "Buy"
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
@@ -131,7 +128,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 mark_price = executed_entry
                 log("⚠️ Failed to fetch markPrice, using entry price")
 
-            if direction == "Long":
+            if direction.lower() == "long":
                 trigger_direction = 1
                 if sl >= mark_price:
                     sl = round(mark_price * (1 - MIN_SL_BUFFER), 6)
@@ -139,6 +136,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 trigger_direction = 2
                 if sl <= mark_price:
                     sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
+
+            side = "Sell" if direction.lower() == "long" else "Buy"
 
             log(f"🧪 SL Debug [1st Attempt] | {symbol} | Dir: {direction} | Entry: {executed_entry} | SL: {sl} | Mark: {mark_price} | TriggerDir: {trigger_direction}")
 
@@ -195,7 +194,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 sl_payload = {
                     "category": category,
                     "symbol": symbol,
-                    "side": "Sell" if direction == "Long" else "Buy",
+                    "side": "Sell" if direction.lower() == "long" else "Buy",
                     "orderType": "Market",
                     "triggerPrice": str(sl),
                     "triggerDirection": trigger_direction,
