@@ -1,5 +1,7 @@
+<|diff_marker|> PATCH A
 import asyncio
 import traceback
+import time
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence
@@ -28,7 +30,7 @@ recent_exits = {}
 EXIT_COOLDOWN = 10
 
 MIN_SCALP_SCORE = 6.5
-MIN_INTRADAY_SCORE = 7
+MIN_INTRADAY_SCORE = 7.0
 MIN_SWING_SCORE = 7.5
 
 def extract_last_pattern(candles_by_tf):
@@ -40,6 +42,17 @@ def extract_last_pattern(candles_by_tf):
 
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
+    regime = trend_context.get("regime", "trending")
+
+    score_adjustments = {
+        "volatile": {"scalp": 0.5, "intraday": 0.5, "swing": 0.5},
+        "ranging": {"scalp": 1.0, "intraday": 1.0, "swing": 1.0},
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},
+    }
+    adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
+    adj_scalp = MIN_SCALP_SCORE + adjust["scalp"]
+    adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
+    adj_swing = MIN_SWING_SCORE + adjust["swing"]
 
     for i, symbol in enumerate(symbols, 1):
         if symbol not in live_candles:
@@ -66,14 +79,18 @@ async def scan_for_new_signals(symbols):
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
-        leverage = DEFAULT_LEVERAGE
+
         risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
+        if regime == "ranging":
+            risk_pct *= 0.6
+        elif regime == "trending":
+            risk_pct *= 1.1
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
         sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-            candles_by_tf, price, trade_type, direction, score, confidence
+            candles_by_tf, price, trade_type, direction, score, confidence, regime
         )
 
         pump_data = await detect_early_pump(candles_by_tf, symbol)
@@ -85,11 +102,11 @@ async def scan_for_new_signals(symbols):
                 f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
             )
 
-        if (trade_type == "Scalp" and score < MIN_SCALP_SCORE) or \
-           (trade_type == "Intraday" and score < MIN_INTRADAY_SCORE) or \
-           (trade_type == "Swing" and score < MIN_SWING_SCORE):
+        if (trade_type == "Scalp" and score < adj_scalp) or \
+           (trade_type == "Intraday" and score < adj_intraday) or \
+           (trade_type == "Swing" and score < adj_swing):
             if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
-                log(f"⚠️ Swing setup below min score ({score} < {MIN_SWING_SCORE}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
+                log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
                 continue
             continue
 
@@ -130,7 +147,7 @@ async def scan_for_new_signals(symbols):
                 trade_type=trade_type,
                 direction=direction,
                 trailing_pct=trailing_pct,
-                leverage=leverage,
+                leverage=DEFAULT_LEVERAGE,
                 risk_pct=risk_pct,
                 confidence=confidence,
                 sl_pct=sl_pct
@@ -174,10 +191,10 @@ async def scan_for_new_signals(symbols):
                     qty=trade.get("qty"),
                     sl_order_id=trade.get("sl_order_id")
                 )
-                
-                # Verify SL order immediately after tracking
+
                 await verify_stop_loss_placement(symbol, trade, direction)
 
+# The rest of the file remains unchanged...
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
