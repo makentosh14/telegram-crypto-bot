@@ -22,7 +22,7 @@ def calculate_quantity(symbol, raw_qty):
     return rounded_qty
 
 
-def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
+def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending"):
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
     atr_tf = atr_tf_map.get(trade_type, '15')
     candles = candles_by_tf.get(atr_tf)
@@ -40,6 +40,11 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         else:
             sl_pct = 1.0
 
+    if regime == "volatile":
+        sl_pct *= 1.5
+    elif regime == "ranging":
+        sl_pct *= 1.3
+
     tp1_pct = sl_pct * 1.8
     trailing_pct = sl_pct * 0.5
 
@@ -51,7 +56,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
-
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
