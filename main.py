@@ -22,6 +22,7 @@ from whale_detector import detect_whale_activity
 from ai_memory import load_memory
 from mean_reversion import score_mean_reversion
 from breakout_sniper import score_breakout_sniper
+from strategy_performance import get_strategy_stats
 
 load_memory()
 
@@ -79,10 +80,21 @@ async def scan_for_new_signals(symbols):
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
 
         risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
-        if regime == "ranging":
-            risk_pct *= 0.6
-        elif regime == "trending":
-            risk_pct *= 1.1
+        strategy = "core_strategy"
+        if tf_scores.get("mean_reversion"):
+            strategy = "mean_reversion"
+        elif tf_scores.get("breakout_sniper"):
+            strategy = "breakout_sniper"
+
+        stats = get_strategy_stats(strategy)
+        win_rate = stats["win_rate"]
+
+        if win_rate >= 70:
+            risk_pct = base_risk * 1.2
+        elif win_rate <= 40:
+            risk_pct = base_risk * 0.6
+        else:
+            risk_pct = base_risk
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
