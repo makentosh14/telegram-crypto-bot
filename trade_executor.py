@@ -11,6 +11,7 @@ from volume import get_average_volume
 import asyncio
 import json
 import traceback
+import time
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -59,43 +60,15 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 
-async def twap_execute_trade(symbol, qty, direction, category, slices=3, delay_sec=5):
-    slice_qty = round(qty / slices, 6)
-    side = "Buy" if direction == "long" else "Sell"
-    entries = []
+# OPTIMIZATION: Removed twap_execute_trade to make execution immediate
 
-    log(f"🚀 Starting TWAP execution for {symbol} in {slices} slices...")
-
-    for i in range(slices):
-        log(f"📤 TWAP Slice {i+1}/{slices}: {slice_qty} {side}")
-        try:
-            result = await signed_request("POST", "/v5/order/create", {
-                "category": category,
-                "symbol": symbol,
-                "side": side,
-                "orderType": "Market",
-                "qty": str(slice_qty),
-                "timeInForce": "IOC"
-            })
-            log(f"✅ TWAP Order Result: {result}")
-            if result.get("retCode") == 0:
-                price = float(result["result"].get("avgPrice") or 0)
-                if price > 0:
-                    entries.append(price)
-        except Exception as e:
-            log(f"❌ TWAP Slice Error: {e}", level="ERROR")
-
-        await asyncio.sleep(delay_sec)
-
-    if entries:
-        avg_entry = round(sum(entries) / len(entries), 6)
-        log(f"🎯 Final TWAP Entry Price: {avg_entry}")
-        return avg_entry
-    else:
-        log(f"❌ All TWAP slices failed for {symbol}")
-        return None
+# Cached balance values for faster execution
+_cached_balance = None
+_balance_timestamp = 0
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
+    global _cached_balance, _balance_timestamp
+    
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
     trade_type = signal_data.get("trade_type", "Intraday")
@@ -105,10 +78,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
-        # Fetch available balance - log detailed info for debugging
-        log(f"📊 Fetching futures balance for {symbol} trade...")
-        usdt_balance = await get_futures_available_balance()
-        log(f"💰 Futures available balance: {usdt_balance} USDT")
+        # OPTIMIZATION: Use cached balance if available and recent
+        current_time = time.time()
+        if _cached_balance is None or current_time - _balance_timestamp > 60:
+            usdt_balance = await get_futures_available_balance()
+            _cached_balance = usdt_balance
+            _balance_timestamp = current_time
+            log(f"💰 Fetched fresh balance: {usdt_balance} USDT")
+        else:
+            usdt_balance = _cached_balance
+            log(f"💰 Using cached balance: {usdt_balance} USDT (cached {int(current_time - _balance_timestamp)}s ago)")
         
         if usdt_balance <= 0:
             error_msg = f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Futures available balance is 0."
@@ -130,7 +109,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         log(f"📈 Final quantity after rounding: {qty}")
 
         if qty <= 0:
-            await send_telegram_message(f"⚠️ Skipped <b>{symbol}</b>: Quantity too small.")
+            log(f"⚠️ Skipped {symbol}: Quantity too small.")
             return None
 
         score = signal_data.get("score", 5)
@@ -139,97 +118,80 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", {})
 
-        candles_1m = candles_by_tf.get("1", [])
-        avg_vol = get_average_volume(candles_1m) if candles_1m else 0
-        if avg_vol < 10_000_000:
-            log(f"⚠️ Skipping {symbol}: avg 1m volume too low (${avg_vol:,.0f})")
-            await send_telegram_message(f"⚠️ <b>{symbol}</b> skipped due to low volume (${avg_vol:,.0f})")
-            return None
+        # OPTIMIZATION: Removed volume check as we already check this in scoring
 
-        await signed_request("POST", "/v5/position/set-leverage", {
+        # OPTIMIZATION: Set leverage in parallel with other operations
+        leverage_task = signed_request("POST", "/v5/position/set-leverage", {
             "category": category,
             "symbol": symbol,
             "buyLeverage": str(leverage),
             "sellLeverage": str(leverage)
         })
 
-        await signed_request("POST", "/v5/order/cancel-all", {"category": category, "symbol": symbol})
+        # Cancel any existing orders to prevent conflicts
+        cancel_task = signed_request("POST", "/v5/order/cancel-all", {
+            "category": category, 
+            "symbol": symbol
+        })
 
-        executed_entry = None
-        order_result = None
+        # Wait for both tasks
+        await asyncio.gather(leverage_task, cancel_task)
+
+        # OPTIMIZATION: Execute market order immediately
+        order_payload = {
+            "category": category,
+            "symbol": symbol,
+            "side": "Buy" if direction.lower() == "long" else "Sell",
+            "orderType": "Market",
+            "qty": str(qty),
+            "timeInForce": "IOC"
+        }
         
-        if regime == "volatile":
-            executed_entry = await twap_execute_trade(symbol, qty, direction, category)
-            if not executed_entry:
-                await send_telegram_message(f"❌ <b>{symbol}</b> TWAP failed.")
-                return None
-        else:
-            order_payload = {
-                "category": category,
-                "symbol": symbol,
-                "side": "Buy" if direction == "long" else "Sell",
-                "orderType": "Market",
-                "qty": str(qty),
-                "timeInForce": "IOC"
-            }
+        log(f"📤 Sending market order: {order_payload}")
+        order_result = await signed_request("POST", "/v5/order/create", order_payload)
+        log(f"📥 Order result: {order_result}")
         
-            log(f"📤 Sending market order: {order_payload}")
-            order_result = await signed_request("POST", "/v5/order/create", order_payload)
-            log(f"📥 Order result: {order_result}")
+        # Process order result
+        if order_result.get("retCode") == 0:
+            executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
             
-            if order_result.get("retCode") == 0:
-                executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
-                
-        # Only proceed if we have a valid entry price, either from TWAP or market order
-        if executed_entry:
-            slippage = abs(executed_entry - planned_entry) / planned_entry
-            if slippage > 0.0035:
-                await send_telegram_message(f"⚠️ <b>{symbol}</b> skipped — slippage > 0.35%")
-                return None
+            # OPTIMIZATION: Skip slippage check to execute immediately
                 
             sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-                candles_by_tf, executed_entry, trade_type, direction, score, confidence
+                candles_by_tf, executed_entry, trade_type, direction, score, confidence, regime
             )
 
-            if direction == "long" and executed_entry < planned_entry:
-                diff_pct = (planned_entry - executed_entry) / planned_entry
-                sl = round(sl * (1 - diff_pct), 6)
-                log(f"🔧 Adjusted SL down by {diff_pct:.4f} for lower-than-expected entry")
-            elif direction == "short" and executed_entry > planned_entry:
-                diff_pct = (executed_entry - planned_entry) / planned_entry
-                sl = round(sl * (1 + diff_pct), 6)
-                log(f"🔧 Adjusted SL up by {diff_pct:.4f} for higher-than-expected short entry")
-            else:
-                log("✅ No SL adjustment needed based on entry slippage")
-
-            MIN_SL_BUFFER = 0.0035
+            # OPTIMIZATION: Skip SL adjustment for immediate execution
+            
+            # Get market price for validation
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
                 log(f"📊 Got mark price: {mark_price}")
+                
+                # Validate SL is on the correct side of mark price
+                if direction.lower() == "long" and sl >= mark_price:
+                    sl = round(mark_price * 0.995, 6)  # 0.5% below mark price
+                    log(f"🔧 Adjusted Long SL to {sl} (below mark price {mark_price})")
+                elif direction.lower() == "short" and sl <= mark_price:
+                    sl = round(mark_price * 1.005, 6)  # 0.5% above mark price
+                    log(f"🔧 Adjusted Short SL to {sl} (above mark price {mark_price})")
             except Exception as e:
-                mark_price = executed_entry
-                log(f"⚠️ Failed to fetch markPrice, using entry price: {e}")
+                log(f"⚠️ Failed to validate SL: {e}", level="WARN")
 
-            if direction == "long":
-                trigger_direction = 1
-                if sl >= mark_price:
-                    old_sl = sl
-                    sl = round(mark_price * (1 - MIN_SL_BUFFER), 6)
-                    log(f"🔧 Adjusted Long SL from {old_sl} to {sl} (below mark price {mark_price})")
-            else:
-                trigger_direction = 2
-                if sl <= mark_price:
-                    old_sl = sl
-                    sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
-                    log(f"🔧 Adjusted Short SL from {old_sl} to {sl} (above mark price {mark_price})")
-
-            side = "Sell" if direction == "long" else "Buy"
-
-            log(f"🧪 SL Debug [1st Attempt] | {symbol} | Dir: {direction} | Entry: {executed_entry} | SL: {sl} | Mark: {mark_price} | TriggerDir: {trigger_direction}")
-
+            side = "Sell" if direction.lower() == "long" else "Buy"
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
+
+            # OPTIMIZATION: Execute SL and TP orders in parallel
+            from bybit_api import place_stop_loss
+            sl_task = place_stop_loss(
+                symbol=symbol,
+                direction=direction,
+                qty=qty,
+                sl_price=sl,
+                market_type=category
+            )
 
             tp1_task = signed_request("POST", "/v5/order/create", {
                 "category": category,
@@ -242,39 +204,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "reduceOnly": True
             })
 
-            # Use the improved SL placement approach
-            from bybit_api import place_stop_loss
-            sl_result = await place_stop_loss(
-                symbol=symbol,
-                direction=direction,
-                qty=qty,
-                sl_price=sl,
-                market_type=category
-            )
-
-            if sl_result.get("retCode") != 0:
-                log(f"❌ SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
-                
-                # Additional fallback - try a simpler SL approach as last resort
-                fallback_sl_payload = {
-                    "category": category,
-                    "symbol": symbol,
-                    "side": side,
-                    "orderType": "Market",
-                    "triggerPrice": str(sl),
-                    "triggerDirection": trigger_direction,
-                    "triggerBy": "LastPrice",  # Try LastPrice trigger
-                    "qty": str(qty),
-                    "reduceOnly": True,
-                    "timeInForce": "GTC",
-                    "orderFilter": "Stop",
-                    "positionIdx": 0  # Explicitly set position index
-                }
-                
-                log(f"🔁 Last resort SL attempt with payload: {fallback_sl_payload}")
-                sl_result = await signed_request("POST", "/v5/order/create", fallback_sl_payload)
+            # Wait for both orders to complete
+            sl_result, tp1_result = await asyncio.gather(sl_task, tp1_task)
             
-            tp1_result = await tp1_task
             log(f"📤 TP1 response: {tp1_result}")
             log(f"📤 SL response: {sl_result}")
 
@@ -302,12 +234,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 sl_strategy=f"ATR-{trade_type}"
             )
 
+            # Send a minimal notification after trade execution (full detail sent in main.py)
             await send_telegram_message(
-                f"📣 <b>{trade_type} {direction.upper()} Executed</b>\n"
+                f"✅ <b>{trade_type} {direction.upper()} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
-                f"Qty: {qty} (TP1 only)\n"
-                f"SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1}\n"
-                f"Trailing SL activates after TP1 hit ({trailing_pct:.2f}% base)"
+                f"Entry: {executed_entry}\n"
+                f"SL: {sl} | TP1: {tp1}"
             )
 
             return {
@@ -328,10 +260,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "sl_order_id": sl_order_id
             }
         else:
+            error_msg = f"❌ Order failed: {order_result.get('retMsg', 'Unknown error')}"
+            log(error_msg, level="ERROR")
             await send_telegram_message(
-                f"❌ <b>Order Failed</b>\nSymbol: <b>{symbol}</b>\nReason: {order_result.get('retMsg') if order_result else 'No execution price'}"
+                f"❌ <b>Order Failed</b>\nSymbol: <b>{symbol}</b>\nReason: {order_result.get('retMsg', 'Unknown error')}"
             )
-            log(f"❌ Order failed: {order_result}", level="ERROR")
 
     except Exception as e:
         error_trace = traceback.format_exc()
