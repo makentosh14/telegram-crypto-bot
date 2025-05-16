@@ -8,6 +8,7 @@ from activity_logger import write_log, log_trade_to_file
 from symbol_info import round_qty, symbol_precisions
 from datetime import datetime
 import asyncio
+import json
 
 
 def calculate_quantity(symbol, raw_qty):
@@ -191,10 +192,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                     sl = round(mark_price * (1 + 0.005), 6)
                     reason = "Short: SL must be ABOVE markPrice"
 
+                side = "Sell" if direction == "long" else "Buy"
+
                 sl_payload = {
                     "category": category,
                     "symbol": symbol,
-                    "side": "Sell" if direction == "long" else "Buy",
+                    "side": side,
                     "orderType": "Market",
                     "triggerPrice": str(sl),
                     "triggerDirection": trigger_direction,
@@ -206,6 +209,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 }
 
                 log(f"🔁 Retrying SL | Symbol: {symbol} | Direction: {direction} | SL: {sl} | MarkPrice: {mark_price} | TriggerDir: {trigger_direction} | Reason: {reason}")
+                log(f"📌 SL Retry Debug → Side: {side}, TriggerDir: {trigger_direction}, TriggerBy: LastPrice, SL: {sl}")
+                log(f"📦 SL Retry Payload:\n{json.dumps(sl_payload, indent=2)}")
 
                 sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
                 log(f"🔁 Retry SL response: {sl_result}")
