@@ -1,7 +1,6 @@
-# risk_manager.py
-
 from config import RISK_SPOT, RISK_FUTURES, DAILY_MAX_LOSS
 from logger import log
+from strategy_performance import get_strategy_stats
 
 # Daily risk tracking
 daily_loss_count = 0
@@ -16,6 +15,33 @@ def get_risk(symbol, is_altseason=False):
     risk = RISK_SPOT if symbol.startswith("SPOT_") else RISK_FUTURES
     if is_altseason:
         risk *= 1.5  # Boost risk in altseason
+    return round(risk, 4)
+
+def calculate_dynamic_risk(symbol, confidence, strategy_name, base_risk_pct):
+    """
+    Adjusts risk % based on confidence score and strategy win rate
+    """
+    risk = base_risk_pct
+
+    # Confidence-based adjustment
+    if confidence >= 85:
+        risk *= 1.2
+    elif confidence < 60:
+        risk *= 0.6
+
+    # Strategy win rate adjustment
+    stats = get_strategy_stats(strategy_name)
+    win_rate = stats.get("win_rate", 50)
+
+    if win_rate >= 70:
+        risk *= 1.15
+    elif win_rate <= 40:
+        risk *= 0.7
+
+    # Apply altseason multiplier if needed
+    if symbol.startswith("SPOT_ALTSEASON_"):
+        risk *= 1.25
+
     return round(risk, 4)
 
 def register_loss(symbol, loss_amount, balance):
