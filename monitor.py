@@ -13,6 +13,7 @@ from ai_memory import log_trade_result
 from activity_logger import log_trade_to_file
 from bybit_api import signed_request, check_order_exists, place_stop_loss, place_stop_loss_with_retry
 from error_handler import send_telegram_message
+from strategy_performance import log_strategy_result
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
