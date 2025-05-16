@@ -79,7 +79,7 @@ async def get_wallet_balance():
 async def get_futures_available_balance():
     try:
         response = await signed_request("GET", "/v5/account/wallet-balance", {
-            "accountType": "CONTRACT",  # Specifically request CONTRACT account type
+            "accountType": "UNIFIED",  # Specifically request CONTRACT account type
             "coin": "USDT"  # Specifically request USDT balance
         })
         
