@@ -15,6 +15,10 @@ BYBIT_API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"
 def create_signature(secret, payload):
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
+# === SIGNATURE UTILITY ===
+def create_signature(secret, payload):
+    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
 # === SIGNED REQUEST WRAPPER ===
 async def signed_request(method, endpoint, params=None):
     try:
@@ -77,22 +81,85 @@ async def get_wallet_balance():
 # === FUTURES BALANCE FUNCTION (FIXED DUPLICATE) ===
 async def get_futures_available_balance():
     try:
-        response = await get_wallet_balance()
+        response = await signed_request("GET", "/v5/account/wallet-balance", {
+            "accountType": "CONTRACT",  # Specifically request CONTRACT account type
+            "coin": "USDT"  # Specifically request USDT balance
+        })
+        
+        log(f"📊 Futures balance response: {response}")
+        
         if response.get("retCode") != 0:
-            log(f"❌ Failed to fetch wallet balance: {response.get('retMsg')}", level="ERROR")
+            log(f"❌ Failed to fetch futures wallet balance: {response.get('retMsg')}", level="ERROR")
+            
+            # Try fallback to UNIFIED account if CONTRACT fails
+            fallback = await signed_request("GET", "/v5/account/wallet-balance", {
+                "accountType": "UNIFIED"
+            })
+            
+            log(f"📊 Fallback balance response: {fallback}")
+            
+            if fallback.get("retCode") != 0:
+                log(f"❌ All balance fetch attempts failed", level="ERROR")
+                return 0.0
+                
+            try:
+                # Try to get USDT from UNIFIED account
+                usdt = next(
+                    coin for coin in fallback["result"]["list"][0]["coin"] if coin["coin"] == "USDT"
+                )
+                balance = float(usdt.get("availableToTrade", 0))
+                log(f"💰 Using fallback UNIFIED USDT balance: {balance}")
+                return balance
+            except Exception as e:
+                log(f"❌ Failed to extract USDT from fallback: {e}", level="ERROR")
+                return 0.0
+                
+        # Parse CONTRACT account USDT balance
+        try:
+            if "list" in response["result"] and len(response["result"]["list"]) > 0:
+                account_info = response["result"]["list"][0]
+                
+                # Check if we have a direct USDT coin entry
+                if "coin" in account_info and len(account_info["coin"]) > 0:
+                    usdt_coins = [coin for coin in account_info["coin"] if coin["coin"] == "USDT"]
+                    
+                    if usdt_coins:
+                        usdt = usdt_coins[0]
+                        # Try multiple possible field names for available balance
+                        available = usdt.get("availableBalance", usdt.get("walletBalance", usdt.get("equity", usdt.get("available", 0))))
+                        balance = float(available)
+                        log(f"💰 Using CONTRACT USDT balance: {balance}")
+                        return balance
+                
+                # Fallback to account-level available balance
+                if "availableBalance" in account_info:
+                    balance = float(account_info["availableBalance"])
+                    log(f"💰 Using CONTRACT account balance: {balance}")
+                    return balance
+            
+            log("⚠️ No suitable balance field found in response")
             return 0.0
             
-        # First try to get 'availableToTrade' for USDT
-        try:
-            usdt = next(
-                coin for coin in response["result"]["list"][0]["coin"] if coin["coin"] == "USDT"
-            )
-            return float(usdt.get("availableToTrade", 0))
-        except Exception:
-            # Fallback to totalAvailableBalance
-            return float(response["result"]["list"][0]["totalAvailableBalance"])
+        except Exception as e:
+            log(f"❌ Failed to parse CONTRACT balance: {e}", level="ERROR")
+            
+            # One more fallback attempt - try to get any available balance we can find
+            try:
+                if "list" in response["result"] and len(response["result"]["list"]) > 0:
+                    account = response["result"]["list"][0]
+                    for key in ["availableBalance", "totalAvailableBalance", "walletBalance"]:
+                        if key in account and float(account[key]) > 0:
+                            balance = float(account[key])
+                            log(f"💰 Using fallback balance field {key}: {balance}")
+                            return balance
+            except:
+                pass
+                
+            return 0.0
+            
     except Exception as e:
         log(f"❌ Failed to fetch available futures balance: {e}", level="ERROR")
+        log(f"💡 Full error: {traceback.format_exc()}")
         return 0.0
 
 # === TRADE FUNCTION ===
