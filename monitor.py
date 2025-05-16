@@ -10,7 +10,7 @@ from exit_manager import should_trail_stop
 from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
 from ai_memory import log_trade_result
 from activity_logger import log_trade_to_file
-from bybit_api import signed_request
+from bybit_api import signed_request, check_order_exists, place_stop_loss
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
@@ -80,54 +80,68 @@ def remove_trade(symbol):
         save_active_trades()
 
 async def check_and_restore_sl(symbol, trade):
+    """Enhanced function to check for and restore missing stop-loss orders"""
     from telegram_bot import send_telegram_message
-    if not trade.get("sl_order_id"):
+    
+    # Don't try to restore SL if we don't have the necessary information
+    if not trade or trade.get("exited") or not trade.get("qty"):
         return
-    try:
-        response = await signed_request("GET", "/v5/order/realtime", {
-            "symbol": symbol,
-            "category": "linear",
-        })
-        active_orders = response.get("result", {}).get("list", [])
-        sl_order_id = trade.get("sl_order_id")
-        sl_exists = any(order.get("orderId") == sl_order_id for order in active_orders)
-        if not sl_exists:
-            direction = trade.get("direction")
-            qty = trade.get("qty")
-            sl = trade.get("original_sl")
-            entry = trade.get("entry_price")
-            side = "Sell" if direction == "Long" else "Buy"
-            trigger_direction = 1 if direction == "Long" else 2
-
-            # SL safety buffer
-            if direction == "Long" and sl >= entry:
-                sl = round(entry * (1 - MIN_SL_BUFFER), 6)
-            elif direction == "Short" and sl <= entry:
-                sl = round(entry * (1 + MIN_SL_BUFFER), 6)
-
-            sl_resp = await signed_request("POST", "/v5/order/create", {
-                "category": "linear",
-                "symbol": symbol,
-                "side": side,
-                "orderType": "Market",
-                "triggerPrice": str(sl),
-                "triggerDirection": trigger_direction,
-                "triggerBy": "MarkPrice",
-                "qty": str(qty),
-                "reduceOnly": True,
-                "timeInForce": "GTC",
-                "orderFilter": "Stop"
-            })
-
-            await send_telegram_message(f"⚠️ <b>SL Replaced</b> for {symbol} (was missing). New SL order: {sl_resp.get('result', {}).get('orderId')}")
-            write_log(f"SL RESTORED: {symbol} | Order ID: {sl_resp.get('result', {}).get('orderId')}")
-            log(f"✅ SL replaced for {symbol} (MarkPrice fallback)")
-            trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
-            save_active_trades()
-    except Exception as e:
-        log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
         
-# (Rest of monitor_trades remains unchanged — already compatible with SL logic)
+    sl_order_id = trade.get("sl_order_id")
+    
+    # Check if SL exists - First verify we have an ID to check
+    sl_exists = False
+    if sl_order_id:
+        try:
+            # Use the new check_order_exists function from bybit_api
+            sl_exists = await check_order_exists(sl_order_id, symbol)
+            log(f"🔍 SL order check for {symbol}: {'Exists' if sl_exists else 'Missing'}")
+        except Exception as e:
+            log(f"❌ Error checking SL order: {e}", level="ERROR")
+    
+    # If SL doesn't exist or we don't have an SL order ID, recreate it
+    if not sl_exists:
+        try:
+            direction = trade.get("direction", "").lower()
+            qty = trade.get("qty")
+            
+            # Try to use the trailing SL if available, otherwise use original SL or fallback to entry price with buffer
+            entry_price = trade.get("entry_price")
+            if not entry_price:
+                log(f"❌ Cannot restore SL for {symbol}: No entry price available", level="ERROR")
+                return
+                
+            sl_price = None
+            if trade.get("trailing_sl"):
+                sl_price = trade.get("trailing_sl")
+                log(f"🔄 Using trailing SL price: {sl_price}")
+            elif trade.get("original_sl"):
+                sl_price = trade.get("original_sl") 
+                log(f"🔄 Using original SL price: {sl_price}")
+            else:
+                # Fallback: Calculate a safety SL from entry price
+                if direction == "long":
+                    sl_price = round(entry_price * (1 - MIN_SL_BUFFER * 2), 6)
+                else:
+                    sl_price = round(entry_price * (1 + MIN_SL_BUFFER * 2), 6)
+                log(f"⚠️ No SL price found, using fallback from entry: {sl_price}")
+            
+            # Place the new SL order using our improved function
+            sl_resp = await place_stop_loss(symbol, direction, qty, sl_price)
+            
+            if sl_resp.get("retCode") == 0:
+                new_sl_order_id = sl_resp.get("result", {}).get("orderId")
+                trade["sl_order_id"] = new_sl_order_id
+                await send_telegram_message(f"🛡️ <b>SL Restored</b> for {symbol} at {sl_price}")
+                write_log(f"SL RESTORED: {symbol} | Price: {sl_price} | Order ID: {new_sl_order_id}")
+                log(f"✅ SL restored for {symbol} at {sl_price}")
+                save_active_trades()
+            else:
+                log(f"❌ Failed to restore SL for {symbol}: {sl_resp.get('retMsg')}", level="ERROR")
+                await send_telegram_message(f"⚠️ <b>SL Restoration Failed</b> for {symbol}: {sl_resp.get('retMsg')}")
+        except Exception as e:
+            log(f"❌ Error restoring SL for {symbol}: {e}", level="ERROR")
+            write_log(f"ERROR RESTORING SL: {symbol} | {str(e)}")
 
 async def monitor_trades(live_candles):
     from telegram_bot import send_telegram_message
@@ -168,6 +182,7 @@ async def monitor_trades(live_candles):
         current_price = float(candles_by_tf['1'][-1]['close'])
         trailing_pct = trade.get("trailing_pct")
 
+        # Check and restore SL first - ALWAYS do this before any other logic
         await check_and_restore_sl(symbol, trade)
 
         if trade.get("tp1_hit") and trailing_pct:
@@ -180,20 +195,46 @@ async def monitor_trades(live_candles):
                candles=candles_by_tf['1'],
                trigger_pct=trailing_pct * 2,
                trail_pct=trailing_pct,
-               current_trailing_sl=current_trailing_sl  # ✅ Pass it in
+               current_trailing_sl=current_trailing_sl
            )
            if new_sl and (current_trailing_sl is None or
-                          (direction == "Long" and new_sl > current_trailing_sl) or
-                          (direction == "Short" and new_sl < current_trailing_sl)):
+                          (direction.lower() == "long" and new_sl > current_trailing_sl) or
+                          (direction.lower() == "short" and new_sl < current_trailing_sl)):
                trade["trailing_sl"] = new_sl
-               await send_telegram_message(f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}")
-               log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
-               write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
+               
+               # Update the actual SL order in Bybit when we move the trailing SL
+               try:
+                   # Cancel existing SL
+                   if trade.get("sl_order_id"):
+                       await signed_request("POST", "/v5/order/cancel", {
+                           "category": "linear",
+                           "symbol": symbol,
+                           "orderId": trade["sl_order_id"]
+                       })
+                   
+                   # Place new SL
+                   sl_resp = await place_stop_loss(
+                       symbol=symbol,
+                       direction=direction.lower(),
+                       qty=trade.get("qty"),
+                       sl_price=new_sl
+                   )
+                   
+                   if sl_resp.get("retCode") == 0:
+                       trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
+                       await send_telegram_message(f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}")
+                       log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
+                       write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
+                       save_active_trades()
+                   else:
+                       log(f"❌ Failed to update trailing SL: {sl_resp.get('retMsg')}", level="ERROR")
+               except Exception as e:
+                   log(f"❌ Error updating trailing SL: {e}", level="ERROR")
 
-        # ✅ INSIDE THE LOOP — Trailing SL hit check FIRST (before TP1 logic)
+        # Trail SL hit check
         if trade.get("tp1_hit") and trade.get("trailing_sl"):
             trailing_sl = trade["trailing_sl"]
-            if (direction == "Long" and current_price <= trailing_sl) or (direction == "Short" and current_price >= trailing_sl):
+            if (direction.lower() == "long" and current_price <= trailing_sl) or (direction.lower() == "short" and current_price >= trailing_sl):
                 trade["exited"] = True
                 await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
                 write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
@@ -202,20 +243,49 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
+        # TP1 hit check
         if not trade.get("tp1_hit") and direction and entry_price:
-            tp1_level = entry_price * (1.018 if direction == "Long" else 0.982)
-            if (direction == "Long" and current_price >= tp1_level) or (direction == "Short" and current_price <= tp1_level):
+            tp1_level = entry_price * (1.018 if direction.lower() == "long" else 0.982)
+            if (direction.lower() == "long" and current_price >= tp1_level) or (direction.lower() == "short" and current_price <= tp1_level):
                 trade["tp1_hit"] = True
                 trade["break_even_triggered"] = True
                 trade["tp1_price"] = current_price
                 trade["trailing_sl"] = entry_price
+                
+                # Update the actual SL order when TP1 is hit
+                try:
+                    # Cancel existing SL
+                    if trade.get("sl_order_id"):
+                        await signed_request("POST", "/v5/order/cancel", {
+                            "category": "linear",
+                            "symbol": symbol,
+                            "orderId": trade["sl_order_id"]
+                        })
+                    
+                    # Place new break-even SL
+                    sl_resp = await place_stop_loss(
+                        symbol=symbol,
+                        direction=direction.lower(),
+                        qty=trade.get("qty"),
+                        sl_price=entry_price
+                    )
+                    
+                    if sl_resp.get("retCode") == 0:
+                        trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
+                    else:
+                        log(f"❌ Failed to set break-even SL: {sl_resp.get('retMsg')}", level="ERROR")
+                except Exception as e:
+                    log(f"❌ Error setting break-even SL: {e}", level="ERROR")
+                
                 await send_telegram_message(f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b> — Smart Trailing SL Activated at Break-even")
                 write_log(f"TP1 HIT: {symbol} | SL moved to break-even: {entry_price}")
                 log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                save_active_trades()
 
+        # Original SL hit check
         if not trade.get("tp1_hit") and trade.get("original_sl"):
             sl_price = trade["original_sl"]
-            if (direction == "Long" and current_price <= sl_price) or (direction == "Short" and current_price >= sl_price):
+            if (direction.lower() == "long" and current_price <= sl_price) or (direction.lower() == "short" and current_price >= sl_price):
                 trade["exited"] = True
                 await send_telegram_message(f"❌ <b>SL Hit</b> on <b>{symbol}</b>")
                 write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
@@ -225,15 +295,14 @@ async def monitor_trades(live_candles):
                 save_active_trades()
                 continue
 
-                if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("smart_pump_alerted"):
-                    recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
-                    pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
-                    if pump_move >= TP1_PUMP_THRESHOLD:
-                        trade["smart_pump_alerted"] = True
-                        await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
-                        write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
-
+        # Post-TP1 pump detection
+        if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("smart_pump_alerted"):
+            recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
+            pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
+            if pump_move >= TP1_PUMP_THRESHOLD:
+                trade["smart_pump_alerted"] = True
+                await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
+                write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
+                save_active_trades()
 
     save_active_trades()
-
-load_active_trades()
