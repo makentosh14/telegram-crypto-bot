@@ -1,308 +1,277 @@
-import json
-import os
-import time
-from datetime import datetime, timedelta
-from score import score_symbol
-from pattern_detector import detect_pattern
-from volume import get_average_volume
-from logger import log, write_log
-from exit_manager import should_trail_stop
-from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
-from ai_memory import log_trade_result
-from activity_logger import log_trade_to_file
-from bybit_api import signed_request, check_order_exists, place_stop_loss
+from bybit_api import signed_request, get_futures_available_balance
+from symbol_utils import get_symbol_category
+from config import DEFAULT_LEVERAGE
+from logger import log
+from error_handler import send_telegram_message
+from atr import calculate_atr
+from activity_logger import write_log, log_trade_to_file
+from symbol_info import round_qty, symbol_precisions
+from datetime import datetime
+import asyncio
 
-PERSIST_PATH = "monitor_active_trades.json"
-active_trades = {}
-startup_time = time.time()
 
-POST_EXIT_CANDLE_COUNT = 5
-TP1_PUMP_CANDLE_LOOKAHEAD = 4
-TP1_PUMP_THRESHOLD = 1.2
+def calculate_quantity(symbol, raw_qty):
+    if raw_qty <= 0:
+        return 0
+    min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+    rounded_qty = round_qty(symbol, raw_qty)
+    if rounded_qty < min_qty:
+        return 0
+    return rounded_qty
 
-MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
-def save_active_trades():
+def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence):
+    atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
+    atr_tf = atr_tf_map.get(trade_type, '15')
+    candles = candles_by_tf.get(atr_tf)
+    atr = calculate_atr(candles) if candles else None
+
+    atr_factor = 1.2
+    if atr:
+        sl_distance = atr * atr_factor
+        sl_pct = (sl_distance / price) * 100
+    else:
+        if confidence >= 85 and score >= 7.5:
+            sl_pct = 1.5
+        elif confidence < 60 or score < 6:
+            sl_pct = 0.6
+        else:
+            sl_pct = 1.0
+
+    tp1_pct = sl_pct * 1.8
+    trailing_pct = sl_pct * 0.5
+
+    if direction == "long":
+        sl = round(price * (1 - sl_pct / 100), 6)
+        tp1 = round(price * (1 + tp1_pct / 100), 6)
+    else:
+        sl = round(price * (1 + sl_pct / 100), 6)
+        tp1 = round(price * (1 - tp1_pct / 100), 6)
+
+    return sl, tp1, sl_pct, trailing_pct, tp1_pct
+
+
+async def execute_trade_if_valid(signal_data, max_risk=0.06):
+    symbol = signal_data["symbol"]
+    category = get_symbol_category(symbol)
+    trade_type = signal_data.get("trade_type", "Intraday")
+    direction = signal_data.get("direction", "Long").strip().lower()
+
+    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
+
     try:
-        with open(PERSIST_PATH, 'w') as f:
-            json.dump(active_trades, f, indent=2)
-    except Exception as e:
-        log(f"❌ Failed to save trades: {e}", level="ERROR")
+        usdt_balance = await get_futures_available_balance()
+        if usdt_balance <= 0:
+            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Futures available balance is 0.")
+            return None
 
-def load_active_trades():
-    global active_trades
-    if os.path.exists(PERSIST_PATH):
-        try:
-            now = datetime.utcnow()
-            with open(PERSIST_PATH, 'r') as f:
-                loaded_trades = json.load(f)
-            for symbol, trade in loaded_trades.items():
-                trade_time = trade.get("timestamp")
-                if trade.get("exited"):
-                    continue
-                if trade_time:
-                    try:
-                        trade_dt = datetime.strptime(trade_time, "%Y-%m-%d %H:%M:%S")
-                        if now - trade_dt > timedelta(hours=24):
-                            continue
-                    except:
-                        continue
-                trade["exited"] = False
-                active_trades[symbol] = trade
-            log(f"🔁 Loaded {len(active_trades)} active trades from disk")
-        except Exception as e:
-            log(f"❌ Failed to load active trades: {e}", level="ERROR")
+        price = float(signal_data.get("price", 1.0))
+        planned_entry = price
+        leverage = DEFAULT_LEVERAGE
+        risk_amount = usdt_balance * max_risk
+        position_value = risk_amount * leverage
+        raw_qty = position_value / price
+        qty = calculate_quantity(symbol, raw_qty)
 
-def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
-    active_trades[symbol] = {
-        "score_history": [initial_score],
-        "trade_type": trade_type,
-        "entry_price": entry_price,
-        "direction": direction,
-        "cycles": 0,
-        "exited": False,
-        "trailing_pct": trailing_pct,
-        "trailing_sl": None,
-        "original_sl": sl,
-        "tp1_hit": False,
-        "tp1_partial_exit": False,
-        "sl_order_id": sl_order_id,
-        "qty": qty,
-        "break_even_triggered": False,
-        "tp1_price": None,
-        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    }
-    save_active_trades()
+        if qty <= 0:
+            await send_telegram_message(f"⚠️ Skipped <b>{symbol}</b>: Quantity too small.")
+            return None
 
-def remove_trade(symbol):
-    if symbol in active_trades:
-        del active_trades[symbol]
-        save_active_trades()
+        score = signal_data.get("score", 5)
+        confidence = signal_data.get("confidence", 60)
+        candles_by_tf = signal_data.get("candles")
+        indicator_scores = signal_data.get("indicator_scores", {})
+        used_indicators = signal_data.get("used_indicators", {})
 
-async def check_and_restore_sl(symbol, trade):
-    """Enhanced function to check for and restore missing stop-loss orders"""
-    from telegram_bot import send_telegram_message
-    
-    # Don't try to restore SL if we don't have the necessary information
-    if not trade or trade.get("exited") or not trade.get("qty"):
-        return
-        
-    sl_order_id = trade.get("sl_order_id")
-    
-    # Check if SL exists - First verify we have an ID to check
-    sl_exists = False
-    if sl_order_id:
-        try:
-            # Use the new check_order_exists function from bybit_api
-            sl_exists = await check_order_exists(sl_order_id, symbol)
-            log(f"🔍 SL order check for {symbol}: {'Exists' if sl_exists else 'Missing'}")
-        except Exception as e:
-            log(f"❌ Error checking SL order: {e}", level="ERROR")
-    
-    # If SL doesn't exist or we don't have an SL order ID, recreate it
-    if not sl_exists:
-        try:
-            direction = trade.get("direction", "").lower()
-            qty = trade.get("qty")
-            
-            # Try to use the trailing SL if available, otherwise use original SL or fallback to entry price with buffer
-            entry_price = trade.get("entry_price")
-            if not entry_price:
-                log(f"❌ Cannot restore SL for {symbol}: No entry price available", level="ERROR")
-                return
-                
-            sl_price = None
-            if trade.get("trailing_sl"):
-                sl_price = trade.get("trailing_sl")
-                log(f"🔄 Using trailing SL price: {sl_price}")
-            elif trade.get("original_sl"):
-                sl_price = trade.get("original_sl") 
-                log(f"🔄 Using original SL price: {sl_price}")
+        await signed_request("POST", "/v5/position/set-leverage", {
+            "category": "linear",
+            "symbol": symbol,
+            "buyLeverage": str(leverage),
+            "sellLeverage": str(leverage)
+        })
+
+        await signed_request("POST", "/v5/order/cancel-all", {"category": category})
+
+        order_payload = {
+            "category": category,
+            "symbol": symbol,
+            "side": "Buy" if direction == "long" else "Sell",
+            "orderType": "Market",
+            "qty": str(qty),
+            "timeInForce": "IOC"
+        }
+
+        order_result = await signed_request("POST", "/v5/order/create", order_payload)
+
+        if order_result.get("retCode") == 0:
+            executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+            sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                candles_by_tf, executed_entry, trade_type, direction, score, confidence
+            )
+
+            if direction == "long" and executed_entry < planned_entry:
+                diff_pct = (planned_entry - executed_entry) / planned_entry
+                sl = round(sl * (1 - diff_pct), 6)
+                log(f"🔧 Adjusted SL down by {diff_pct:.4f} for lower-than-expected entry")
+            elif direction == "short" and executed_entry > planned_entry:
+                diff_pct = (executed_entry - planned_entry) / planned_entry
+                sl = round(sl * (1 + diff_pct), 6)
+                log(f"🔧 Adjusted SL up by {diff_pct:.4f} for higher-than-expected short entry")
             else:
-                # Fallback: Calculate a safety SL from entry price
-                if direction == "long":
-                    sl_price = round(entry_price * (1 - MIN_SL_BUFFER * 2), 6)
-                else:
-                    sl_price = round(entry_price * (1 + MIN_SL_BUFFER * 2), 6)
-                log(f"⚠️ No SL price found, using fallback from entry: {sl_price}")
-            
-            # Place the new SL order using our improved function
-            sl_resp = await place_stop_loss(symbol, direction, qty, sl_price)
-            
-            if sl_resp.get("retCode") == 0:
-                new_sl_order_id = sl_resp.get("result", {}).get("orderId")
-                trade["sl_order_id"] = new_sl_order_id
-                await send_telegram_message(f"🛡️ <b>SL Restored</b> for {symbol} at {sl_price}")
-                write_log(f"SL RESTORED: {symbol} | Price: {sl_price} | Order ID: {new_sl_order_id}")
-                log(f"✅ SL restored for {symbol} at {sl_price}")
-                save_active_trades()
+                log("✅ No SL adjustment needed based on entry slippage")
+
+            MIN_SL_BUFFER = 0.0035
+            try:
+                ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
+                mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
+            except:
+                mark_price = executed_entry
+                log("⚠️ Failed to fetch markPrice, using entry price")
+
+            if direction == "long":
+                trigger_direction = 1
+                if sl >= mark_price:
+                    sl = round(mark_price * (1 - MIN_SL_BUFFER), 6)
             else:
-                log(f"❌ Failed to restore SL for {symbol}: {sl_resp.get('retMsg')}", level="ERROR")
-                await send_telegram_message(f"⚠️ <b>SL Restoration Failed</b> for {symbol}: {sl_resp.get('retMsg')}")
-        except Exception as e:
-            log(f"❌ Error restoring SL for {symbol}: {e}", level="ERROR")
-            write_log(f"ERROR RESTORING SL: {symbol} | {str(e)}")
+                trigger_direction = 2
+                if sl <= mark_price:
+                    sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
 
-async def monitor_trades(live_candles):
-    from telegram_bot import send_telegram_message
-    update_exit_cooldowns()
+            side = "Sell" if direction == "long" else "Buy"
 
-    if time.time() - startup_time < 120:
-        log("⏳ Grace period active, skipping trade exit checks...")
-        return
+            log(f"🧪 SL Debug [1st Attempt] | {symbol} | Dir: {direction} | Entry: {executed_entry} | SL: {sl} | Mark: {mark_price} | TriggerDir: {trigger_direction}")
 
-    for symbol, trade in list(active_trades.items()):
-        if trade.get("exited"):
-            continue
+            min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+            qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-        if not trade.get("entry_price") or not trade.get("direction"):
-            write_log(f"🚫 Skipping ghost trade: {symbol} — Missing entry data")
-            continue
+            tp1_task = signed_request("POST", "/v5/order/create", {
+                "category": category,
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Limit",
+                "qty": str(qty_half),
+                "price": str(tp1),
+                "timeInForce": "GTC",
+                "reduceOnly": True
+            })
 
-        trade_type = trade["trade_type"]
-        direction = trade["direction"]
-        entry_price = trade["entry_price"]
-
-        if symbol not in live_candles:
-            continue
-
-        try:
-            candles_by_tf = {
-                tf: list(live_candles[symbol][str(tf)]) for tf in ['1', '3', '5', '15', '30', '60', '240']
+            sl_payload = {
+                "category": category,
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "triggerPrice": str(sl),
+                "triggerDirection": trigger_direction,
+                "triggerBy": "MarkPrice",
+                "qty": str(qty),
+                "reduceOnly": True,
+                "timeInForce": "GTC",
+                "orderFilter": "Stop"
             }
-        except Exception as e:
-            log(f"Monitor: Failed to fetch candles for {symbol}: {e}", level="ERROR")
-            write_log(f"MONITOR ERROR: {symbol} candle fetch failed: {e}", level="ERROR")
-            continue
 
-        score, tf_scores, _, _, used_list = score_symbol(symbol, candles_by_tf)
-        trade["score_history"].append(score)
-        trade["cycles"] += 1
+            sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
 
-        current_price = float(candles_by_tf['1'][-1]['close'])
-        trailing_pct = trade.get("trailing_pct")
+            if sl_result.get("retCode") != 0:
+                log(f"❌ Initial SL rejected — RetCode {sl_result.get('retCode')} | RetMsg: {sl_result.get('retMsg')}", level="ERROR")
+                log(f"🪵 SL Payload (1st try): {sl_payload}", level="ERROR")
 
-        # Check and restore SL first - ALWAYS do this before any other logic
-        await check_and_restore_sl(symbol, trade)
-
-        if trade.get("tp1_hit") and trailing_pct:
-           current_trailing_sl = trade.get("trailing_sl")
-           new_sl = should_trail_stop(
-               symbol=symbol,
-               entry_price=entry_price,
-               current_price=current_price,
-               direction=direction.lower(),
-               candles=candles_by_tf['1'],
-               trigger_pct=trailing_pct * 2,
-               trail_pct=trailing_pct,
-               current_trailing_sl=current_trailing_sl
-           )
-           if new_sl and (current_trailing_sl is None or
-                          (direction.lower() == "long" and new_sl > current_trailing_sl) or
-                          (direction.lower() == "short" and new_sl < current_trailing_sl)):
-               trade["trailing_sl"] = new_sl
-               
-               # Update the actual SL order in Bybit when we move the trailing SL
-               try:
-                   # Cancel existing SL
-                   if trade.get("sl_order_id"):
-                       await signed_request("POST", "/v5/order/cancel", {
-                           "category": "linear",
-                           "symbol": symbol,
-                           "orderId": trade["sl_order_id"]
-                       })
-                   
-                   # Place new SL
-                   sl_resp = await place_stop_loss(
-                       symbol=symbol,
-                       direction=direction.lower(),
-                       qty=trade.get("qty"),
-                       sl_price=new_sl
-                   )
-                   
-                   if sl_resp.get("retCode") == 0:
-                       trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
-                       await send_telegram_message(f"🔐 <b>Trailing SL Updated</b> for {symbol} | New SL: {new_sl}")
-                       log(f"🔐 Smart SL updated for {symbol} to {new_sl}")
-                       write_log(f"TRAILING SL UPDATED: {symbol} | New SL: {new_sl} | Price: {current_price}")
-                       save_active_trades()
-                   else:
-                       log(f"❌ Failed to update trailing SL: {sl_resp.get('retMsg')}", level="ERROR")
-               except Exception as e:
-                   log(f"❌ Error updating trailing SL: {e}", level="ERROR")
-
-        # Trail SL hit check
-        if trade.get("tp1_hit") and trade.get("trailing_sl"):
-            trailing_sl = trade["trailing_sl"]
-            if (direction.lower() == "long" and current_price <= trailing_sl) or (direction.lower() == "short" and current_price >= trailing_sl):
-                trade["exited"] = True
-                await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
-                write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
-                log_trade_result(symbol, tf_scores, "breakeven")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, current_price, "breakeven", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
-                save_active_trades()
-                continue
-
-        # TP1 hit check
-        if not trade.get("tp1_hit") and direction and entry_price:
-            tp1_level = entry_price * (1.018 if direction.lower() == "long" else 0.982)
-            if (direction.lower() == "long" and current_price >= tp1_level) or (direction.lower() == "short" and current_price <= tp1_level):
-                trade["tp1_hit"] = True
-                trade["break_even_triggered"] = True
-                trade["tp1_price"] = current_price
-                trade["trailing_sl"] = entry_price
-                
-                # Update the actual SL order when TP1 is hit
                 try:
-                    # Cancel existing SL
-                    if trade.get("sl_order_id"):
-                        await signed_request("POST", "/v5/order/cancel", {
-                            "category": "linear",
-                            "symbol": symbol,
-                            "orderId": trade["sl_order_id"]
-                        })
-                    
-                    # Place new break-even SL
-                    sl_resp = await place_stop_loss(
-                        symbol=symbol,
-                        direction=direction.lower(),
-                        qty=trade.get("qty"),
-                        sl_price=entry_price
-                    )
-                    
-                    if sl_resp.get("retCode") == 0:
-                        trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
-                    else:
-                        log(f"❌ Failed to set break-even SL: {sl_resp.get('retMsg')}", level="ERROR")
-                except Exception as e:
-                    log(f"❌ Error setting break-even SL: {e}", level="ERROR")
-                
-                await send_telegram_message(f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b> — Smart Trailing SL Activated at Break-even")
-                write_log(f"TP1 HIT: {symbol} | SL moved to break-even: {entry_price}")
-                log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
-                save_active_trades()
+                    ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
+                    mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
+                except:
+                    mark_price = executed_entry
+                    log("⚠️ Failed to fetch markPrice during SL retry, using entry price again")
 
-        # Original SL hit check
-        if not trade.get("tp1_hit") and trade.get("original_sl"):
-            sl_price = trade["original_sl"]
-            if (direction.lower() == "long" and current_price <= sl_price) or (direction.lower() == "short" and current_price >= sl_price):
-                trade["exited"] = True
-                await send_telegram_message(f"❌ <b>SL Hit</b> on <b>{symbol}</b>")
-                write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
-                log_exit(symbol, score)
-                log_trade_result(symbol, tf_scores, "loss")
-                log_trade_to_file(symbol, direction, entry_price, sl_price, None, current_price, "loss", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
-                save_active_trades()
-                continue
+                if direction == "long":
+                    trigger_direction = 1
+                    sl = round(mark_price * (1 - 0.005), 6)
+                    reason = "Long: SL must be BELOW markPrice"
+                else:
+                    trigger_direction = 2
+                    sl = round(mark_price * (1 + 0.005), 6)
+                    reason = "Short: SL must be ABOVE markPrice"
 
-        # Post-TP1 pump detection
-        if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("smart_pump_alerted"):
-            recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
-            pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
-            if pump_move >= TP1_PUMP_THRESHOLD:
-                trade["smart_pump_alerted"] = True
-                await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
-                write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
-                save_active_trades()
+                sl_payload = {
+                    "category": category,
+                    "symbol": symbol,
+                    "side": "Sell" if direction == "long" else "Buy",
+                    "orderType": "Market",
+                    "triggerPrice": str(sl),
+                    "triggerDirection": trigger_direction,
+                    "triggerBy": "LastPrice",
+                    "qty": str(qty),
+                    "reduceOnly": True,
+                    "timeInForce": "GTC",
+                    "orderFilter": "Stop"
+                }
 
-    save_active_trades()
+                log(f"🔁 Retrying SL | Symbol: {symbol} | Direction: {direction} | SL: {sl} | MarkPrice: {mark_price} | TriggerDir: {trigger_direction} | Reason: {reason}")
+
+                sl_result = await signed_request("POST", "/v5/order/create", sl_payload)
+                log(f"🔁 Retry SL response: {sl_result}")
+
+            tp1_result = await tp1_task
+            log(f"📤 TP1 response: {tp1_result}")
+            log(f"📤 SL response: {sl_result}")
+
+            sl_order_id = sl_result.get("result", {}).get("orderId")
+
+            log_trade_to_file(
+                symbol=symbol,
+                direction=direction,
+                entry=executed_entry,
+                sl=sl,
+                tp1=tp1,
+                tp2=None,
+                result="open",
+                score=score,
+                trade_type=trade_type,
+                confidence=confidence,
+                tf_scores=signal_data.get("tf_scores", {}),
+                indicator_scores=indicator_scores,
+                used_indicators=used_indicators,
+                pattern_detected=signal_data.get("pattern"),
+                whale_signal=signal_data.get("whale", False),
+                volume_spike=signal_data.get("volume_spike", False),
+                sl_strategy=f"ATR-{trade_type}"
+            )
+
+            await send_telegram_message(
+                f"📣 <b>{trade_type} {direction.upper()} Executed</b>\n"
+                f"Symbol: <b>{symbol}</b>\n"
+                f"Qty: {qty} (TP1 only)\n"
+                f"SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1}\n"
+                f"Trailing SL activates after TP1 hit ({trailing_pct:.2f}% base)"
+            )
+
+            return {
+                "entry": executed_entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": None,
+                "qty": qty,
+                "type": trade_type,
+                "direction": direction,
+                "symbol": symbol,
+                "sl_pct": sl_pct,
+                "tp1_pct": tp1_pct,
+                "tp2_pct": None,
+                "trailing_pct": trailing_pct,
+                "indicator_scores": indicator_scores,
+                "used_indicators": used_indicators,
+                "sl_order_id": sl_order_id
+            }
+
+        else:
+            await send_telegram_message(
+                f"❌ <b>Order Failed</b>\nSymbol: <b>{symbol}</b>\nReason: {order_result.get('retMsg')}"
+            )
+            log(f"❌ Order failed: {order_result}", level="ERROR")
+
+    except Exception as e:
+        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
+        await send_telegram_message(
+            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
+        )
+
+    return None
