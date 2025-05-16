@@ -60,7 +60,67 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 
-# OPTIMIZATION: Removed twap_execute_trade to make execution immediate
+# Optimized TWAP implementation for volatile markets only
+async def twap_execute_trade(symbol, qty, direction, category, slices=3, delay_sec=2):
+    """Optimized TWAP execution with reduced delays for volatile markets"""
+    slice_qty = round(qty / slices, 6)
+    side = "Buy" if direction == "long" else "Sell"
+    entries = []
+
+    log(f"🚀 Starting fast TWAP execution for {symbol} in {slices} slices...")
+
+    # Execute first slice immediately
+    log(f"📤 TWAP Slice 1/{slices}: {slice_qty} {side}")
+    try:
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Market",
+            "qty": str(slice_qty),
+            "timeInForce": "IOC"
+        })
+        if result.get("retCode") == 0:
+            price = float(result["result"].get("avgPrice") or 0)
+            if price > 0:
+                entries.append(price)
+    except Exception as e:
+        log(f"❌ TWAP First Slice Error: {e}", level="ERROR")
+
+    # Execute remaining slices with minimal delay
+    for i in range(1, slices):
+        task = asyncio.create_task(execute_twap_slice(symbol, category, side, slice_qty, entries))
+        # Use a very short delay between slices
+        await asyncio.sleep(delay_sec)
+    
+    # Wait for all slices to finish
+    await asyncio.sleep(delay_sec * (slices - 1) + 1)
+    
+    if entries:
+        avg_entry = round(sum(entries) / len(entries), 6)
+        log(f"🎯 Final Fast TWAP Entry Price: {avg_entry}")
+        return avg_entry
+    else:
+        log(f"❌ All TWAP slices failed for {symbol}")
+        return None
+
+async def execute_twap_slice(symbol, category, side, slice_qty, entries):
+    """Helper function to execute a single TWAP slice asynchronously"""
+    try:
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Market",
+            "qty": str(slice_qty),
+            "timeInForce": "IOC"
+        })
+        if result.get("retCode") == 0:
+            price = float(result["result"].get("avgPrice") or 0)
+            if price > 0:
+                entries.append(price)
+    except Exception as e:
+        log(f"❌ TWAP Slice Error: {e}", level="ERROR")
 
 # Cached balance values for faster execution
 _cached_balance = None
@@ -118,9 +178,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", {})
 
-        # OPTIMIZATION: Removed volume check as we already check this in scoring
-
-        # OPTIMIZATION: Set leverage in parallel with other operations
+        # OPTIMIZATION: Run leverage setting and order cancellation in parallel
         leverage_task = signed_request("POST", "/v5/position/set-leverage", {
             "category": category,
             "symbol": symbol,
@@ -128,7 +186,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "sellLeverage": str(leverage)
         })
 
-        # Cancel any existing orders to prevent conflicts
         cancel_task = signed_request("POST", "/v5/order/cancel-all", {
             "category": category, 
             "symbol": symbol
@@ -137,39 +194,46 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         # Wait for both tasks
         await asyncio.gather(leverage_task, cancel_task)
 
-        # OPTIMIZATION: Execute market order immediately
-        order_payload = {
-            "category": category,
-            "symbol": symbol,
-            "side": "Buy" if direction.lower() == "long" else "Sell",
-            "orderType": "Market",
-            "qty": str(qty),
-            "timeInForce": "IOC"
-        }
+        executed_entry = None
+        order_result = None
         
-        log(f"📤 Sending market order: {order_payload}")
-        order_result = await signed_request("POST", "/v5/order/create", order_payload)
-        log(f"📥 Order result: {order_result}")
+        # Use TWAP only for volatile markets, otherwise immediate execution
+        if regime == "volatile":
+            executed_entry = await twap_execute_trade(symbol, qty, direction, category, slices=3, delay_sec=2)
+            if not executed_entry:
+                await send_telegram_message(f"❌ <b>{symbol}</b> TWAP failed.")
+                return None
+        else:
+            # Execute market order immediately
+            order_payload = {
+                "category": category,
+                "symbol": symbol,
+                "side": "Buy" if direction.lower() == "long" else "Sell",
+                "orderType": "Market",
+                "qty": str(qty),
+                "timeInForce": "IOC"
+            }
         
-        # Process order result
-        if order_result.get("retCode") == 0:
-            executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+            log(f"📤 Sending market order: {order_payload}")
+            order_result = await signed_request("POST", "/v5/order/create", order_payload)
+            log(f"📥 Order result: {order_result}")
             
-            # OPTIMIZATION: Skip slippage check to execute immediately
+            if order_result.get("retCode") == 0:
+                executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
                 
+        # Only proceed if we have a valid entry price
+        if executed_entry:
+            # Calculate SL/TP based on actual entry price
             sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence, regime
             )
 
-            # OPTIMIZATION: Skip SL adjustment for immediate execution
-            
-            # Get market price for validation
+            # Get market price for SL validation
             try:
                 ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": category, "symbol": symbol})
                 mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", executed_entry))
-                log(f"📊 Got mark price: {mark_price}")
                 
-                # Validate SL is on the correct side of mark price
+                # Ensure SL is on the correct side of mark price
                 if direction.lower() == "long" and sl >= mark_price:
                     sl = round(mark_price * 0.995, 6)  # 0.5% below mark price
                     log(f"🔧 Adjusted Long SL to {sl} (below mark price {mark_price})")
@@ -183,7 +247,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
             qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
-            # OPTIMIZATION: Execute SL and TP orders in parallel
+            # Execute SL and TP orders in parallel
             from bybit_api import place_stop_loss
             sl_task = place_stop_loss(
                 symbol=symbol,
@@ -232,14 +296,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 whale_signal=signal_data.get("whale", False),
                 volume_spike=signal_data.get("volume_spike", False),
                 sl_strategy=f"ATR-{trade_type}"
-            )
-
-            # Send a minimal notification after trade execution (full detail sent in main.py)
-            await send_telegram_message(
-                f"✅ <b>{trade_type} {direction.upper()} Executed</b>\n"
-                f"Symbol: <b>{symbol}</b>\n"
-                f"Entry: {executed_entry}\n"
-                f"SL: {sl} | TP1: {tp1}"
             )
 
             return {
