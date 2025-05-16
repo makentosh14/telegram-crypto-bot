@@ -124,6 +124,7 @@ async def scan_for_new_signals(symbols):
                 f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
             )
 
+        # Check if score meets minimum thresholds
         if (trade_type == "Scalp" and score < adj_scalp) or \
            (trade_type == "Intraday" and score < adj_intraday) or \
            (trade_type == "Swing" and score < adj_swing):
@@ -132,6 +133,7 @@ async def scan_for_new_signals(symbols):
                 continue
             continue
 
+        # Check active signals
         if symbol in active_signals:
             data = active_signals[symbol]
             data['score_history'].append(score)
@@ -147,74 +149,76 @@ async def scan_for_new_signals(symbols):
                 await log_trade_result(symbol, "loss", -1.0)
             continue
 
-        if not is_duplicate_signal(symbol):
-            log(f"🔍 Checking new signal for {symbol} | Score: {score:.2f} | Direction: {direction} | Type: {trade_type}")
-            await asyncio.sleep(2)
-            re_score, re_tf_scores, re_type, _, _ = score_symbol(symbol, candles_by_tf)
-            re_direction = determine_direction(re_tf_scores)
-            if re_score < score or re_type != trade_type or re_direction != direction:
-                continue
+        # OPTIMIZATION: Move duplicate check earlier to avoid wasting time
+        if is_duplicate_signal(symbol):
+            continue
 
-            log_signal(symbol)
-            track_signal(symbol, score)
+        # OPTIMIZATION: Track signal and execute trade BEFORE notification
+        log_signal(symbol)
+        track_signal(symbol, score)
 
-            msg = format_trade_signal(
+        # Execute trade immediately before Telegram notification
+        trade = await execute_trade_if_valid({
+            "symbol": symbol,
+            "price": price,
+            "trade_type": trade_type,
+            "direction": direction,
+            "score": score,
+            "confidence": confidence,
+            "candles": candles_by_tf,
+            "indicator_scores": indicator_scores,
+            "used_indicators": used_indicators,
+            "tf_scores": tf_scores,
+            "pattern": extract_last_pattern(candles_by_tf),
+            "whale": detect_whale_activity(candles_by_tf.get("5", [])),
+            "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
+            "regime": regime
+        })
+
+        # Format and send notification message after trade is placed
+        msg = format_trade_signal(
+            symbol=symbol,
+            score=score,
+            tf_scores=tf_scores,
+            trend=trend_context,
+            entry_price=price,
+            sl=sl,
+            tp1=tp1,
+            trade_type=trade_type,
+            direction=direction,
+            trailing_pct=trailing_pct,
+            leverage=DEFAULT_LEVERAGE,
+            risk_pct=risk_pct,
+            confidence=confidence,
+            sl_pct=sl_pct
+        )
+
+        await send_telegram_message(msg)
+        active_signals[symbol] = {
+            'score': score,
+            'score_history': [score]
+        }
+
+        if trade:
+            log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
+            write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
+
+            track_active_trade(
                 symbol=symbol,
-                score=score,
-                tf_scores=tf_scores,
-                trend=trend_context,
-                entry_price=price,
-                sl=sl,
-                tp1=tp1,
                 trade_type=trade_type,
+                initial_score=score,
+                entry_price=price,
                 direction=direction,
-                trailing_pct=trailing_pct,
-                leverage=DEFAULT_LEVERAGE,
-                risk_pct=risk_pct,
-                confidence=confidence,
-                sl_pct=sl_pct
+                trailing_pct=trade.get("trailing_pct"),
+                tp2=None,
+                sl=trade.get("sl"),
+                qty=trade.get("qty"),
+                sl_order_id=trade.get("sl_order_id")
             )
 
-            await send_telegram_message(msg)
-            active_signals[symbol] = {
-                'score': score,
-                'score_history': [score]
-            }
-
-            trade = await execute_trade_if_valid({
-                "symbol": symbol,
-                "price": price,
-                "trade_type": trade_type,
-                "direction": direction,
-                "score": score,
-                "confidence": confidence,
-                "candles": candles_by_tf,
-                "indicator_scores": indicator_scores,
-                "used_indicators": used_indicators,
-                "tf_scores": tf_scores,
-                "pattern": extract_last_pattern(candles_by_tf),
-                "whale": detect_whale_activity(candles_by_tf.get("5", [])),
-                "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5)
-            })
-
-            if trade:
-                log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
-                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
-
-                track_active_trade(
-                    symbol=symbol,
-                    trade_type=trade_type,
-                    initial_score=score,
-                    entry_price=price,
-                    direction=direction,
-                    trailing_pct=trade.get("trailing_pct"),
-                    tp2=None,
-                    sl=trade.get("sl"),
-                    qty=trade.get("qty"),
-                    sl_order_id=trade.get("sl_order_id")
-                )
-
-                await verify_stop_loss_placement(symbol, trade, direction)
+            await verify_stop_loss_placement(symbol, trade, direction)
+        else:
+            log(f"⚠️ Trade execution failed for {symbol}")
 
         # ✅ Additional Strategy: Mean Reversion Logic
         if regime == "ranging":
@@ -226,6 +230,21 @@ async def scan_for_new_signals(symbols):
                 sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
                     candles_by_tf, price, "Scalp", rev_dir, rev_score, rev_conf, regime
                 )
+
+                # OPTIMIZATION: Execute trade BEFORE notification for mean reversion strategy
+                mr_trade = await execute_trade_if_valid({
+                    "symbol": symbol,
+                    "price": price,
+                    "trade_type": "Scalp",
+                    "direction": rev_dir,
+                    "score": rev_score,
+                    "confidence": rev_conf,
+                    "candles": candles_by_tf,
+                    "indicator_scores": {"mean_reversion": rev_score},
+                    "used_indicators": list(rev_reasons.keys()),
+                    "tf_scores": {"mean_reversion": rev_score},
+                    "regime": regime
+                })
 
                 msg = format_trade_signal(
                     symbol=symbol,
@@ -246,6 +265,20 @@ async def scan_for_new_signals(symbols):
                 msg += f"\n🧠 Mean Reversion Signal\nTriggers: {', '.join(rev_reasons.keys())}"
                 await send_telegram_message(msg)
 
+                if mr_trade:
+                    track_active_trade(
+                        symbol=symbol,
+                        trade_type="Scalp",
+                        initial_score=rev_score,
+                        entry_price=price,
+                        direction=rev_dir,
+                        trailing_pct=trailing_pct,
+                        tp2=None,
+                        sl=mr_trade.get("sl"),
+                        qty=mr_trade.get("qty"),
+                        sl_order_id=mr_trade.get("sl_order_id")
+                    )
+
         # ✅ Additional Strategy: Breakout Sniper Logic
         if regime == "volatile":
             bo_score, bo_dir, bo_conf, bo_reasons = score_breakout_sniper(symbol, candles_by_tf, regime)
@@ -256,6 +289,21 @@ async def scan_for_new_signals(symbols):
                 sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
                     candles_by_tf, price, "Scalp", bo_dir, bo_score, bo_conf, regime
                 )
+
+                # OPTIMIZATION: Execute trade BEFORE notification for breakout strategy
+                bo_trade = await execute_trade_if_valid({
+                    "symbol": symbol,
+                    "price": price,
+                    "trade_type": "Scalp",
+                    "direction": bo_dir,
+                    "score": bo_score,
+                    "confidence": bo_conf,
+                    "candles": candles_by_tf,
+                    "indicator_scores": {"breakout_sniper": bo_score},
+                    "used_indicators": list(bo_reasons.keys()),
+                    "tf_scores": {"breakout_sniper": bo_score},
+                    "regime": regime
+                })
 
                 msg = format_trade_signal(
                     symbol=symbol,
@@ -275,6 +323,20 @@ async def scan_for_new_signals(symbols):
                 )
                 msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
                 await send_telegram_message(msg)
+
+                if bo_trade:
+                    track_active_trade(
+                        symbol=symbol,
+                        trade_type="Scalp",
+                        initial_score=bo_score,
+                        entry_price=price,
+                        direction=bo_dir,
+                        trailing_pct=trailing_pct,
+                        tp2=None,
+                        sl=bo_trade.get("sl"),
+                        qty=bo_trade.get("qty"),
+                        sl_order_id=bo_trade.get("sl_order_id")
+                    )
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
