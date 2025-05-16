@@ -41,7 +41,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     tp1_pct = sl_pct * 1.8
     trailing_pct = sl_pct * 0.5
 
-    if direction.lower() == "long":
+    if direction == "long":
         sl = round(price * (1 - sl_pct / 100), 6)
         tp1 = round(price * (1 + tp1_pct / 100), 6)
     else:
@@ -55,7 +55,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     symbol = signal_data["symbol"]
     category = get_symbol_category(symbol)
     trade_type = signal_data.get("trade_type", "Intraday")
-    direction = signal_data.get("direction", "Long")
+    direction = signal_data.get("direction", "Long").strip().lower()
 
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
@@ -95,7 +95,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         order_payload = {
             "category": category,
             "symbol": symbol,
-            "side": "Buy" if direction.lower() == "long" else "Sell",
+            "side": "Buy" if direction == "long" else "Sell",
             "orderType": "Market",
             "qty": str(qty),
             "timeInForce": "IOC"
@@ -109,11 +109,11 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence
             )
 
-            if direction.lower() == "long" and executed_entry < planned_entry:
+            if direction == "long" and executed_entry < planned_entry:
                 diff_pct = (planned_entry - executed_entry) / planned_entry
                 sl = round(sl * (1 - diff_pct), 6)
                 log(f"🔧 Adjusted SL down by {diff_pct:.4f} for lower-than-expected entry")
-            elif direction.lower() == "short" and executed_entry > planned_entry:
+            elif direction == "short" and executed_entry > planned_entry:
                 diff_pct = (executed_entry - planned_entry) / planned_entry
                 sl = round(sl * (1 + diff_pct), 6)
                 log(f"🔧 Adjusted SL up by {diff_pct:.4f} for higher-than-expected short entry")
@@ -128,7 +128,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 mark_price = executed_entry
                 log("⚠️ Failed to fetch markPrice, using entry price")
 
-            if direction.lower() == "long":
+            if direction == "long":
                 trigger_direction = 1
                 if sl >= mark_price:
                     sl = round(mark_price * (1 - MIN_SL_BUFFER), 6)
@@ -137,7 +137,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 if sl <= mark_price:
                     sl = round(mark_price * (1 + MIN_SL_BUFFER), 6)
 
-            side = "Sell" if direction.lower() == "long" else "Buy"
+            side = "Sell" if direction == "long" else "Buy"
 
             log(f"🧪 SL Debug [1st Attempt] | {symbol} | Dir: {direction} | Entry: {executed_entry} | SL: {sl} | Mark: {mark_price} | TriggerDir: {trigger_direction}")
 
@@ -182,7 +182,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                     mark_price = executed_entry
                     log("⚠️ Failed to fetch markPrice during SL retry, using entry price again")
 
-                if direction.lower() == "long":
+                if direction == "long":
                     trigger_direction = 1
                     sl = round(mark_price * (1 - 0.005), 6)
                     reason = "Long: SL must be BELOW markPrice"
@@ -194,7 +194,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 sl_payload = {
                     "category": category,
                     "symbol": symbol,
-                    "side": "Sell" if direction.lower() == "long" else "Buy",
+                    "side": "Sell" if direction == "long" else "Buy",
                     "orderType": "Market",
                     "triggerPrice": str(sl),
                     "triggerDirection": trigger_direction,
@@ -237,7 +237,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             )
 
             await send_telegram_message(
-                f"📣 <b>{trade_type} {direction} Executed</b>\n"
+                f"📣 <b>{trade_type} {direction.upper()} Executed</b>\n"
                 f"Symbol: <b>{symbol}</b>\n"
                 f"Qty: {qty} (TP1 only)\n"
                 f"SL: {sl} ({sl_pct:.2f}%) | TP1: {tp1}\n"
