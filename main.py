@@ -21,6 +21,7 @@ from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from ai_memory import load_memory
 from mean_reversion import score_mean_reversion
+from breakout_sniper import score_breakout_sniper
 
 load_memory()
 
@@ -221,6 +222,35 @@ async def scan_for_new_signals(symbols):
                 msg += f"\n🧠 Mean Reversion Signal\nTriggers: {', '.join(rev_reasons.keys())}"
                 await send_telegram_message(msg)
 
+        # ✅ Additional Strategy: Breakout Sniper Logic
+        if regime == "volatile":
+            bo_score, bo_dir, bo_conf, bo_reasons = score_breakout_sniper(symbol, candles_by_tf, regime)
+            if bo_score >= 4 and not is_duplicate_signal(symbol):
+                log_signal(symbol)
+                track_signal(symbol, bo_score)
+
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                    candles_by_tf, price, "Scalp", bo_dir, bo_score, bo_conf, regime
+                )
+
+                msg = format_trade_signal(
+                    symbol=symbol,
+                    score=bo_score,
+                    tf_scores={"breakout_sniper": bo_score},
+                    trend=trend_context,
+                    entry_price=price,
+                    sl=sl,
+                    tp1=tp1,
+                    trade_type="Scalp",
+                    direction=bo_dir,
+                    trailing_pct=trailing_pct,
+                    leverage=DEFAULT_LEVERAGE,
+                    risk_pct=6.5,
+                    confidence=bo_conf,
+                    sl_pct=sl_pct
+                )
+                msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
+                await send_telegram_message(msg)
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
