@@ -411,6 +411,14 @@ async def monitor_trades(live_candles):
                     write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
                     log_trade_result(symbol, tf_scores, "breakeven")
                     log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, current_price, "breakeven", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                    strategy = "core_strategy"
+                    if tf_scores.get("mean_reversion"):
+                        strategy = "mean_reversion"
+                    elif tf_scores.get("breakout_sniper"):
+                        strategy = "breakout_sniper"
+
+                    profit_pct = ((current_price - entry_price) / entry_price) * 100 if direction == "long" else ((entry_price - current_price) / entry_price) * 100
+                    log_strategy_result(strategy, "win", round(profit_pct, 2))
                     save_active_trades()
                     continue
 
@@ -431,6 +439,12 @@ async def monitor_trades(live_candles):
                     await send_telegram_message(f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b> — Smart Trailing SL Activated at Break-even")
                     write_log(f"TP1 HIT: {symbol} | SL moved to break-even: {entry_price}")
                     log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                    strategy = "core_strategy"
+                    if tf_scores.get("mean_reversion"):
+                        strategy = "mean_reversion"
+                    elif tf_scores.get("breakout_sniper"):
+                        strategy = "breakout_sniper"
+                    log_strategy_result(strategy, "breakeven", 0)
                     save_active_trades()
 
             # 6. Original SL hit check
@@ -443,6 +457,12 @@ async def monitor_trades(live_candles):
                     log_exit(symbol, score)
                     log_trade_result(symbol, tf_scores, "loss")
                     log_trade_to_file(symbol, direction, entry_price, sl_price, None, current_price, "loss", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                    strategy = "core_strategy"
+                    if tf_scores.get("mean_reversion"):
+                        strategy = "mean_reversion"
+                    elif tf_scores.get("breakout_sniper"):
+                         strategy = "breakout_sniper"
+                    log_strategy_result(strategy, "loss", -100)
                     save_active_trades()
                     continue
 
