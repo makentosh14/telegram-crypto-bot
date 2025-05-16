@@ -23,6 +23,7 @@ from ai_memory import load_memory
 from mean_reversion import score_mean_reversion
 from breakout_sniper import score_breakout_sniper
 from strategy_performance import get_strategy_stats
+from risk_manager import calculate_dynamic_risk
 
 load_memory()
 
@@ -85,6 +86,8 @@ async def scan_for_new_signals(symbols):
             strategy = "mean_reversion"
         elif tf_scores.get("breakout_sniper"):
             strategy = "breakout_sniper"
+       
+        risk_pct = calculate_dynamic_risk(symbol, confidence, strategy, base_risk)
 
         stats = get_strategy_stats(strategy)
         win_rate = stats["win_rate"]
