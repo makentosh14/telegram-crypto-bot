@@ -13,6 +13,7 @@ TELEGRAM_ASSISTANT_CHAT_ID = "-1000000000000"  # optional
 
 # === TRADING MODE ===
 TRADING_MODE = "auto"  # "auto" or "signal"
+RISK_SPOT = 0.03
 RISK_FUTURES = 0.09    # default 9% per futures trade
 DAILY_MAX_LOSS = 0.1   # max daily loss before auto pause (10%)
 
