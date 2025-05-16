@@ -86,7 +86,14 @@ async def scan_for_new_signals(symbols):
             strategy = "mean_reversion"
         elif tf_scores.get("breakout_sniper"):
             strategy = "breakout_sniper"
-       
+        
+       if trade_type == "Scalp":
+           base_risk = 0.09
+       elif trade_type == "Intraday":
+           base_risk = 0.06
+       else:
+           base_risk = 0.03
+           
         risk_pct = calculate_dynamic_risk(symbol, confidence, strategy, base_risk)
 
         stats = get_strategy_stats(strategy)
