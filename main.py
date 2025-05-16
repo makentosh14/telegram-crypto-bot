@@ -1,4 +1,3 @@
-<|diff_marker|> PATCH A
 import asyncio
 import traceback
 import time
@@ -21,6 +20,7 @@ from pattern_detector import detect_pattern
 from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from ai_memory import load_memory
+from mean_reversion import score_mean_reversion
 
 load_memory()
 
@@ -71,11 +71,8 @@ async def scan_for_new_signals(symbols):
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
 
+        # ---- Primary strategy scoring ----
         score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
-        if score <= -50:
-            log(f"❌ Skipping {symbol} — filtered due to low score ({score})")
-            continue
-
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
@@ -194,7 +191,36 @@ async def scan_for_new_signals(symbols):
 
                 await verify_stop_loss_placement(symbol, trade, direction)
 
-# The rest of the file remains unchanged...
+        # ✅ Additional Strategy: Mean Reversion Logic
+        if regime == "ranging":
+            rev_score, rev_dir, rev_conf, rev_reasons = score_mean_reversion(symbol, candles_by_tf, regime)
+            if rev_score >= 4 and not is_duplicate_signal(symbol):
+                log_signal(symbol)
+                track_signal(symbol, rev_score)
+
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                    candles_by_tf, price, "Scalp", rev_dir, rev_score, rev_conf, regime
+                )
+
+                msg = format_trade_signal(
+                    symbol=symbol,
+                    score=rev_score,
+                    tf_scores={"mean_reversion": rev_score},
+                    trend=trend_context,
+                    entry_price=price,
+                    sl=sl,
+                    tp1=tp1,
+                    trade_type="Scalp",
+                    direction=rev_dir,
+                    trailing_pct=trailing_pct,
+                    leverage=DEFAULT_LEVERAGE,
+                    risk_pct=6.0,
+                    confidence=rev_conf,
+                    sl_pct=sl_pct
+                )
+                msg += f"\n🧠 Mean Reversion Signal\nTriggers: {', '.join(rev_reasons.keys())}"
+                await send_telegram_message(msg)
+
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
