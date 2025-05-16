@@ -156,6 +156,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         await signed_request("POST", "/v5/order/cancel-all", {"category": category, "symbol": symbol})
 
         executed_entry = None
+        order_result = None
+        
         if regime == "volatile":
             executed_entry = await twap_execute_trade(symbol, qty, direction, category)
             if not executed_entry:
@@ -174,9 +176,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📤 Sending market order: {order_payload}")
             order_result = await signed_request("POST", "/v5/order/create", order_payload)
             log(f"📥 Order result: {order_result}")
-
-        if order_result.get("retCode") == 0:
-            executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+            
+            if order_result.get("retCode") == 0:
+                executed_entry = float(order_result.get("result", {}).get("avgPrice", price)) or price
+                
+        # Only proceed if we have a valid entry price, either from TWAP or market order
+        if executed_entry:
             slippage = abs(executed_entry - planned_entry) / planned_entry
             if slippage > 0.0035:
                 await send_telegram_message(f"⚠️ <b>{symbol}</b> skipped — slippage > 0.35%")
@@ -322,10 +327,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "used_indicators": used_indicators,
                 "sl_order_id": sl_order_id
             }
-
         else:
             await send_telegram_message(
-                f"❌ <b>Order Failed</b>\nSymbol: <b>{symbol}</b>\nReason: {order_result.get('retMsg')}"
+                f"❌ <b>Order Failed</b>\nSymbol: <b>{symbol}</b>\nReason: {order_result.get('retMsg') if order_result else 'No execution price'}"
             )
             log(f"❌ Order failed: {order_result}", level="ERROR")
 
