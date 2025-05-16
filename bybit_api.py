@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import json
 import time
+import traceback
 from logger import log
 
 # === CONFIG ===
@@ -10,10 +11,6 @@ BYBIT_API_URL = "https://api.bybit.com"
 # Replace with your API keys - DO NOT expose these in code
 BYBIT_API_KEY = "NuGJJSlzNeQG2bMb8h"  
 BYBIT_API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"  
-
-# === SIGNATURE UTILITY ===
-def create_signature(secret, payload):
-    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 # === SIGNATURE UTILITY ===
 def create_signature(secret, payload):
@@ -197,15 +194,18 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
         ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
         mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
         
-        # IMPORTANT FIX: Make sure SL is on the correct side of mark price
+        # Add safety check to make sure SL is on the correct side of mark price
         if direction.lower() == "long" and sl_price >= mark_price:
-            # For long positions, SL must be below current price
+            old_sl = sl_price
             sl_price = round(mark_price * 0.995, 6)  # 0.5% below mark price
-            log(f"⚠️ Adjusted long SL to be below mark price: {sl_price}", level="WARN")
+            log(f"⚠️ Adjusted long SL from {old_sl} to {sl_price} (below mark price {mark_price})", level="WARN")
         elif direction.lower() == "short" and sl_price <= mark_price:
-            # For short positions, SL must be above current price
+            old_sl = sl_price
             sl_price = round(mark_price * 1.005, 6)  # 0.5% above mark price
-            log(f"⚠️ Adjusted short SL to be above mark price: {sl_price}", level="WARN")
+            log(f"⚠️ Adjusted short SL from {old_sl} to {sl_price} (above mark price {mark_price})", level="WARN")
+            
+        # Important debug message to understand the relationship between SL and current price
+        log(f"🧪 SL Debug | {symbol} | Dir: {direction} | Mark: {mark_price} | SL: {sl_price} | TriggerDir: {trigger_direction}")
     except Exception as e:
         log(f"❌ Failed to fetch mark price for SL check: {e}", level="ERROR")
     
@@ -233,6 +233,121 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
         sl_payload["triggerBy"] = "LastPrice"
         log(f"🔄 Retrying SL with LastPrice: {sl_payload}")
         result = await signed_request("POST", "/v5/order/create", sl_payload)
+        
+        # If still failing, try one more approach with increased buffer
+        if result.get("retCode") != 0:
+            log(f"❌ Second SL attempt failed: {result.get('retMsg')}", level="ERROR")
+            
+            # Add more buffer to make sure SL is at a valid price
+            if direction.lower() == "long":
+                sl_price = round(mark_price * 0.99, 6)  # 1% below mark price
+            else:
+                sl_price = round(mark_price * 1.01, 6)  # 1% above mark price
+                
+            sl_payload["triggerPrice"] = str(sl_price)
+            log(f"🔄 Final SL attempt with more buffer: {sl_price}")
+            result = await signed_request("POST", "/v5/order/create", sl_payload)
+    
+    return result
+
+async def place_stop_loss_with_retry(symbol, direction, qty, sl_price, market_type="linear", max_attempts=3):
+    """Enhanced stop loss placement with exponential backoff retries"""
+    attempt = 0
+    delay = 1  # Start with 1 second delay
+    
+    while attempt < max_attempts:
+        try:
+            result = await place_stop_loss(symbol, direction, qty, sl_price, market_type)
+            
+            if result.get("retCode") == 0:
+                log(f"✅ SL order placed successfully for {symbol} on attempt {attempt+1}")
+                return result
+                
+            # Handle specific error codes that might be temporary
+            if result.get("retCode") in [10002, 10006, 10010]:  # Rate limit or temporary server issues
+                log(f"⚠️ Temporary error placing SL for {symbol}: {result.get('retMsg')}", level="WARN")
+                await asyncio.sleep(delay)
+                attempt += 1
+                delay *= 2  # Exponential backoff
+                continue
+            else:
+                # For permanent errors, try a different approach
+                return await fallback_stop_loss(symbol, direction, qty, sl_price, market_type)
+                
+        except Exception as e:
+            log(f"❌ Exception in SL placement for {symbol}: {e}", level="ERROR")
+            await asyncio.sleep(delay)
+            attempt += 1
+            delay *= 2
+            
+    # If we get here, all attempts failed
+    from error_handler import send_telegram_message
+    await send_telegram_message(f"⚠️ <b>Critical SL Failure</b> for {symbol} after {max_attempts} attempts")
+    return {"retCode": -1, "retMsg": f"Failed after {max_attempts} attempts"}
+
+async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="linear"):
+    """Alternative approach for placing stop loss when standard method fails"""
+    
+    # Try a conditional order approach as fallback
+    side = "Sell" if direction.lower() == "long" else "Buy"
+    
+    # First, try a StopLimit order 
+    fallback_payload = {
+        "category": market_type,
+        "symbol": symbol,
+        "side": side,
+        "orderType": "Limit",  # Try limit instead of market
+        "price": str(sl_price),  # Add limit price
+        "triggerPrice": str(sl_price),
+        "triggerBy": "LastPrice",  # Try LastPrice as another alternative
+        "qty": str(qty),
+        "reduceOnly": True,
+        "timeInForce": "GTC",
+        "orderFilter": "StopLimit"  # Change to StopLimit order
+    }
+    
+    log(f"🔄 Using fallback StopLimit SL for {symbol}: {fallback_payload}")
+    result = await signed_request("POST", "/v5/order/create", fallback_payload)
+    
+    # If StopLimit also fails, try a conditional TP order as SL (last resort)
+    if result.get("retCode") != 0:
+        log(f"❌ StopLimit fallback failed: {result.get('retMsg')}", level="ERROR")
+        
+        # Get current price
+        try:
+            ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
+            mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
+            
+            # For long positions: if SL < mark, use TakeProfit
+            # For short positions: if SL > mark, use TakeProfit
+            if (direction.lower() == "long" and sl_price < mark_price) or (direction.lower() == "short" and sl_price > mark_price):
+                last_resort_payload = {
+                    "category": market_type,
+                    "symbol": symbol,
+                    "side": side,
+                    "orderType": "Market",
+                    "triggerPrice": str(sl_price),
+                    "qty": str(qty),
+                    "reduceOnly": True,
+                    "timeInForce": "GTC",
+                    "orderFilter": "tpslOrder",
+                    "orderIv": "0",
+                    "tpslMode": "Partial",
+                    "tpOrderType": "Market",
+                    "slOrderType": "Market",
+                    "tpTriggerBy": "LastPrice",
+                    "slTriggerBy": "LastPrice"
+                }
+                
+                if direction.lower() == "long":
+                    last_resort_payload["takeProfit"] = str(sl_price)
+                else:
+                    last_resort_payload["stopLoss"] = str(sl_price)
+                
+                log(f"🆘 Last resort TP/SL approach for {symbol}: {last_resort_payload}")
+                result = await signed_request("POST", "/v5/order/create", last_resort_payload)
+        except Exception as e:
+            log(f"❌ Error in last resort SL approach: {e}", level="ERROR")
     
     return result
 
