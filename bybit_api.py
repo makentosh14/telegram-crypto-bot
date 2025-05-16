@@ -8,8 +8,8 @@ from logger import log
 # === CONFIG ===
 BYBIT_API_URL = "https://api.bybit.com"
 # Replace with your API keys - DO NOT expose these in code
-BYBIT_API_KEY = "YOUR_API_KEY"  
-BYBIT_API_SECRET = "YOUR_API_SECRET"  
+BYBIT_API_KEY = "NuGJJSlzNeQG2bMb8h"  
+BYBIT_API_SECRET = "njckVADwWy8YQ3BbcXrgkp68yw1r6lYyGedj"  
 
 # === SIGNATURE UTILITY ===
 def create_signature(secret, payload):
