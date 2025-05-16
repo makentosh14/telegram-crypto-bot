@@ -14,7 +14,7 @@ from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
 from activity_logger import write_log, log_trade_to_file
-from monitor import track_active_trade, monitor_trades, load_active_trades
+from monitor import track_active_trade, monitor_trades, load_active_trades, check_and_restore_sl
 from pattern_detector import detect_pattern
 from volume import is_volume_spike
 from whale_detector import detect_whale_activity
@@ -174,6 +174,29 @@ async def scan_for_new_signals(symbols):
                     qty=trade.get("qty"),
                     sl_order_id=trade.get("sl_order_id")
                 )
+                
+                # Verify SL order immediately after tracking
+                await verify_stop_loss_placement(symbol, trade, direction)
+
+
+async def verify_stop_loss_placement(symbol, trade, direction):
+    """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
+    from monitor import check_and_restore_sl
+    
+    if not trade or not trade.get("sl_order_id"):
+        log(f"⚠️ No SL order ID found for {symbol}, attempting to restore", level="WARN")
+        # Create a temporary trade object with the minimum needed info for check_and_restore_sl
+        temp_trade = {
+            "direction": direction,
+            "qty": trade.get("qty"),
+            "original_sl": trade.get("sl"),
+            "entry_price": trade.get("entry"),
+            "exited": False
+        }
+        await check_and_restore_sl(symbol, temp_trade)
+        await send_telegram_message(f"🔄 <b>SL Verification</b>: Attempted to restore missing SL for {symbol}")
+    else:
+        log(f"✅ SL order confirmed for {symbol}: {trade.get('sl_order_id')}")
 
 
 async def monitor_loop():
@@ -184,6 +207,37 @@ async def monitor_loop():
             log(f"❌ Error in monitor loop: {e}", level="ERROR")
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(5)
+
+
+async def sl_verification_loop():
+    """New function to periodically verify all stop-losses for active trades"""
+    from telegram_bot import send_telegram_message
+    
+    while True:
+        try:
+            from monitor import active_trades
+            
+            # Only check after the bot has been running for at least 3 minutes
+            if time.time() - startup_time < 180:
+                await asyncio.sleep(30)
+                continue
+                
+            log(f"🛡️ Running SL verification for {len(active_trades)} active trades")
+            
+            for symbol, trade in active_trades.items():
+                if not trade or trade.get("exited"):
+                    continue
+                
+                await check_and_restore_sl(symbol, trade)
+                
+            log("✅ SL verification complete")
+            
+        except Exception as e:
+            log(f"❌ Error in SL verification loop: {e}", level="ERROR")
+            await send_error_to_telegram(f"SL verification error: {str(e)}")
+        
+        # Run every 15 minutes
+        await asyncio.sleep(900)
 
 
 async def pattern_discovery_loop(symbols):
@@ -231,6 +285,9 @@ async def run_bot():
     asyncio.create_task(pattern_discovery_loop(symbols))
     asyncio.create_task(pattern_match_loop(symbols))
     asyncio.create_task(pattern_summary_loop())
+    
+    # Add the new SL verification loop
+    asyncio.create_task(sl_verification_loop())
 
     await asyncio.sleep(5)
 
@@ -247,6 +304,10 @@ async def run_bot():
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
+    
+    # Store bot startup time for reference in various functions
+    import time
+    startup_time = time.time()
 
     async def restart_forever():
         while True:
