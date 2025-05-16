@@ -197,11 +197,13 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
         ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
         mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
         
-        # Add safety check to make sure SL is on the correct side of mark price
+        # IMPORTANT FIX: Make sure SL is on the correct side of mark price
         if direction.lower() == "long" and sl_price >= mark_price:
+            # For long positions, SL must be below current price
             sl_price = round(mark_price * 0.995, 6)  # 0.5% below mark price
             log(f"⚠️ Adjusted long SL to be below mark price: {sl_price}", level="WARN")
         elif direction.lower() == "short" and sl_price <= mark_price:
+            # For short positions, SL must be above current price
             sl_price = round(mark_price * 1.005, 6)  # 0.5% above mark price
             log(f"⚠️ Adjusted short SL to be above mark price: {sl_price}", level="WARN")
     except Exception as e:
