@@ -5,6 +5,7 @@ import json
 import time
 import traceback
 from logger import log
+from bybit_api import place_stop_loss_with_retry
 
 # === CONFIG ===
 BYBIT_API_URL = "https://api.bybit.com"
