@@ -1,7 +1,7 @@
 import os
 import asyncio
 import time
-from bybit_api import place_market_order, place_stop_loss, get_futures_available_balance
+from bybit_api import place_market_order, place_stop_loss, get_futures_available_balance, signed_request
 from logger import log
 
 # === Set and verify Bybit API credentials ===
@@ -32,10 +32,27 @@ async def test_trade_with_sl():
     log(f"📌 Side: {side}")
     log(f"📌 Quantity: {qty}")
     log(f"📌 Market Type: {market_type}")
-    log(f"🕒 Local UTC Timestamp (ms): {int(time.time() * 1000)}")
 
     try:
-        # === Step 1: Place market order ===
+        # === Step 1: Get current market price first ===
+        ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+            "category": market_type, 
+            "symbol": symbol
+        })
+        
+        if ticker_resp.get("retCode") != 0:
+            log(f"❌ Failed to get market price: {ticker_resp.get('retMsg')}")
+            return
+            
+        # Extract current price and calculate SL price
+        current_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+        if current_price <= 0:
+            log("❌ Failed to get valid market price")
+            return
+            
+        log(f"📊 Current market price: {current_price}")
+            
+        # === Step 2: Place market order ===
         result = await place_market_order(
             symbol=symbol,
             side=side,
@@ -55,15 +72,42 @@ async def test_trade_with_sl():
 
         if ret_code == 0:
             log("✅ Test Trade Entry Successful!")
-            entry_price = float(result.get("result", {}).get("avgPrice", 0))
-            log(f"📈 Entry price: {entry_price}")
+            order_id = result.get("result", {}).get("orderId")
             
-            # === Step 2: Get current price for SL calculation ===
-            # Calculate a stop loss 1% below entry (for long position)
-            sl_price = entry_price * 0.99
-            log(f"🛑 Setting SL at {sl_price} (1% below entry)")
+            # === Step 3: Wait briefly for the order to be processed ===
+            log("⏳ Waiting 2 seconds for order to be processed...")
+            await asyncio.sleep(2)
             
-            # === Step 3: Place stop loss order ===
+            # === Step 4: Fetch position to confirm entry ===
+            position_resp = await signed_request("GET", "/v5/position/list", {
+                "category": market_type,
+                "symbol": symbol
+            })
+            
+            if position_resp.get("retCode") != 0:
+                log(f"❌ Failed to get position: {position_resp.get('retMsg')}")
+                return
+                
+            positions = position_resp.get("result", {}).get("list", [])
+            if not positions:
+                log("❌ No position found after order execution")
+                return
+                
+            position = positions[0]
+            entry_price = float(position.get("avgPrice", 0))
+            position_size = float(position.get("size", 0))
+            
+            if position_size <= 0:
+                log("❌ Position size is zero - order may have failed")
+                return
+                
+            log(f"📈 Confirmed position - Entry price: {entry_price}, Size: {position_size}")
+            
+            # === Step 5: Calculate valid SL price (5% below entry for long) ===
+            sl_price = round(entry_price * 0.95, 2)  # 5% below entry for testing
+            log(f"🛑 Setting SL at {sl_price} (5% below entry)")
+            
+            # === Step 6: Place stop loss order ===
             sl_result = await place_stop_loss(
                 symbol=symbol,
                 direction="long",  # since we bought
@@ -79,11 +123,20 @@ async def test_trade_with_sl():
                 sl_order_id = sl_result.get("result", {}).get("orderId")
                 log(f"🆔 SL Order ID: {sl_order_id}")
                 
-                # === Step 4: Check active position ===
-                log("⏳ Waiting 5 seconds to verify position...")
-                await asyncio.sleep(5)
+                # === Step 7: Verify SL order exists ===
+                sl_order_resp = await signed_request("GET", "/v5/order/realtime", {
+                    "category": market_type,
+                    "symbol": symbol,
+                    "orderId": sl_order_id
+                })
                 
-                # Wait for a moment, then close position with market order
+                if sl_order_resp.get("retCode") == 0 and sl_order_resp.get("result", {}).get("list"):
+                    sl_order = sl_order_resp.get("result", {}).get("list")[0]
+                    log(f"✅ SL Order verified: Status = {sl_order.get('orderStatus')}, Trigger = {sl_order.get('triggerPrice')}")
+                else:
+                    log("⚠️ Could not verify SL order")
+                
+                # === Step 8: Close position with market order ===
                 log("🔄 Now closing position with market order...")
                 close_result = await place_market_order(
                     symbol=symbol,
@@ -97,10 +150,21 @@ async def test_trade_with_sl():
                 
                 if close_result.get("retCode") == 0:
                     log("✅ Test Trade Exit Successful!")
+                    log("🔄 Test complete - trade cycle verified with SL placement")
                 else:
                     log(f"❌ Test Trade Exit Failed: {close_result.get('retMsg')}")
             else:
                 log(f"❌ Stop Loss Placement Failed: {sl_result.get('retMsg')}")
+                
+                # Still close the position even if SL failed
+                await place_market_order(
+                    symbol=symbol,
+                    side="Sell",
+                    qty=qty,
+                    market_type=market_type,
+                    reduce_only=True
+                )
+                log("✅ Position closed with market order")
         else:
             log(f"❌ Test Trade Failed!")
             log(f"📛 Error Code: {ret_code}")
@@ -108,6 +172,28 @@ async def test_trade_with_sl():
 
     except Exception as e:
         log(f"❌ Exception occurred during test trade: {e}")
+        
+        # Emergency cleanup - try to close any open position
+        try:
+            position_resp = await signed_request("GET", "/v5/position/list", {
+                "category": market_type,
+                "symbol": symbol
+            })
+            
+            if position_resp.get("retCode") == 0:
+                positions = position_resp.get("result", {}).get("list", [])
+                for pos in positions:
+                    if float(pos.get("size", 0)) > 0:
+                        await place_market_order(
+                            symbol=symbol,
+                            side="Sell",
+                            qty=qty,
+                            market_type=market_type,
+                            reduce_only=True
+                        )
+                        log("✅ Emergency position cleanup completed")
+        except:
+            log("⚠️ Failed to perform emergency cleanup")
 
 if __name__ == "__main__":
     asyncio.run(test_trade_with_sl())
