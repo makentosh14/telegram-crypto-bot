@@ -24,6 +24,8 @@ from mean_reversion import score_mean_reversion
 from breakout_sniper import score_breakout_sniper
 from strategy_performance import get_strategy_stats
 from risk_manager import calculate_dynamic_risk
+from pattern_discovery import pattern_discovery_scan
+from pattern_matcher import pattern_match_scan
 
 load_memory()
 
