@@ -7,7 +7,7 @@ import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import InputFile
-from logger import LOG_FILE
+from logger import LOG_FILE, log
 from error_handler import send_error_to_telegram  # ✅ Use only from external file
 
 # === Global message rate limit and flood protection ===
@@ -149,6 +149,225 @@ async def handle_download_trades(message: types.Message):
         await message.reply_document(file_to_send, caption="📁 Trade log file attached.")
     else:
         await message.reply("❌ Log file not found.")
+
+
+# ✅ New Command: /check_sl [symbol]
+@dp.message_handler(commands=["check_sl"])
+async def handle_check_sl(message: types.Message):
+    args = message.get_args().split()
+    symbol = args[0].upper() if args else None
+    
+    if not symbol:
+        await message.reply("⚠️ Please provide a symbol. Example: /check_sl BTCUSDT")
+        return
+        
+    from monitor import active_trades, debug_stop_loss
+    
+    if symbol not in active_trades:
+        await message.reply(f"❌ No active trade found for {symbol}")
+        return
+        
+    # Call the debug function from monitor.py
+    await debug_stop_loss(symbol)
+    await message.reply(f"✅ SL check for {symbol} completed. Report sent to main channel.")
+
+
+# ✅ New Command: /restore_sl [symbol]
+@dp.message_handler(commands=["restore_sl"])
+async def handle_restore_sl(message: types.Message):
+    args = message.get_args().split()
+    symbol = args[0].upper() if args else None
+    
+    if not symbol:
+        await message.reply("⚠️ Please provide a symbol. Example: /restore_sl BTCUSDT")
+        return
+        
+    from monitor import active_trades, check_and_restore_sl
+    
+    if symbol not in active_trades:
+        await message.reply(f"❌ No active trade found for {symbol}")
+        return
+        
+    await check_and_restore_sl(symbol, active_trades[symbol])
+    await message.reply(f"✅ SL restoration for {symbol} initiated.")
+
+
+# ✅ New Command: /verify_trades
+@dp.message_handler(commands=["verify_trades"])
+async def handle_verify_trades(message: types.Message):
+    from monitor import verify_trade_integrity
+    
+    await message.reply("🔍 Starting trade verification process...")
+    await verify_trade_integrity()
+    await message.reply("✅ Trade verification completed. Check main channel for results.")
+
+
+# ✅ New Command: /update_sl [symbol] [price]
+@dp.message_handler(commands=["update_sl"])
+async def handle_update_sl(message: types.Message):
+    args = message.get_args().split()
+    
+    if len(args) < 2:
+        await message.reply("⚠️ Please provide symbol and price. Example: /update_sl BTCUSDT 25000")
+        return
+        
+    symbol = args[0].upper()
+    try:
+        price = float(args[1])
+    except ValueError:
+        await message.reply("❌ Invalid price format. Please provide a valid number.")
+        return
+        
+    from monitor import active_trades, update_stop_loss_order
+    
+    if symbol not in active_trades:
+        await message.reply(f"❌ No active trade found for {symbol}")
+        return
+        
+    trade = active_trades[symbol]
+    
+    # Validate SL is on the correct side of entry
+    direction = trade.get("direction", "").lower()
+    entry_price = trade.get("entry_price")
+    
+    if entry_price:
+        if (direction == "long" and price >= entry_price) or (direction == "short" and price <= entry_price):
+            await message.reply(f"❌ Invalid SL price! For {direction} positions, SL must be {'below' if direction == 'long' else 'above'} entry price.")
+            return
+            
+    # Validate SL vs current price
+    from sl_tp_utils import validate_sl_placement
+    validated_price = await validate_sl_placement(symbol, direction, price)
+    
+    if validated_price != price:
+        await message.reply(f"⚠️ SL price adjusted from {price} to {validated_price} to ensure it's on the correct side of market price.")
+        price = validated_price
+        
+    # Update the SL
+    result = await update_stop_loss_order(symbol, trade, price)
+    
+    if result:
+        await message.reply(f"✅ SL for {symbol} updated to {price}")
+    else:
+        await message.reply(f"❌ Failed to update SL for {symbol}. Check logs for details.")
+
+
+# ✅ New Command: /exit [symbol]
+@dp.message_handler(commands=["exit"])
+async def handle_exit_trade(message: types.Message):
+    args = message.get_args().split()
+    symbol = args[0].upper() if args else None
+    
+    if not symbol:
+        await message.reply("⚠️ Please provide a symbol. Example: /exit BTCUSDT")
+        return
+        
+    from monitor import active_trades
+    
+    if symbol not in active_trades or active_trades[symbol].get("exited"):
+        await message.reply(f"❌ No active trade found for {symbol}")
+        return
+        
+    # Execute market exit
+    try:
+        from bybit_api import place_market_order
+        
+        trade = active_trades[symbol]
+        direction = trade.get("direction", "").lower()
+        qty = trade.get("qty")
+        
+        if not direction or not qty:
+            await message.reply(f"❌ Missing trade data for {symbol}")
+            return
+            
+        side = "Sell" if direction == "long" else "Buy"
+        
+        await message.reply(f"🔄 Executing market exit for {symbol}...")
+        
+        result = await place_market_order(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            market_type="linear",
+            reduce_only=True
+        )
+        
+        if result.get("retCode") == 0:
+            # Mark trade as exited
+            trade["exited"] = True
+            from monitor import save_active_trades
+            save_active_trades()
+            
+            log(f"🚫 Manual exit executed for {symbol} via Telegram command", level="INFO")
+            
+            # Update trade logs
+            from activity_logger import log_trade_to_file
+            log_trade_to_file(
+                symbol=symbol,
+                direction=direction,
+                entry=trade.get("entry_price"),
+                sl=trade.get("original_sl"),
+                tp1=None,
+                tp2=None,
+                result="manual_exit",
+                score=trade.get("score_history", [0])[-1],
+                trade_type=trade.get("trade_type", "Unknown"),
+                confidence=0
+            )
+            
+            await message.reply(f"✅ Successfully exited {symbol} position.")
+            
+            # Send to main channel
+            await send_telegram_message(f"🚫 <b>Manual Exit</b> for {symbol} via Telegram command")
+        else:
+            await message.reply(f"❌ Exit failed: {result.get('retMsg')}")
+        
+    except Exception as e:
+        log(f"❌ Error executing manual exit for {symbol}: {e}", level="ERROR")
+        await message.reply(f"❌ Error executing exit: {str(e)}")
+
+
+# ✅ New Command: /status
+@dp.message_handler(commands=["status"])
+async def handle_bot_status(message: types.Message):
+    from monitor import active_trades
+    
+    active_count = sum(1 for t in active_trades.values() if not t.get("exited"))
+    
+    # Get latest candle timestamp to verify data freshness
+    latest_timestamp = None
+    from websocket_candles import live_candles
+    
+    if live_candles:
+        for symbol in live_candles:
+            if '1' in live_candles[symbol] and live_candles[symbol]['1']:
+                candle = live_candles[symbol]['1'][-1]
+                ts = candle.get('timestamp')
+                if ts:
+                    latest_timestamp = ts
+                break
+    
+    # Format the response
+    status_msg = (
+        f"🤖 <b>Bot Status Report</b>\n\n"
+        f"• Active Trades: {active_count}\n"
+    )
+    
+    if latest_timestamp:
+        from datetime import datetime
+        dt = datetime.fromtimestamp(latest_timestamp / 1000)  # Convert from ms to seconds
+        status_msg += f"• Latest Data: {dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    
+    # Add uptime if available
+    from main import startup_time
+    current_time = time.time()
+    uptime_seconds = int(current_time - startup_time)
+    hours, remainder = divmod(uptime_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    status_msg += f"• Uptime: {hours}h {minutes}m {seconds}s\n"
+    
+    await message.reply(status_msg, parse_mode="HTML")
 
 
 # ✅ Start the bot
