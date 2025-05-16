@@ -211,5 +211,13 @@ def calculate_confidence(score, tf_scores, trend_context, trade_type):
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
     trend_boost = 2 if trend_context.get("btc_trend") == "strong" or trend_context.get("altseason") else 0
     tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
-    confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
-    return round(min(confidence, 100), 1)
+    base_confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
+
+    regime = trend_context.get("regime", "trending")
+    if regime == "ranging":
+        base_confidence *= 0.9
+    elif regime == "trending" and trend_context.get("altseason"):
+        base_confidence *= 1.05
+
+    return round(min(base_confidence, 100), 1)
+
