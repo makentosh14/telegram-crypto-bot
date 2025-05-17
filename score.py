@@ -9,7 +9,7 @@ from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
-from logger import log
+from logger import log, write_log
 
 # Enhanced weights to better identify potential pumps
 WEIGHTS = {
