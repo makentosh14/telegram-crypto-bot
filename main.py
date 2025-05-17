@@ -531,3 +531,4 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
+    asyncio.create_task(periodic_backups())
