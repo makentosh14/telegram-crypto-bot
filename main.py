@@ -3,7 +3,7 @@ import traceback
 import time
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
-from score import score_symbol, determine_direction, calculate_confidence
+from score import score_symbol, determine_direction, calculate_confidence, has_pump_potential
 from telegram_bot import send_telegram_message, format_trade_signal, send_error_to_telegram
 from trend_filters import get_trend_context
 from signal_memory import log_signal, is_duplicate_signal
@@ -26,6 +26,7 @@ from strategy_performance import get_strategy_stats
 from risk_manager import calculate_dynamic_risk
 from pattern_discovery import pattern_discovery_scan
 from pattern_matcher import pattern_match_scan
+from exit_manager import detect_momentum_surge
 
 load_memory()
 
@@ -34,9 +35,10 @@ active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
 
-MIN_SCALP_SCORE = 6.5
-MIN_INTRADAY_SCORE = 7.0
-MIN_SWING_SCORE = 7.5
+# Slightly reduced thresholds in volatile regime to capture more potential pumps
+MIN_SCALP_SCORE = 6.0
+MIN_INTRADAY_SCORE = 6.5
+MIN_SWING_SCORE = 7.0
 
 def extract_last_pattern(candles_by_tf):
     for tf in sorted(candles_by_tf, key=lambda x: int(x)):
@@ -49,10 +51,12 @@ async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
     regime = trend_context.get("regime", "trending")
 
+    # Adjust score thresholds based on regime
+    # In volatile regimes, lower thresholds to catch more pumps
     score_adjustments = {
-        "volatile": {"scalp": 0.5, "intraday": 0.5, "swing": 0.5},
-        "ranging": {"scalp": 1.0, "intraday": 1.0, "swing": 1.0},
-        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},
+        "volatile": {"scalp": -0.5, "intraday": -0.5, "swing": -0.5},  # Lower thresholds in volatile markets
+        "ranging": {"scalp": 0.5, "intraday": 0.5, "swing": 0.5},      # Higher thresholds in ranging markets
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},     # Normal thresholds in trending markets
     }
     adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
     adj_scalp = MIN_SCALP_SCORE + adjust["scalp"]
@@ -82,13 +86,17 @@ async def scan_for_new_signals(symbols):
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
 
-        risk_pct = 9.0 if trade_type == "Scalp" else (6.0 if trade_type == "Intraday" else 3.0)
-        strategy = "core_strategy"
-        if tf_scores.get("mean_reversion"):
-            strategy = "mean_reversion"
-        elif tf_scores.get("breakout_sniper"):
-            strategy = "breakout_sniper"
-        
+        # Check for pump potential - important for exit strategy
+        pump_potential = has_pump_potential(candles_by_tf, direction)
+        if pump_potential:
+            log(f"🚀 {symbol} shows strong pump potential - adjusting strategy")
+            # Boost score to prioritize potential pumps
+            score += 0.5
+            # Add pump potential indicator
+            indicator_scores["pump_potential"] = 1.0
+            used_indicators.append("pump_potential")
+
+        # Calculate risk percentage
         if trade_type == "Scalp":
             base_risk = 0.09
         elif trade_type == "Intraday":
@@ -96,8 +104,17 @@ async def scan_for_new_signals(symbols):
         else:
             base_risk = 0.03
            
+        # Determine strategy type for risk manager
+        strategy = "core_strategy"
+        if tf_scores.get("mean_reversion"):
+            strategy = "mean_reversion"
+        elif tf_scores.get("breakout_sniper"):
+            strategy = "breakout_sniper"
+        
+        # Get dynamic risk percentage based on confidence, strategy, and past performance
         risk_pct = calculate_dynamic_risk(symbol, confidence, strategy, base_risk)
 
+        # Adjust risk based on strategy performance
         stats = get_strategy_stats(strategy)
         win_rate = stats["win_rate"]
 
@@ -108,13 +125,20 @@ async def scan_for_new_signals(symbols):
         else:
             risk_pct = base_risk
 
+        # For potential pumps, increase position size slightly
+        if pump_potential:
+            risk_pct *= 1.1  # 10% larger position for pump potential
+            log(f"🔼 Increasing position size for {symbol} due to pump potential: {risk_pct:.2f}%")
+
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
+        # Calculate SL, TP levels
         sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence, regime
         )
 
+        # Check for early pump signals
         pump_data = await detect_early_pump(candles_by_tf, symbol)
         if pump_data["trigger_count"] >= 3:
             pump_reasons = ', '.join([k for k, v in pump_data.items() if v is True and k != "trigger_count"])
@@ -123,25 +147,36 @@ async def scan_for_new_signals(symbols):
                 f"<b>Symbol:</b> {symbol}\n"
                 f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
             )
+            # Boost score for early pump signals
+            score += 1.0
+            # Add pump detection to indicators
+            indicator_scores["early_pump"] = 1.5
+            used_indicators.append("early_pump")
 
         # Check if score meets minimum thresholds
         if (trade_type == "Scalp" and score < adj_scalp) or \
            (trade_type == "Intraday" and score < adj_intraday) or \
            (trade_type == "Swing" and score < adj_swing):
             if trade_type == "Swing" and ALWAYS_ALLOW_SWING:
-                log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — skipping this one.")
+                log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — proceeding anyways.")
+            else:
                 continue
-            continue
 
         # Check active signals
         if symbol in active_signals:
             data = active_signals[symbol]
             data['score_history'].append(score)
+            
+            # Don't exit during momentum surges
+            has_momentum = detect_momentum_surge(candles_by_tf.get("1", []))
+            
             exit_required = (
-                (trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:])) or
+                not has_momentum and  # Don't exit during momentum
+                ((trade_type == "Scalp" and all(s < 5 for s in data['score_history'][-2:])) or
                 (trade_type == "Intraday" and all(s < 5 for s in data['score_history'][-3:])) or
-                (trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:]))
+                (trade_type == "Swing" and all(s < 4 for s in data['score_history'][-4:])))
             )
+            
             if exit_required:
                 await send_telegram_message(f"❌ Exit {symbol} | Score dropped.")
                 del active_signals[symbol]
@@ -172,7 +207,8 @@ async def scan_for_new_signals(symbols):
             "pattern": extract_last_pattern(candles_by_tf),
             "whale": detect_whale_activity(candles_by_tf.get("5", [])),
             "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
-            "regime": regime
+            "regime": regime,
+            "pump_potential": pump_potential  # Pass pump potential to executor
         })
 
         # Format and send notification message after trade is placed
@@ -193,6 +229,10 @@ async def scan_for_new_signals(symbols):
             sl_pct=sl_pct
         )
 
+        # Add pump potential info to message if detected
+        if pump_potential:
+            msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
+
         await send_telegram_message(msg)
         active_signals[symbol] = {
             'score': score,
@@ -203,6 +243,7 @@ async def scan_for_new_signals(symbols):
             log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
             write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
 
+            # Pass pump potential and exit tranches to trade tracker
             track_active_trade(
                 symbol=symbol,
                 trade_type=trade_type,
@@ -210,10 +251,12 @@ async def scan_for_new_signals(symbols):
                 entry_price=price,
                 direction=direction,
                 trailing_pct=trade.get("trailing_pct"),
-                tp2=None,
+                tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
                 sl=trade.get("sl"),
                 qty=trade.get("qty"),
-                sl_order_id=trade.get("sl_order_id")
+                sl_order_id=trade.get("sl_order_id"),
+                exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
+                has_pump_potential=pump_potential  # Pass pump potential flag
             )
 
             await verify_stop_loss_placement(symbol, trade, direction)
@@ -273,10 +316,11 @@ async def scan_for_new_signals(symbols):
                         entry_price=price,
                         direction=rev_dir,
                         trailing_pct=trailing_pct,
-                        tp2=None,
+                        tp2=mr_trade.get("tp2"),  # Now including TP2
                         sl=mr_trade.get("sl"),
                         qty=mr_trade.get("qty"),
-                        sl_order_id=mr_trade.get("sl_order_id")
+                        sl_order_id=mr_trade.get("sl_order_id"),
+                        exit_tranches=mr_trade.get("exit_tranches")
                     )
 
         # ✅ Additional Strategy: Breakout Sniper Logic
@@ -290,6 +334,9 @@ async def scan_for_new_signals(symbols):
                     candles_by_tf, price, "Scalp", bo_dir, bo_score, bo_conf, regime
                 )
 
+                # Check for pump potential in breakout strategy
+                bo_pump_potential = has_pump_potential(candles_by_tf, bo_dir)
+
                 # OPTIMIZATION: Execute trade BEFORE notification for breakout strategy
                 bo_trade = await execute_trade_if_valid({
                     "symbol": symbol,
@@ -302,7 +349,8 @@ async def scan_for_new_signals(symbols):
                     "indicator_scores": {"breakout_sniper": bo_score},
                     "used_indicators": list(bo_reasons.keys()),
                     "tf_scores": {"breakout_sniper": bo_score},
-                    "regime": regime
+                    "regime": regime,
+                    "pump_potential": bo_pump_potential
                 })
 
                 msg = format_trade_signal(
@@ -322,6 +370,11 @@ async def scan_for_new_signals(symbols):
                     sl_pct=sl_pct
                 )
                 msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
+                
+                # Add pump potential info if detected
+                if bo_pump_potential:
+                    msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
+                    
                 await send_telegram_message(msg)
 
                 if bo_trade:
@@ -332,10 +385,12 @@ async def scan_for_new_signals(symbols):
                         entry_price=price,
                         direction=bo_dir,
                         trailing_pct=trailing_pct,
-                        tp2=None,
+                        tp2=bo_trade.get("tp2"),  # Now including TP2
                         sl=bo_trade.get("sl"),
                         qty=bo_trade.get("qty"),
-                        sl_order_id=bo_trade.get("sl_order_id")
+                        sl_order_id=bo_trade.get("sl_order_id"),
+                        exit_tranches=bo_trade.get("exit_tranches"),
+                        has_pump_potential=bo_pump_potential
                     )
 
 async def verify_stop_loss_placement(symbol, trade, direction):
@@ -369,7 +424,7 @@ async def monitor_loop():
 
 
 async def sl_verification_loop():
-    """New function to periodically verify all stop-losses for active trades"""
+    """Periodically verify all stop-losses for active trades"""
     from telegram_bot import send_telegram_message
     
     while True:
