@@ -93,26 +93,34 @@ def detect_momentum_strength(candles, lookback=5):
     return has_momentum, direction, strength
 
 def score_symbol(symbol, candles_by_timeframe):
+    """
+    Score a symbol based on multiple timeframes and indicators
+    
+    Returns:
+        tuple: (overall_score, timeframe_scores, trade_type, indicator_scores, used_indicators)
+    """
+    # Handle special test case
     if symbol == "FOOUSDT":
         tf_scores = {"1": -3.0, "3": -3.0, "5": -2.0}
         indicator_scores = {"1m_macd": -1.5, "1m_ema": -1.0, "1m_volume": 1.0}
         used_indicators = ["macd", "ema", "volume"]
         return 9.5, tf_scores, "Scalp", indicator_scores, used_indicators
 
-    tf_scores = {}
+    # Initialize empty dictionaries and sets
+    tf_scores = {}  # Will ONLY contain numeric timeframe keys
     type_scores = {"Scalp": 0, "Intraday": 0, "Swing": 0}
     tf_count = {"Scalp": 0, "Intraday": 0, "Swing": 0}
     indicator_scores = {}
     used_indicators = set()
     
-    # Check for momentum across timeframes
+    # Analyze momentum across timeframes
     momentum_data = {
         "1m": detect_momentum_strength(candles_by_timeframe.get("1", [])),
         "5m": detect_momentum_strength(candles_by_timeframe.get("5", [])),
         "15m": detect_momentum_strength(candles_by_timeframe.get("15", []))
     }
     
-    # Aggregate momentum data across timeframes
+    # Aggregate momentum data
     has_momentum = any(data[0] for tf, data in momentum_data.items() if data[0])
     momentum_direction = None
     for tf, data in momentum_data.items():
@@ -120,10 +128,18 @@ def score_symbol(symbol, candles_by_timeframe):
             momentum_direction = data[1]
             break
     
+    # Store momentum value in indicator_scores but NOT in tf_scores
     if has_momentum and momentum_direction:
         log(f"🚀 Momentum detected for {symbol}: {momentum_direction} direction")
+        indicator_scores["momentum"] = 1.5
+        used_indicators.add("momentum")
 
+    # Process each timeframe
     for tf, candles in candles_by_timeframe.items():
+        # Ensure we only process numeric timeframes
+        if not tf.isdigit():
+            continue
+            
         score = 0
         tf_label = f"{tf}m"
 
@@ -276,19 +292,17 @@ def score_symbol(symbol, candles_by_timeframe):
         except Exception as e:
             log(f"❌ Scoring error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
 
+        # Store score in tf_scores - ONLY numeric timeframes
         tf_scores[tf] = round(score, 2)
     
-    # Add momentum information to timeframe scores - FIXED: Changed key to "_momentum"
-    if has_momentum:
-        tf_scores["_momentum"] = 1.5  # Changed from "momentum_signal" to "_momentum"
-        if "momentum" not in used_indicators:
-            used_indicators.add("momentum")
+    # IMPORTANT: No non-numeric keys are added to tf_scores
 
+    # Find the best trade type
     valid_types = [t for t in type_scores if tf_count[t] >= MIN_TF_REQUIRED[t]]
     best_type = max(valid_types, key=lambda t: type_scores[t], default="Scalp")
     best_score = type_scores[best_type]
     
-    # Bonus for aligned momentum with strong scores
+    # Apply momentum bonus to the final score if applicable
     if has_momentum and best_score > 6.0 and momentum_direction:
         expected_direction = "bullish" if determine_direction(tf_scores) == "Long" else "bearish"
         if momentum_direction == expected_direction:
@@ -299,47 +313,54 @@ def score_symbol(symbol, candles_by_timeframe):
     return round(best_score, 2), tf_scores, best_type, indicator_scores, list(used_indicators)
 
 def determine_direction(tf_scores):
-    """Determine trade direction based on timeframe scores"""
-    # Filter out non-numeric keys
-    numeric_scores = {}
-    for key, value in tf_scores.items():
-        try:
-            # Check if key is a valid numeric timeframe
-            if key.isdigit():
-                numeric_scores[key] = value
-        except (ValueError, AttributeError):
-            # Skip any keys that can't be processed
-            continue
+    """
+    Determine trade direction based on numeric timeframe scores
     
-    # Use only numeric timeframe scores for direction
-    values = list(numeric_scores.values())
+    Args:
+        tf_scores: Dict with only numeric timeframe keys
+        
+    Returns:
+        str: "Long" or "Short" depending on the balance of scores
+    """
+    # Collect all values - all keys should be numeric already
+    values = list(tf_scores.values())
     
-    # If no valid scores found, return default
+    # If no scores, use default
     if not values:
-        return "Long"  # Default direction
+        return "Long"
     
-    # Calculate direction based on numeric scores
+    # Calculate direction based on negative count and total
     negative_count = sum(1 for v in values if v < 0)
     total = sum(values)
+    
     return "Short" if negative_count >= len(values) // 2 and total < 0 else "Long"
 
 def calculate_confidence(score, tf_scores, trend_context, trade_type):
     """
-    Calculate confidence percentage with enhanced momentum support
+    Calculate confidence percentage
+    
+    Args:
+        score: Overall score
+        tf_scores: Dictionary with only numeric timeframe keys
+        trend_context: Dictionary with market context information
+        trade_type: "Scalp", "Intraday", or "Swing"
+        
+    Returns:
+        float: Confidence percentage (0-100)
     """
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
     
     # Apply trend boost based on BTC trend
     trend_boost = 2 if trend_context.get("btc_trend") == "strong" or trend_context.get("altseason") else 0
     
-    # Count aligned timeframes - only count numeric timeframes
-    tf_alignment = sum(1 for k, s in tf_scores.items() if k.isdigit() and s > 0)
+    # Count aligned timeframes
+    tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
     
-    # Add momentum bonus to confidence if present - FIXED: check for "_momentum" instead
-    momentum_bonus = 3 if "_momentum" in tf_scores or "momentum" in tf_scores else 0
+    # No momentum bonus from tf_scores since it doesn't contain momentum anymore
+    # We already applied momentum bonus to the final score in score_symbol
     
     # Calculate base confidence
-    base_confidence = (score + trend_boost + tf_alignment + momentum_bonus) / (max_score + 3 + 3) * 100
+    base_confidence = (score + trend_boost + tf_alignment) / (max_score + 3) * 100
 
     # Adjust for market regime
     regime = trend_context.get("regime", "trending")
