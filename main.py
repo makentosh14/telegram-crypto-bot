@@ -495,11 +495,13 @@ async def run_bot():
     asyncio.create_task(pattern_discovery_loop(symbols))
     asyncio.create_task(pattern_match_loop(symbols))
     asyncio.create_task(pattern_summary_loop())
+
+
+    await check_for_open_positions()
     
     # Add the new SL verification loop
     asyncio.create_task(sl_verification_loop())
 
-    await check_for_open_positions()
     await asyncio.sleep(5)
 
     while True:
@@ -531,5 +533,5 @@ if __name__ == "__main__":
                 await send_error_to_telegram(err_msg)
                 await asyncio.sleep(10)
 
-    asyncio.run(restart_forever())
     asyncio.create_task(periodic_backups())
+    asyncio.run(restart_forever())
