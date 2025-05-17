@@ -31,7 +31,7 @@ MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 8
 ALTSEASON_SCORE_BOOST = 0.5
 MEME_SCORE_BOOST = 0.5
-ALWAYS_ALLOW_SWING = True  # ✅ Always allow swing setups regardless of BTC trend
+ALWAYS_ALLOW_SWING = False  # ❌ Disabled to prevent low-score trades - change back to True if needed
 
 # === MEME / ALTSEASON DETECTION ===
 ENABLE_MEME_RADAR = True
