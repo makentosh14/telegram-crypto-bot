@@ -530,4 +530,4 @@ if __name__ == "__main__":
                 await send_error_to_telegram(err_msg)
                 await asyncio.sleep(10)
 
-    asyncio.create_task(periodic_backups())
+    asyncio.run(restart_forever())
