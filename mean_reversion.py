@@ -5,6 +5,18 @@ from volume import get_average_volume
 from pattern_detector import detect_pattern
 
 def score_mean_reversion(symbol, candles_by_tf, regime):
+    """
+    Score a potential mean reversion setup
+    
+    Args:
+        symbol: Trading pair symbol
+        candles_by_tf: Dictionary of candles by timeframe
+        regime: Market regime (should be 'ranging' for this strategy)
+        
+    Returns:
+        score, direction, confidence, reasons dictionary
+    """
+    # Early exit if not in ranging regime
     if regime != "ranging":
         return 0, "Not Ranging", "N/A", {}
 
@@ -59,5 +71,28 @@ def score_mean_reversion(symbol, candles_by_tf, regime):
             score += 1
             reasons[f"{tf}m_whale"] = True
 
+    # FIX: Add a clear minimum threshold for this strategy
+    min_mean_reversion_score = 4.0
+    if score < min_mean_reversion_score:
+        from logger import log
+        log(f"⚠️ Mean reversion score for {symbol} too low: {score:.2f} < {min_mean_reversion_score}")
+        return 0, "Score too low", 0, {}
+    
+    # Only return results if we have sufficient reasons
+    if len(reasons) < 2:
+        from logger import log
+        log(f"⚠️ Mean reversion for {symbol} has insufficient indicators: {len(reasons)} < 2")
+        return 0, "Not enough indicators", 0, {}
+
     confidence = round((score / 5) * 100)
+    
+    # FIX: Ensure we have a direction before returning a valid score
+    if not direction:
+        from logger import log
+        log(f"⚠️ Mean reversion for {symbol} has no clear direction")
+        return 0, "No direction", 0, {}
+        
+    from logger import log
+    log(f"✅ Valid mean reversion setup for {symbol}: Score {score:.2f}, Dir: {direction}, Conf: {confidence}%")
+    
     return score, direction, confidence, reasons
