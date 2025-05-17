@@ -278,9 +278,9 @@ def score_symbol(symbol, candles_by_timeframe):
 
         tf_scores[tf] = round(score, 2)
     
-    # Add momentum information to timeframe scores
+    # Add momentum information to timeframe scores - FIXED: Changed key to "_momentum"
     if has_momentum:
-        tf_scores["_momentum_signal"] = 1.5
+        tf_scores["_momentum"] = 1.5  # Changed from "momentum_signal" to "_momentum"
         if "momentum" not in used_indicators:
             used_indicators.add("momentum")
 
@@ -324,7 +324,9 @@ def determine_direction(tf_scores):
     return "Short" if negative_count >= len(values) // 2 and total < 0 else "Long"
 
 def calculate_confidence(score, tf_scores, trend_context, trade_type):
-    """Calculate confidence percentage with enhanced momentum support"""
+    """
+    Calculate confidence percentage with enhanced momentum support
+    """
     max_score = 10 if trade_type == "Scalp" else (15 if trade_type == "Intraday" else 20)
     
     # Apply trend boost based on BTC trend
@@ -333,8 +335,8 @@ def calculate_confidence(score, tf_scores, trend_context, trade_type):
     # Count aligned timeframes - only count numeric timeframes
     tf_alignment = sum(1 for k, s in tf_scores.items() if k.isdigit() and s > 0)
     
-    # Add momentum bonus to confidence if present - check for either key
-    momentum_bonus = 3 if "_momentum_signal" in tf_scores or "momentum" in tf_scores else 0
+    # Add momentum bonus to confidence if present - FIXED: check for "_momentum" instead
+    momentum_bonus = 3 if "_momentum" in tf_scores or "momentum" in tf_scores else 0
     
     # Calculate base confidence
     base_confidence = (score + trend_boost + tf_alignment + momentum_bonus) / (max_score + 3 + 3) * 100
