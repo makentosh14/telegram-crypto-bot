@@ -100,6 +100,10 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "has_pump_potential": has_pump_potential,  # Flag to indicate potential pump setup
         "exit_timed": False,  # Flag for time-based exit
         "exit_score": False,  # Flag for score-based exit
+        "tp1_hit_cycle": 0,  # Added to track which cycle TP1 was hit
+        "max_score": initial_score,  # Added to track the highest score achieved
+        "entry_time": datetime.utcnow(),  # Add entry time for clear timing
+        "last_score_update": datetime.utcnow()  # Track when the score was last updated
     }
     
     # Log pump potential if detected
@@ -133,13 +137,25 @@ async def execute_partial_exit(symbol, trade, exit_percentage):
         # Ensure exit quantity meets minimum requirements
         from symbol_info import round_qty, symbol_precisions
         min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+        
+        # Add debug logging for minimum qty
+        log(f"🔍 Partial exit for {symbol}: Min qty={min_qty}, Calculated qty={exit_qty}")
+        
         exit_qty = max(round_qty(symbol, exit_qty), min_qty)
         
         # Don't exit more than we have
         exit_qty = min(exit_qty, total_qty)
         
+        # IMPORTANT: Check if exit quantity is below minimum
+        if exit_qty < min_qty:
+            log(f"⚠️ Exit quantity {exit_qty} below minimum {min_qty} for {symbol}. Aborting partial exit.", level="WARN")
+            return False
+        
         # Execute market order
         side = "Sell" if direction == "long" else "Buy"
+        
+        log(f"🔍 Executing partial exit for {symbol}: {exit_qty} {side} (min_qty={min_qty})")
+        
         result = await place_market_order(
             symbol=symbol,
             side=side,
@@ -157,10 +173,10 @@ async def execute_partial_exit(symbol, trade, exit_percentage):
             write_log(f"PARTIAL EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
             
             # Add to exit tranches history
-            if "exit_tranches" not in trade:
-                trade["exit_tranches"] = []
+            if "exit_tranches_history" not in trade:
+                trade["exit_tranches_history"] = []
             
-            trade["exit_tranches"].append({
+            trade["exit_tranches_history"].append({
                 "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
                 "percentage": exit_percentage,
                 "qty": exit_qty
@@ -169,9 +185,28 @@ async def execute_partial_exit(symbol, trade, exit_percentage):
             save_active_trades()
             return True
         else:
-            log(f"❌ Failed to execute partial exit for {symbol}: {result.get('retMsg')}", level="ERROR")
+            error_msg = result.get("retMsg", "Unknown error")
+            log(f"❌ Failed to execute partial exit for {symbol}: {error_msg}", level="ERROR")
+            
+            # Check if error is about minimum quantity
+            if "minimum limit" in error_msg.lower():
+                # Try with minimum quantity instead
+                log(f"🔄 Retrying with minimum quantity {min_qty}")
+                retry_result = await place_market_order(
+                    symbol=symbol,
+                    side=side,
+                    qty=str(min_qty),
+                    market_type="linear",
+                    reduce_only=True
+                )
+                
+                if retry_result.get("retCode") == 0:
+                    log(f"✅ Partial exit with minimum qty for {symbol} executed")
+                    trade["qty"] = round_qty(symbol, total_qty - min_qty)
+                    save_active_trades()
+                    return True
+            
             return False
-    
     except Exception as e:
         log(f"❌ Error during partial exit for {symbol}: {e}", level="ERROR")
         return False
@@ -494,7 +529,16 @@ async def monitor_trades(live_candles):
             # 2. Calculate score for exit decisions
             try:
                 score, tf_scores, _, indicator_scores, used_list = score_symbol(symbol, candles_by_tf)
-                trade["score_history"].append(score)
+                
+                # Only add to score history if it's a valid score
+                if score is not None and score >= 0:
+                    trade["score_history"].append(score)
+                    trade["last_score_update"] = datetime.utcnow()
+                
+                # Update max score if current score is higher
+                if score > trade.get("max_score", 0):
+                    trade["max_score"] = score
+                
                 trade["cycles"] += 1
             except Exception as e:
                 log(f"❌ Error scoring {symbol}: {e}", level="ERROR")
@@ -527,6 +571,7 @@ async def monitor_trades(live_candles):
                 
                 if (direction.lower() == "long" and current_price >= tp1_level) or (direction.lower() == "short" and current_price <= tp1_level):
                     trade["tp1_hit"] = True
+                    trade["tp1_hit_cycle"] = trade.get("cycles", 0)  # Record which cycle TP1 was hit
                     trade["break_even_triggered"] = True
                     trade["tp1_price"] = current_price
                     
@@ -691,7 +736,13 @@ async def monitor_trades(live_candles):
                         
                         if exit_result.get("retCode") == 0:
                             trade["exited"] = True
-                            await send_telegram_message(f"⏱ <b>Time-Based Exit</b> on <b>{symbol}</b>")
+                            
+                            # Get trade age in hours for logging
+                            entry_time = datetime.strptime(trade.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+                            current_time = datetime.utcnow()
+                            trade_age_hours = (current_time - entry_time).total_seconds() / 3600
+                            
+                            await send_telegram_message(f"⏱ <b>Time-Based Exit</b> on <b>{symbol}</b> after {trade_age_hours:.1f} hours")
                             write_log(f"TIME EXIT: {symbol} | {trade_age_hours:.1f} hours in trade")
                             
                             # Calculate P&L
@@ -713,10 +764,18 @@ async def monitor_trades(live_candles):
                     except Exception as e:
                         log(f"❌ Error executing time-based exit: {e}", level="ERROR")
             
-            # 11. Score-based exit check with momentum override
-            # Don't exit on score deterioration during strong momentum
+            # 11. Score-based exit check with momentum override - IMPROVED VERSION
             if not has_momentum and not trade.get("exit_score"):
+                # Use our enhanced exit evaluation that's more tolerant
                 if evaluate_score_exit(symbol, trade, trade.get("score_history", [])):
+                    # Log detailed information about the score-based exit decision
+                    recent_scores = trade.get("score_history", [])[-5:] if len(trade.get("score_history", [])) >= 5 else trade.get("score_history", [])
+                    max_score = trade.get("max_score", 0)
+                    current_score = recent_scores[-1] if recent_scores else 0
+                    score_drop = max_score - current_score
+                    
+                    log(f"📉 Score deterioration exit triggered for {symbol}: Current: {current_score:.2f}, Peak: {max_score:.2f}, Drop: {score_drop:.2f}")
+                    
                     # Mark trade for exit
                     trade["exit_score"] = True
                     
@@ -733,8 +792,12 @@ async def monitor_trades(live_candles):
                         
                         if exit_result.get("retCode") == 0:
                             trade["exited"] = True
-                            await send_telegram_message(f"📉 <b>Score Deterioration Exit</b> on <b>{symbol}</b>")
-                            write_log(f"SCORE EXIT: {symbol} | Score trend: {trade.get('score_history', [])[-3:]}")
+                            await send_telegram_message(
+                                f"📉 <b>Score Deterioration Exit</b> on <b>{symbol}</b>\n"
+                                f"Peak score: {max_score:.2f}, Current: {current_score:.2f}\n"
+                                f"Drop: {score_drop:.2f} points ({(score_drop/max_score*100):.1f}%)"
+                            )
+                            write_log(f"SCORE EXIT: {symbol} | Score trend: {recent_scores}, Peak: {max_score}, Current: {current_score}")
                             
                             # Calculate P&L
                             profit_pct = ((current_price - entry_price) / entry_price * 100) if direction.lower() == "long" else ((entry_price - current_price) / entry_price * 100)
