@@ -2,6 +2,7 @@ from volume import get_average_volume
 from symbol_info import get_precision, round_qty
 from activity_logger import write_log
 from logger import log
+from atr import calculate_atr
 import asyncio
 
 def calculate_quantity(symbol, raw_qty, min_qty=0.001):
@@ -15,6 +16,83 @@ def calculate_quantity(symbol, raw_qty, min_qty=0.001):
     if rounded_qty < min_qty:
         return 0
     return rounded_qty
+
+def calculate_exit_tranches(symbol, qty, tranches=3):
+    """
+    Split position into multiple exit tranches
+    Returns a list of quantities for each exit level
+    """
+    if qty <= 0:
+        return []
+        
+    min_qty = 0.001  # Use symbol info or fallback
+    
+    # Calculate base tranche size
+    base_tranche = qty / tranches
+    
+    # Create tranches with different sizes (first smaller, rest larger)
+    # This keeps more size for catching bigger moves
+    tranche_sizes = [base_tranche * 0.85, base_tranche * 0.9, base_tranche * 1.25]
+    
+    # Ensure all tranches meet minimum quantity requirements
+    precision = get_precision(symbol)
+    valid_tranches = [round(max(t, min_qty), precision) for t in tranche_sizes]
+    
+    # Adjust last tranche to ensure total equals original quantity
+    sum_tranches = sum(valid_tranches[:-1])
+    valid_tranches[-1] = round(max(qty - sum_tranches, min_qty), precision)
+    
+    log(f"🔢 Exit tranches for {symbol}: {valid_tranches}")
+    return valid_tranches
+
+def detect_momentum_surge(candles, lookback=5):
+    """
+    Detect if we're in a strong momentum move that might continue
+    Returns True if strong momentum is detected
+    """
+    if len(candles) < lookback + 5:
+        return False
+        
+    # Get recent candles and slightly older candles for comparison
+    recent = candles[-lookback:]
+    prior = candles[-(lookback+5):-lookback]
+    
+    # Calculate average volume increase
+    recent_vol_avg = sum(float(c['volume']) for c in recent) / len(recent)
+    prior_vol_avg = sum(float(c['volume']) for c in prior) / len(prior)
+    vol_increase = recent_vol_avg / prior_vol_avg if prior_vol_avg > 0 else 1
+    
+    # Calculate price momentum
+    recent_opens = [float(c['open']) for c in recent]
+    recent_closes = [float(c['close']) for c in recent]
+    
+    # Count consecutive up/down candles
+    if recent_closes[-1] > recent_opens[-1]:  # Current candle is up
+        consecutive_up = 1
+        for i in range(len(recent)-2, -1, -1):
+            if recent_closes[i] > recent_opens[i]:
+                consecutive_up += 1
+            else:
+                break
+                
+        # Strong momentum criteria: 3+ consecutive up candles with 2x+ volume
+        if consecutive_up >= 3 and vol_increase >= 2.0:
+            return True
+    
+    # For downward momentum (for shorts)
+    if recent_closes[-1] < recent_opens[-1]:  # Current candle is down
+        consecutive_down = 1
+        for i in range(len(recent)-2, -1, -1):
+            if recent_closes[i] < recent_opens[i]:
+                consecutive_down += 1
+            else:
+                break
+                
+        # Strong momentum criteria: 3+ consecutive down candles with 2x+ volume
+        if consecutive_down >= 3 and vol_increase >= 2.0:
+            return True
+    
+    return False
 
 def calculate_trailing_stop(symbol, entry_price, current_price, direction="long", trigger_pct=0.01, trail_pct=0.005):
     """
@@ -43,23 +121,73 @@ def calculate_trailing_stop(symbol, entry_price, current_price, direction="long"
     # Return None if trailing should not be activated yet
     return None
 
+def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_trail_pct):
+    """
+    Adjust trailing percentage based on recent volatility and momentum.
+    Returns an adjusted trailing percentage - wider for momentum, tighter for consolidation
+    """
+    try:
+        # Use 7-period ATR for current volatility
+        atr_short = calculate_atr(candles, period=7)
+        # Use 21-period ATR for baseline volatility
+        atr_long = calculate_atr(candles, period=21)
+        
+        volatility_factor = 1.0
+        
+        if atr_short and atr_long and atr_long > 0:
+            # Calculate volatility ratio
+            vol_ratio = atr_short / atr_long
+            
+            if vol_ratio > 1.5:
+                # Higher volatility = wider trailing to avoid noise
+                volatility_factor = 1.3
+                log(f"📊 High volatility detected for {symbol}: {vol_ratio:.2f}x - widening trail")
+            elif vol_ratio < 0.7:
+                # Lower volatility = tighter trailing to lock profits
+                volatility_factor = 0.8
+                log(f"📊 Low volatility detected for {symbol}: {vol_ratio:.2f}x - tightening trail")
+        
+        # Check for momentum surge - uses wider trailing to catch bigger moves
+        if detect_momentum_surge(candles):
+            momentum_factor = 1.5  # Much wider trail during strong momentum
+            log(f"🚀 Momentum surge detected for {symbol} - using wider trailing ({momentum_factor}x)")
+            volatility_factor = max(volatility_factor, momentum_factor)
+        
+        adjusted_pct = base_trail_pct * volatility_factor
+        log(f"🔄 Adjusted trailing % for {symbol}: {base_trail_pct:.2f}% → {adjusted_pct:.2f}%")
+        return adjusted_pct
+        
+    except Exception as e:
+        log(f"⚠️ Error in adaptive trailing calculation: {e}", level="WARN")
+        return base_trail_pct  # Return original as fallback
+
 def should_trail_stop(symbol, entry_price, current_price, direction="long", candles=None, trigger_pct=0.018, trail_pct=0.009, current_trailing_sl=None):
     """
     Checks if trailing stop should activate:
       - price exceeds trigger threshold
       - volume is at least 1.2x average (optional)
       - SL must improve (never downgrade)
+      - Adjusts trailing based on volatility and momentum
     """
     # Check if we have enough volume to justify trailing
     if candles:
         avg_volume = get_average_volume(candles)
         current_volume = float(candles[-1]['volume'])
-        if current_volume < avg_volume * 1.2:
+        
+        # Check for mega pump pattern - in strong momentum don't require high volume for trailing
+        in_momentum_surge = detect_momentum_surge(candles)
+        
+        if current_volume < avg_volume * 1.2 and not in_momentum_surge:
             write_log(f"🔕 Volume too low for trailing: {current_volume:.2f} < 1.2x avg {avg_volume:.2f}")
             return None
+            
+        # Use adaptive trailing based on volatility
+        adjusted_trail_pct = calculate_adaptive_trailing(symbol, candles, direction, current_price, trail_pct)
+    else:
+        adjusted_trail_pct = trail_pct
 
     # Calculate potential new SL value
-    new_sl = calculate_trailing_stop(symbol, entry_price, current_price, direction, trigger_pct, trail_pct)
+    new_sl = calculate_trailing_stop(symbol, entry_price, current_price, direction, trigger_pct, adjusted_trail_pct)
     if not new_sl:
         return None
 
@@ -89,7 +217,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     
     # Calculate ATR if we have candles
     if candles and len(candles) >= 30:
-        from atr import calculate_atr
         atr = calculate_atr(candles)
     else:
         atr = None
@@ -116,17 +243,26 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     elif regime == "ranging":
         sl_pct *= 1.3  # Slightly wider stops in ranging markets
 
-    # Calculate TP based on risk-reward ratio that varies with trade type
-    if trade_type == "Scalp":
-        tp1_ratio = 1.5  # 1.5:1 reward-to-risk for scalps
-    elif trade_type == "Intraday":
-        tp1_ratio = 1.8  # 1.8:1 for intraday
-    else:  # Swing
-        tp1_ratio = 2.2  # 2.2:1 for swing trades
+    # Calculate TP based on risk-reward ratio that varies with trade type AND regime
+    # Using higher TP targets to catch larger pumps
+    base_tp_ratios = {
+        "Scalp": 2.0,      # 2.0:1 reward-to-risk for scalps (increased from 1.5)
+        "Intraday": 2.5,   # 2.5:1 for intraday (increased from 1.8)
+        "Swing": 3.0       # 3.0:1 for swing trades (increased from 2.2)
+    }
+    
+    tp1_ratio = base_tp_ratios.get(trade_type, 2.5)
+    
+    # Adjust TP ratio based on market regime
+    if regime == "volatile":
+        tp1_ratio *= 1.4   # Higher targets in volatile markets to catch pumps
+    elif regime == "ranging":
+        tp1_ratio *= 0.85  # Tighter targets in ranging markets
     
     tp1_pct = sl_pct * tp1_ratio
     
     # Calculate trailing percentage (typically 1/3 to 1/2 of SL percentage)
+    # Using wider trailing % to avoid getting stopped out of big pumps
     trailing_pct = sl_pct * 0.4 if trade_type == "Scalp" else sl_pct * 0.5
     
     # Calculate actual price levels
@@ -137,6 +273,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl = round(price * (1 + sl_pct / 100), 6)
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
+    log(f"📊 SL/TP calculated for {direction} {trade_type} in {regime} regime | SL: {sl_pct:.2f}% | TP: {tp1_pct:.2f}% | Ratio: {tp1_ratio:.2f}")
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 def calculate_optimal_sl(symbol, direction, entry_price, current_price, trade_type="Intraday", candles=None):
@@ -157,7 +294,6 @@ def calculate_optimal_sl(symbol, direction, entry_price, current_price, trade_ty
     # Calculate ATR-based SL if candles available
     atr = None
     if candles and len(candles) >= 30:
-        from atr import calculate_atr
         atr = calculate_atr(candles)
     
     # Calculate ATR-based SL if available
@@ -220,6 +356,173 @@ def calculate_early_trailing_stop(symbol, direction, entry_price, current_price,
             new_sl = entry_price - (move_down * (1 - trailing_pct/100))
             return round(new_sl, precision)
         return None
+
+def adjust_profit_protection(symbol, entry_price, current_price, direction, trade_type="Intraday"):
+    """
+    Adjust stop loss based on profit milestones reached
+    Returns a new stop loss price if a milestone is hit, otherwise None
+    """
+    precision = get_precision(symbol)
+    
+    if not entry_price or entry_price <= 0:
+        return None
+        
+    # Calculate current profit percentage
+    if direction.lower() == "long":
+        profit_pct = ((current_price - entry_price) / entry_price) * 100
+    else:  # short
+        profit_pct = ((entry_price - current_price) / entry_price) * 100
+    
+    # Define profit milestones based on trade type
+    # Modified to be more tolerant of big moves
+    milestones = {
+        "Scalp": [
+            {"pct": 2.0, "sl_at": 0.5},  # At 2% profit, move SL to 0.5% profit
+            {"pct": 4.0, "sl_at": 1.5},  # At 4% profit, move SL to 1.5% profit
+            {"pct": 7.0, "sl_at": 3.0}   # At 7% profit, move SL to 3% profit
+        ],
+        "Intraday": [
+            {"pct": 3.0, "sl_at": 0.5},  # At 3% profit, move SL to 0.5% profit
+            {"pct": 6.0, "sl_at": 2.0},  # At 6% profit, move SL to 2.0% profit
+            {"pct": 10.0, "sl_at": 4.0}  # At 10% profit, move SL to 4% profit
+        ],
+        "Swing": [
+            {"pct": 5.0, "sl_at": 1.0},   # At 5% profit, move SL to 1% profit
+            {"pct": 10.0, "sl_at": 3.0},  # At 10% profit, move SL to 3% profit
+            {"pct": 15.0, "sl_at": 6.0}   # At 15% profit, move SL to 6% profit
+        ]
+    }
+    
+    # Get appropriate milestones based on trade type
+    trade_milestones = milestones.get(trade_type, milestones["Intraday"])
+    
+    # Find the highest milestone reached
+    best_milestone = None
+    for milestone in trade_milestones:
+        if profit_pct >= milestone["pct"]:
+            best_milestone = milestone
+        else:
+            break
+            
+    # If milestone reached, calculate new SL price
+    if best_milestone:
+        sl_pct = best_milestone["sl_at"]
+        
+        if direction.lower() == "long":
+            new_sl = entry_price * (1 + sl_pct/100)
+        else:  # short
+            new_sl = entry_price * (1 - sl_pct/100)
+            
+        new_sl = round(new_sl, precision)
+        log(f"💰 Profit protection triggered for {symbol} at {profit_pct:.2f}% profit. New SL: {new_sl} ({sl_pct:.2f}% profit)")
+        return new_sl
+        
+    return None
+
+def should_exit_by_time(trade, current_price, candles):
+    """
+    Check if trade should be exited based on time conditions
+    Returns True if time-based exit is recommended
+    """
+    from datetime import datetime
+    
+    # Get trade age in hours
+    try:
+        entry_time = datetime.strptime(trade.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+        current_time = datetime.utcnow()
+        trade_age_hours = (current_time - entry_time).total_seconds() / 3600
+        
+        trade_type = trade.get("trade_type", "Intraday")
+        direction = trade.get("direction", "").lower()
+        entry_price = trade.get("entry_price")
+        tp1_price = trade.get("tp1_price")
+        
+        # Check for momentum surge - don't exit based on time during strong momentum
+        if detect_momentum_surge(candles):
+            log(f"🚀 Momentum surge detected for {trade.get('symbol')} - bypassing time-based exit")
+            return False
+        
+        # Define max age based on trade type
+        max_age = {
+            "Scalp": 6,     # 6 hours for scalps (increased from 4)
+            "Intraday": 30,  # 30 hours for intraday (increased from 24)
+            "Swing": 96      # 96 hours (4 days) for swing trades (increased from 72)
+        }.get(trade_type, 30)
+        
+        # For scalps - check for progress
+        if trade_type == "Scalp" and trade_age_hours > 3 and not trade.get("tp1_hit") and entry_price and tp1_price:
+            # Calculate minimum progress expected
+            if direction == "long":
+                min_progress = entry_price + ((tp1_price - entry_price) * 0.33)
+                if current_price < min_progress:
+                    log(f"⏱ Time-based exit for {trade.get('symbol')}: Scalp not making progress after {trade_age_hours:.1f} hours")
+                    return True
+            else:  # short
+                min_progress = entry_price - ((entry_price - tp1_price) * 0.33)
+                if current_price > min_progress:
+                    log(f"⏱ Time-based exit for {trade.get('symbol')}: Scalp not making progress after {trade_age_hours:.1f} hours")
+                    return True
+        
+        # Exit any trade if max age exceeded AND no significant profit
+        if trade_age_hours > max_age:
+            # Check if we're in good profit
+            if entry_price:
+                profit_pct = ((current_price - entry_price) / entry_price * 100) if direction == "long" else \
+                             ((entry_price - current_price) / entry_price * 100)
+                
+                # If in good profit, allow more time
+                if profit_pct > 3.0:
+                    # Only exit if extremely old
+                    if trade_age_hours > max_age * 1.5:
+                        log(f"⏱ Time-based exit for {trade.get('symbol')}: Extended max age exceeded ({trade_age_hours:.1f} hours)")
+                        return True
+                    return False
+            
+            log(f"⏱ Time-based exit for {trade.get('symbol')}: Max age of {max_age} hours exceeded ({trade_age_hours:.1f} hours)")
+            return True
+            
+    except Exception as e:
+        log(f"❌ Error in time-based exit check: {e}", level="ERROR")
+    
+    return False
+
+def evaluate_score_exit(symbol, trade, score_history, min_exit_cycles=3):
+    """
+    Evaluate whether to exit based on score deterioration pattern
+    Returns True if exit is recommended based on score trend
+    """
+    if len(score_history) < min_exit_cycles:
+        return False
+    
+    trade_type = trade.get("trade_type", "Intraday")
+    recent_scores = score_history[-min_exit_cycles:]
+    
+    # Check for momentum in the current market - don't exit on score alone if in momentum
+    candles = trade.get("candles_1m")
+    if candles and detect_momentum_surge(candles):
+        log(f"🚀 Momentum surge detected for {symbol} - bypassing score-based exit")
+        return False
+    
+    # Check for deteriorating trend
+    is_deteriorating = all(recent_scores[i] >= recent_scores[i+1] for i in range(len(recent_scores)-1))
+    
+    # Different exit thresholds based on trade type
+    thresholds = {
+        "Scalp": 5.0,
+        "Intraday": 5.5,
+        "Swing": 5.0
+    }
+    
+    threshold = thresholds.get(trade_type, 5.0)
+    
+    # Exit only if scores consistently dropping AND last score far below threshold
+    should_exit = is_deteriorating and recent_scores[-1] < threshold and \
+                 (recent_scores[0] - recent_scores[-1]) > 1.5  # Major score drop
+    
+    if should_exit:
+        log(f"📉 Score deterioration exit for {symbol}: Recent scores {recent_scores} below threshold {threshold}")
+        
+    return should_exit
 
 async def validate_sl_price(symbol, direction, sl_price, market_type="linear"):
     """
