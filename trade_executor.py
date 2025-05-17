@@ -8,6 +8,7 @@ from activity_logger import write_log, log_trade_to_file
 from symbol_info import round_qty, symbol_precisions
 from datetime import datetime
 from volume import get_average_volume
+from exit_manager import calculate_exit_tranches, detect_momentum_surge
 import asyncio
 import json
 import traceback
@@ -25,31 +26,72 @@ def calculate_quantity(symbol, raw_qty):
 
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending"):
+    """
+    Calculate optimal SL/TP levels based on trade type, regime, and confidence
+    Enhanced for capturing big pumps
+    """
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
     atr_tf = atr_tf_map.get(trade_type, '15')
     candles = candles_by_tf.get(atr_tf)
     atr = calculate_atr(candles) if candles else None
 
-    atr_factor = 1.2
+    # Adjust ATR factor based on confidence
+    atr_factor = 1.2 if confidence >= 75 else 1.6
+    
     if atr:
         sl_distance = atr * atr_factor
         sl_pct = (sl_distance / price) * 100
     else:
+        # More conservative stops for high confidence setups
         if confidence >= 85 and score >= 7.5:
             sl_pct = 1.5
         elif confidence < 60 or score < 6:
-            sl_pct = 0.6
+            sl_pct = 0.8  # Changed from 0.6 to be slightly wider
         else:
             sl_pct = 1.0
 
+    # Adjust SL based on market regime
     if regime == "volatile":
         sl_pct *= 1.5
     elif regime == "ranging":
         sl_pct *= 1.3
 
-    tp1_pct = sl_pct * 1.8
-    trailing_pct = sl_pct * 0.5
-
+    # Enhanced TP ratios optimized for catching bigger moves
+    tp_ratio_map = {
+        "Scalp": 2.0,      # Increased from 1.8 to 2.0
+        "Intraday": 2.5,   # Increased from 1.8 to 2.5
+        "Swing": 3.0       # Increased from 2.2 to 3.0
+    }
+    
+    tp1_ratio = tp_ratio_map.get(trade_type, 2.5)
+    
+    # Adjust TP ratio based on regime
+    if regime == "volatile":
+        tp1_ratio *= 1.3   # Set higher targets in volatile markets to catch pumps
+    elif regime == "ranging":
+        tp1_ratio *= 0.85  # More conservative in ranging markets
+    
+    # Check for momentum to set even more aggressive targets
+    has_momentum = False
+    candles_1m = candles_by_tf.get('1')
+    if candles_1m and len(candles_1m) >= 10:
+        has_momentum = detect_momentum_surge(candles_1m)
+        if has_momentum:
+            log(f"🚀 Momentum detected during setup - setting aggressive targets")
+            tp1_ratio *= 1.2  # Even higher targets for momentum
+    
+    # Calculate TP percentage and trailing stop percentage
+    tp1_pct = sl_pct * tp1_ratio
+    
+    # Adjusted trailing percentages to better catch big pumps - wider for all types
+    trailing_pct_map = {
+        "Scalp": 0.5,     # More relaxed trailing for scalps
+        "Intraday": 0.6,  # More relaxed trailing for intraday
+        "Swing": 0.7      # More relaxed trailing for swings
+    }
+    trailing_pct = sl_pct * trailing_pct_map.get(trade_type, 0.5)
+    
+    # Calculate actual price levels
     if direction.lower() == "long":
         sl = round(price * (1 - sl_pct / 100), 6)
         tp1 = round(price * (1 + tp1_pct / 100), 6)
@@ -57,6 +99,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl = round(price * (1 + sl_pct / 100), 6)
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
+    log(f"📊 SL/TP calculated: {direction} {trade_type} ({regime}) | SL: {sl_pct:.2f}% | TP: {tp1_pct:.2f}% | Ratio: {tp1_ratio:.1f}x | Trailing: {trailing_pct:.2f}%")
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 
@@ -178,6 +221,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         indicator_scores = signal_data.get("indicator_scores", {})
         used_indicators = signal_data.get("used_indicators", {})
 
+        # Calculate exit tranches for this trade
+        exit_tranches = calculate_exit_tranches(symbol, qty)
+        log(f"📊 Exit tranches calculated for {symbol}: {exit_tranches}")
+
         # OPTIMIZATION: Run leverage setting and order cancellation in parallel
         leverage_task = signed_request("POST", "/v5/position/set-leverage", {
             "category": category,
@@ -244,9 +291,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 log(f"⚠️ Failed to validate SL: {e}", level="WARN")
 
             side = "Sell" if direction.lower() == "long" else "Buy"
-            min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
-            qty_half = max(round_qty(symbol, qty / 2), min_qty)
 
+            # Use the first exit tranche for TP1
+            tp1_qty = exit_tranches[0] if exit_tranches and len(exit_tranches) > 0 else round_qty(symbol, qty / 3)
+            
             # Execute SL and TP orders in parallel
             from bybit_api import place_stop_loss
             sl_task = place_stop_loss(
@@ -262,7 +310,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "symbol": symbol,
                 "side": side,
                 "orderType": "Limit",
-                "qty": str(qty_half),
+                "qty": str(tp1_qty),
                 "price": str(tp1),
                 "timeInForce": "GTC",
                 "reduceOnly": True
@@ -278,13 +326,25 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if not sl_order_id:
                 log(f"⚠️ Warning: No SL order ID returned. Will need to set SL manually.", level="WARN")
 
+            # Also set up a more distant TP2 for catching bigger moves (optional)
+            tp2_price = None
+            if trade_type in ["Intraday", "Swing"]:
+                # Set TP2 at 2x the TP1 distance for potential home runs
+                tp2_pct = tp1_pct * 1.8  # Even more aggressive
+                if direction.lower() == "long":
+                    tp2_price = round(executed_entry * (1 + tp2_pct / 100), 6)
+                else:
+                    tp2_price = round(executed_entry * (1 - tp2_pct / 100), 6)
+                
+                log(f"🎯 Setting stretched TP2 at {tp2_price} ({tp2_pct:.2f}%) for potential pump")
+
             log_trade_to_file(
                 symbol=symbol,
                 direction=direction,
                 entry=executed_entry,
                 sl=sl,
                 tp1=tp1,
-                tp2=None,
+                tp2=tp2_price,
                 result="open",
                 score=score,
                 trade_type=trade_type,
@@ -302,18 +362,20 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 "entry": executed_entry,
                 "sl": sl,
                 "tp1": tp1,
-                "tp2": None,
+                "tp2": tp2_price,
                 "qty": qty,
                 "type": trade_type,
                 "direction": direction,
                 "symbol": symbol,
                 "sl_pct": sl_pct,
                 "tp1_pct": tp1_pct,
-                "tp2_pct": None,
+                "tp2_pct": tp2_pct * 1.8 if tp2_price else None,
                 "trailing_pct": trailing_pct,
                 "indicator_scores": indicator_scores,
                 "used_indicators": used_indicators,
-                "sl_order_id": sl_order_id
+                "sl_order_id": sl_order_id,
+                "exit_tranches": exit_tranches,
+                "regime": regime
             }
         else:
             error_msg = f"❌ Order failed: {order_result.get('retMsg', 'Unknown error')}"
