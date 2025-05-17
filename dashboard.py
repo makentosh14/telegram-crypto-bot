@@ -859,9 +859,15 @@ def filter_data(df):
         hide_open = st.checkbox("Hide Open Trades", value=False, key="hide_open")
         
         # Score range filter
-        if 'score' in df.columns:
-            min_score = float(df['score'].min()) if not df['score'].empty else 0
-            max_score = float(df['score'].max()) if not df['score'].empty else 10
+        if 'score' in df.columns and not df['score'].empty:
+            min_score = float(df['score'].min()) if not pd.isna(df['score'].min()) else 0
+            max_score = float(df['score'].max()) if not pd.isna(df['score'].max()) else 10
+            
+            # Fix for min/max being the same
+            if min_score == max_score:
+                min_score = max(0, min_score - 1)  # Ensure it doesn't go below 0
+                max_score = max_score + 1
+                
             score_range = st.slider("Score Range", min_score, max_score, (min_score, max_score), key="score_range")
         else:
             score_range = (0, 10)
@@ -872,6 +878,12 @@ def filter_data(df):
             if not completed_df.empty:
                 min_pnl = float(completed_df['move_pct'].min()) if not completed_df['move_pct'].empty else -100
                 max_pnl = float(completed_df['move_pct'].max()) if not completed_df['move_pct'].empty else 100
+                
+                # Fix for min/max being the same
+                if min_pnl == max_pnl:
+                    min_pnl = min_pnl - 1
+                    max_pnl = max_pnl + 1
+                    
                 pnl_range = st.slider("PnL Range (%)", min_pnl, max_pnl, (min_pnl, max_pnl), key="pnl_range")
             else:
                 pnl_range = (-100, 100)
@@ -913,8 +925,12 @@ def filter_data(df):
     # Apply score filter
     if 'score' in df.columns:
         df_filtered = df_filtered[
-            (df_filtered.score >= score_range[0]) & 
-            (df_filtered.score <= score_range[1])
+            (df_filtered.score >= score_range[0]) | 
+            (df_filtered.score.isna())
+        ]
+        df_filtered = df_filtered[
+            (df_filtered.score <= score_range[1]) |
+            (df_filtered.score.isna())
         ]
         
     # Apply PnL filter for completed trades
@@ -929,6 +945,19 @@ def filter_data(df):
             (df_filtered.result == "open") |
             (df_filtered.move_pct.isna())
         ]
+        
+    # Display the filtered dataframe
+    if df_filtered.empty:
+        st.warning("No data available after applying filters.")
+        return df_filtered
+
+    # Process additional columns for display
+    if "indicator_scores" in df_filtered.columns:
+        df_filtered.loc[:, "indicators"] = df_filtered["indicator_scores"].apply(format_indicator_scores)
+        df_filtered.loc[:, "top_indicator"] = df_filtered["indicator_scores"].apply(top_indicator)
+
+    if "tf_scores" in df_filtered.columns:
+        df_filtered.loc[:, "tf_scores_display"] = df_filtered["tf_scores"].apply(format_tf_scores)
 
     return df_filtered
 
