@@ -170,6 +170,16 @@ _cached_balance = None
 _balance_timestamp = 0
 
 async def execute_trade_if_valid(signal_data, max_risk=0.06):
+    """
+    Execute a trade if the setup meets all validation criteria
+    
+    Args:
+        signal_data: Dictionary containing trade setup details
+        max_risk: Maximum risk percentage per trade
+        
+    Returns:
+        Trade details dictionary if executed, None if not
+    """
     global _cached_balance, _balance_timestamp
     
     symbol = signal_data["symbol"]
@@ -177,10 +187,43 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     trade_type = signal_data.get("trade_type", "Intraday")
     direction = signal_data.get("direction", "Long").strip().lower()
     regime = signal_data.get("regime", "trending")
+    
+    # FIX: Add score validation at the executor level as final safeguard
+    score = signal_data.get("score", 0)
+    min_score_required = {
+        "Scalp": 6.0,
+        "Intraday": 6.5,
+        "Swing": 7.0
+    }.get(trade_type, 6.0)
+    
+    # Adjust based on regime
+    if regime == "volatile":
+        min_score_required -= 0.5
+    elif regime == "ranging":
+        min_score_required += 0.5
+        
+    # CRITICAL FIX: Final validation check before proceeding
+    if score < min_score_required:
+        log(f"🚫 Score validation failed in executor for {symbol}: {score:.2f} < {min_score_required}", level="WARN")
+        return None
+        
+    # Special check for alternative strategies
+    is_alt_strategy = False
+    if "mean_reversion" in signal_data.get("tf_scores", {}):
+        is_alt_strategy = True
+        if score < 4.0:  # Minimum for mean reversion
+            log(f"🚫 Score validation failed for mean reversion {symbol}: {score:.2f} < 4.0", level="WARN")
+            return None
+    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
+        is_alt_strategy = True
+        if score < 4.0:  # Minimum for breakout sniper
+            log(f"🚫 Score validation failed for breakout sniper {symbol}: {score:.2f} < 4.0", level="WARN")
+            return None
 
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
+        # Rest of your execution code...
         # OPTIMIZATION: Use cached balance if available and recent
         current_time = time.time()
         if _cached_balance is None or current_time - _balance_timestamp > 60:
