@@ -190,40 +190,92 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     
     # FIX: Add score validation at the executor level as final safeguard
     score = signal_data.get("score", 0)
-    min_score_required = {
+    
+    # Base thresholds (exactly matching the ones in main.py)
+    base_thresholds = {
         "Scalp": 6.0,
         "Intraday": 6.5,
         "Swing": 7.0
-    }.get(trade_type, 6.0)
+    }
+    min_score_required = base_thresholds.get(trade_type, 6.0)
     
-    # Adjust based on regime
-    if regime == "volatile":
-        min_score_required -= 0.5
-    elif regime == "ranging":
-        min_score_required += 0.5
+    # Adjust based on regime - exactly matching main.py adjustments
+    score_adjustments = {
+        "volatile": {"scalp": -0.5, "intraday": -0.5, "swing": -0.5},
+        "ranging": {"scalp": 0.5, "intraday": 0.5, "swing": 0.5},
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},
+    }
+    adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
+    
+    if trade_type == "Scalp":
+        min_score_required += adjust["scalp"]
+    elif trade_type == "Intraday":
+        min_score_required += adjust["intraday"]
+    elif trade_type == "Swing":
+        min_score_required += adjust["swing"]
         
-    # CRITICAL FIX: Final validation check before proceeding
-    if score < min_score_required:
-        log(f"🚫 Score validation failed in executor for {symbol}: {score:.2f} < {min_score_required}", level="WARN")
+    # Check for alternative strategies
+    is_mean_reversion = "mean_reversion" in signal_data.get("tf_scores", {})
+    is_breakout_sniper = "breakout_sniper" in signal_data.get("tf_scores", {})
+    
+    # Validation logic - matching the main.py validation
+    score_valid = False
+    
+    if is_mean_reversion:
+        # Mean Reversion has a minimum of 4.0, adjusted for regime
+        mean_rev_min = 4.0
+        if regime == "ranging":
+            mean_rev_min += 0.5  # More stringent in ranging markets
+        elif regime == "volatile":
+            mean_rev_min -= 0.5  # Less stringent in volatile markets
+            
+        if score >= mean_rev_min:
+            score_valid = True
+            log(f"✅ Mean Reversion validation passed: {score:.2f} >= {mean_rev_min}", level="INFO")
+        else:
+            log(f"❌ Mean Reversion validation failed: {score:.2f} < {mean_rev_min}", level="WARN")
+            
+    elif is_breakout_sniper:
+        # Breakout Sniper has a minimum of 4.0, adjusted for regime
+        breakout_min = 4.0
+        if regime == "ranging":
+            breakout_min += 0.5  # More stringent in ranging markets
+        elif regime == "volatile":
+            breakout_min -= 0.5  # Less stringent in volatile markets
+            
+        if score >= breakout_min:
+            score_valid = True
+            log(f"✅ Breakout Sniper validation passed: {score:.2f} >= {breakout_min}", level="INFO")
+        else:
+            log(f"❌ Breakout Sniper validation failed: {score:.2f} < {breakout_min}", level="WARN")
+            
+    elif trade_type == "Swing" and signal_data.get("always_allow_swing", False):
+        # Handle ALWAYS_ALLOW_SWING flag - only when explicitly passed in signal_data
+        # Must be at least 50% of the adjusted threshold
+        if score >= min_score_required:
+            score_valid = True
+            log(f"✅ Swing validation passed: {score:.2f} >= {min_score_required}", level="INFO")
+        elif score >= min_score_required * 0.5:
+            score_valid = True
+            log(f"⚠️ Swing validation passed via ALWAYS_ALLOW_SWING: {score:.2f} >= {min_score_required * 0.5}", level="WARN")
+        else:
+            log(f"❌ Swing validation failed: {score:.2f} < {min_score_required * 0.5}", level="WARN")
+            
+    else:
+        # Standard validation for regular trade types
+        if score >= min_score_required:
+            score_valid = True
+            log(f"✅ {trade_type} validation passed: {score:.2f} >= {min_score_required}", level="INFO")
+        else:
+            log(f"❌ {trade_type} validation failed: {score:.2f} < {min_score_required}", level="WARN")
+    
+    # CRITICAL FIX: Exit early if validation fails
+    if not score_valid:
         return None
         
-    # Special check for alternative strategies
-    is_alt_strategy = False
-    if "mean_reversion" in signal_data.get("tf_scores", {}):
-        is_alt_strategy = True
-        if score < 4.0:  # Minimum for mean reversion
-            log(f"🚫 Score validation failed for mean reversion {symbol}: {score:.2f} < 4.0", level="WARN")
-            return None
-    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
-        is_alt_strategy = True
-        if score < 4.0:  # Minimum for breakout sniper
-            log(f"🚫 Score validation failed for breakout sniper {symbol}: {score:.2f} < 4.0", level="WARN")
-            return None
-
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type}...")
 
     try:
-        # Rest of your execution code...
         # OPTIMIZATION: Use cached balance if available and recent
         current_time = time.time()
         if _cached_balance is None or current_time - _balance_timestamp > 60:
