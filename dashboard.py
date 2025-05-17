@@ -6,6 +6,8 @@ import json
 import plotly.graph_objects as go
 import plotly.express as px
 import numpy as np
+import time
+import shutil
 
 LOG_PATH = "/mnt/data/trade_logs/trade_setups.csv"
 
@@ -181,11 +183,15 @@ def display_trade_table(df, title):
     # Only use columns that exist in the dataframe
     default_columns = [col for col in default_columns if col in all_columns]
     
-    with st.expander("Customize Table Columns"):
+    # Add a unique key based on the title parameter
+    key_suffix = title.lower().replace(" ", "_")
+    
+    with st.expander(f"Customize Table Columns - {title}"):
         selected_columns = st.multiselect(
             "Select columns to display",
             options=all_columns,
-            default=default_columns
+            default=default_columns,
+            key=f"cols_select_{key_suffix}"  # Add unique key here
         )
     
     if not selected_columns:  # Fallback if no columns selected
@@ -483,7 +489,7 @@ def display_trade_drilldown(df):
     
     # Group by symbol for better organization
     symbols = df["symbol"].unique()
-    selected_symbol = st.selectbox("Select a symbol", symbols)
+    selected_symbol = st.selectbox("Select a symbol", symbols, key="drilldown_symbol_select")
     
     # Filter trades for the selected symbol
     symbol_trades = df[df.symbol == selected_symbol].copy()
@@ -495,7 +501,7 @@ def display_trade_drilldown(df):
         st.warning(f"No trades found for {selected_symbol}")
         return
         
-    selected_timestamp = st.selectbox("Select trade timestamp", trade_options)
+    selected_timestamp = st.selectbox("Select trade timestamp", trade_options, key="drilldown_timestamp_select")
     row = symbol_trades[symbol_trades["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S") == selected_timestamp].iloc[0]
 
     # Create nice layout with multiple columns and sections
@@ -718,6 +724,95 @@ def filter_data(df):
     signal_tags = df.signal_tag.unique().tolist() if 'signal_tag' in df.columns else []
 
     with st.sidebar:
+        # Add options to clear/reset data
+        st.write("## 🔄 Data Management")
+        with st.expander("Reset Data Options"):
+            reset_option = st.radio(
+                "Reset Option",
+                ["Keep all data", "Keep recent trades only", "Start fresh"],
+                key="reset_option"
+            )
+            
+            if reset_option == "Keep recent trades only":
+                reset_days = st.number_input(
+                    "Keep trades from the last N days:",
+                    min_value=1,
+                    value=30,
+                    key="reset_days"
+                )
+                
+                if st.button("Confirm Reset (Keep Recent)", key="confirm_reset_recent"):
+                    try:
+                        # Load the data
+                        full_df = pd.read_csv(LOG_PATH)
+                        full_df["timestamp"] = pd.to_datetime(full_df["timestamp"])
+                        
+                        # Filter to keep only recent trades
+                        cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=reset_days)
+                        df_recent = full_df[full_df["timestamp"] >= cutoff_date]
+                        
+                        # Save the filtered data back to the CSV
+                        df_recent.to_csv(LOG_PATH, index=False)
+                        st.success(f"Reset complete! Kept only trades from the last {reset_days} days.")
+                        time.sleep(2)  # Give user time to see the message
+                        st.experimental_rerun()
+                    except Exception as e:
+                        st.error(f"Error resetting data: {e}")
+                        
+            elif reset_option == "Start fresh":
+                st.warning("⚠️ This will delete ALL trade data. This cannot be undone!")
+                
+                confirm_text = st.text_input(
+                    "Type 'CONFIRM' to proceed with complete reset:",
+                    key="confirm_text"
+                )
+                
+                if st.button("Start Fresh (Delete All Data)", key="confirm_fresh_start"):
+                    if confirm_text == "CONFIRM":
+                        try:
+                            # Create a backup just in case
+                            import shutil
+                            from datetime import datetime
+                            
+                            # Create backup
+                            backup_path = f"{LOG_PATH}.backup.{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            if os.path.exists(LOG_PATH):
+                                shutil.copy2(LOG_PATH, backup_path)
+                            
+                            # Get header from existing file or create default header
+                            if os.path.exists(LOG_PATH):
+                                with open(LOG_PATH, 'r') as f:
+                                    header = f.readline().strip()
+                            else:
+                                header = "timestamp,symbol,direction,entry_price,sl,tp1,tp2,result,score,trade_type,confidence,tf_scores,indicator_scores,used_indicators,pattern_detected,whale_signal,volume_spike,sl_strategy,missed_upside,pullback_after"
+                            
+                            # Create new file with just the header
+                            with open(LOG_PATH, 'w') as f:
+                                f.write(header + '\n')
+                                
+                            st.success(f"Successfully reset all trade data! A backup was saved to {backup_path}")
+                            time.sleep(2)  # Give user time to see the message
+                            st.experimental_rerun()
+                        except Exception as e:
+                            st.error(f"Error resetting data: {e}")
+                    else:
+                        st.error("Confirmation text doesn't match 'CONFIRM'. Reset aborted.")
+        
+        # Add option to download current log as backup
+        if os.path.exists(LOG_PATH):
+            try:
+                with open(LOG_PATH, 'r') as f:
+                    file_contents = f.read()
+                    
+                st.download_button(
+                    label="Download Current Log Backup",
+                    data=file_contents,
+                    file_name=f"trade_log_backup_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                    key="download_backup"
+                )
+            except Exception as e:
+                st.error(f"Error creating backup: {e}")
         st.write("## 🔍 Filters")
         
         # Date range filter
@@ -728,7 +823,8 @@ def filter_data(df):
                 "Date range",
                 value=(min_date, max_date),
                 min_value=min_date,
-                max_value=max_date
+                max_value=max_date,
+                key="date_filter"
             )
             
             # Handle single date selection
@@ -738,35 +834,35 @@ def filter_data(df):
                 start_date = end_date = date_range
         
         # Symbol filter with search
-        symbol_search = st.text_input("Search symbols")
+        symbol_search = st.text_input("Search symbols", key="symbol_search")
         filtered_symbols = [s for s in symbols if symbol_search.lower() in s.lower()] if symbol_search else symbols
-        selected_symbols = st.multiselect("Symbols", filtered_symbols, default=filtered_symbols)
+        selected_symbols = st.multiselect("Symbols", filtered_symbols, default=filtered_symbols, key="symbol_select")
         
         # Other filters
-        selected_types = st.multiselect("Trade Types", trade_types, default=trade_types)
-        selected_directions = st.multiselect("Direction", directions, default=directions)
-        selected_results = st.multiselect("Results", results, default=results)
+        selected_types = st.multiselect("Trade Types", trade_types, default=trade_types, key="type_select")
+        selected_directions = st.multiselect("Direction", directions, default=directions, key="direction_select")
+        selected_results = st.multiselect("Results", results, default=results, key="result_select")
         
         # Strategy type filter if available
         if strategy_types:
-            selected_strategies = st.multiselect("Strategy Types", strategy_types, default=strategy_types)
+            selected_strategies = st.multiselect("Strategy Types", strategy_types, default=strategy_types, key="strategy_select")
         else:
             selected_strategies = strategy_types
             
         # Signal tag filter if available
         if signal_tags:
-            selected_tags = st.multiselect("Signal Tags", signal_tags, default=signal_tags)
+            selected_tags = st.multiselect("Signal Tags", signal_tags, default=signal_tags, key="tag_select")
         else:
             selected_tags = signal_tags
             
         # Additional filters
-        hide_open = st.checkbox("Hide Open Trades", value=False)
+        hide_open = st.checkbox("Hide Open Trades", value=False, key="hide_open")
         
         # Score range filter
         if 'score' in df.columns:
             min_score = float(df['score'].min()) if not df['score'].empty else 0
             max_score = float(df['score'].max()) if not df['score'].empty else 10
-            score_range = st.slider("Score Range", min_score, max_score, (min_score, max_score))
+            score_range = st.slider("Score Range", min_score, max_score, (min_score, max_score), key="score_range")
         else:
             score_range = (0, 10)
             
@@ -776,7 +872,7 @@ def filter_data(df):
             if not completed_df.empty:
                 min_pnl = float(completed_df['move_pct'].min()) if not completed_df['move_pct'].empty else -100
                 max_pnl = float(completed_df['move_pct'].max()) if not completed_df['move_pct'].empty else 100
-                pnl_range = st.slider("PnL Range (%)", min_pnl, max_pnl, (min_pnl, max_pnl))
+                pnl_range = st.slider("PnL Range (%)", min_pnl, max_pnl, (min_pnl, max_pnl), key="pnl_range")
             else:
                 pnl_range = (-100, 100)
         else:
@@ -931,7 +1027,7 @@ def export_data(df):
         return
     
     # Export options
-    export_format = st.selectbox("Export format", ["CSV", "Excel", "JSON"])
+    export_format = st.selectbox("Export format", ["CSV", "Excel", "JSON"], key="export_format_select")
     
     # Generate export data
     if export_format == "CSV":
