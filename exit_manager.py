@@ -420,10 +420,7 @@ def adjust_profit_protection(symbol, entry_price, current_price, direction, trad
     return None
 
 def should_exit_by_time(trade, current_price, candles):
-    """
-    Check if trade should be exited based on time conditions
-    Returns True if time-based exit is recommended
-    """
+    """Check if trade should be exited based on time conditions"""
     from datetime import datetime
     
     # Get trade age in hours
@@ -435,33 +432,45 @@ def should_exit_by_time(trade, current_price, candles):
         trade_type = trade.get("trade_type", "Intraday")
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
-        tp1_price = trade.get("tp1_price")
         
-        # Check for momentum surge - don't exit based on time during strong momentum
-        if detect_momentum_surge(candles):
-            log(f"🚀 Momentum surge detected for {trade.get('symbol')} - bypassing time-based exit")
-            return False
+        # Don't exit if we're in profit and in momentum
+        if candles and detect_momentum_surge(candles):
+            # Check if in significant profit
+            is_in_profit = False
+            if entry_price:
+                if direction == "long":
+                    is_in_profit = current_price > entry_price * 1.02  # 2% profit
+                else:
+                    is_in_profit = current_price < entry_price * 0.98  # 2% profit
+                    
+            if is_in_profit:
+                log(f"🚀 Momentum surge detected for {trade.get('symbol')} in profit - bypassing time-based exit")
+                return False
         
-        # Define max age based on trade type
+        # Define max age based on trade type - INCREASED TIMES
         max_age = {
-            "Scalp": 6,     # 6 hours for scalps (increased from 4)
-            "Intraday": 30,  # 30 hours for intraday (increased from 24)
-            "Swing": 96      # 96 hours (4 days) for swing trades (increased from 72)
-        }.get(trade_type, 30)
+            "Scalp": 8,      # 8 hours for scalps (was 6)
+            "Intraday": 36,  # 36 hours for intraday (was 30)
+            "Swing": 120     # 120 hours (5 days) for swing trades (was 96)
+        }.get(trade_type, 36)
         
         # For scalps - check for progress
-        if trade_type == "Scalp" and trade_age_hours > 3 and not trade.get("tp1_hit") and entry_price and tp1_price:
-            # Calculate minimum progress expected
+        if trade_type == "Scalp" and trade_age_hours > 4 and not trade.get("tp1_hit") and entry_price:
+            # Check if price is making any progress
             if direction == "long":
-                min_progress = entry_price + ((tp1_price - entry_price) * 0.33)
-                if current_price < min_progress:
+                # For longs, exit if price is below entry after 4 hours
+                if current_price < entry_price:
                     log(f"⏱ Time-based exit for {trade.get('symbol')}: Scalp not making progress after {trade_age_hours:.1f} hours")
                     return True
             else:  # short
-                min_progress = entry_price - ((entry_price - tp1_price) * 0.33)
-                if current_price > min_progress:
+                # For shorts, exit if price is above entry after 4 hours
+                if current_price > entry_price:
                     log(f"⏱ Time-based exit for {trade.get('symbol')}: Scalp not making progress after {trade_age_hours:.1f} hours")
                     return True
+        
+        # If trade has hit TP1, give it more time
+        if trade.get("tp1_hit"):
+            max_age *= 1.5  # 50% more time after TP1 is hit
         
         # Exit any trade if max age exceeded AND no significant profit
         if trade_age_hours > max_age:
@@ -471,9 +480,9 @@ def should_exit_by_time(trade, current_price, candles):
                              ((entry_price - current_price) / entry_price * 100)
                 
                 # If in good profit, allow more time
-                if profit_pct > 3.0:
+                if profit_pct > 5.0:  # Increased from 3.0% to 5.0%
                     # Only exit if extremely old
-                    if trade_age_hours > max_age * 1.5:
+                    if trade_age_hours > max_age * 2:  # Increased from 1.5x to 2x
                         log(f"⏱ Time-based exit for {trade.get('symbol')}: Extended max age exceeded ({trade_age_hours:.1f} hours)")
                         return True
                     return False
@@ -491,37 +500,62 @@ def evaluate_score_exit(symbol, trade, score_history, min_exit_cycles=3):
     Evaluate whether to exit based on score deterioration pattern
     Returns True if exit is recommended based on score trend
     """
+    # Guard clauses
     if len(score_history) < min_exit_cycles:
+        return False
+        
+    # Don't exit too early after entry
+    min_cycles_before_exit = 5
+    if trade.get("cycles", 0) < min_cycles_before_exit:
+        return False
+    
+    # Don't exit if TP1 just hit (give it time to develop)
+    if trade.get("tp1_hit") and trade.get("cycles", 0) - trade.get("tp1_hit_cycle", 0) < 3:
         return False
     
     trade_type = trade.get("trade_type", "Intraday")
     recent_scores = score_history[-min_exit_cycles:]
     
-    # Check for momentum in the current market - don't exit on score alone if in momentum
+    # Don't exit during momentum
     candles = trade.get("candles_1m")
     if candles and detect_momentum_surge(candles):
         log(f"🚀 Momentum surge detected for {symbol} - bypassing score-based exit")
         return False
     
-    # Check for deteriorating trend
+    # Calculate peak score and current score
+    max_score = max(score_history)
+    current_score = score_history[-1]
+    absolute_drop = max_score - current_score
+    pct_drop = (absolute_drop / max_score * 100) if max_score > 0 else 0
+    
+    # Check if scores are consistently declining
     is_deteriorating = all(recent_scores[i] >= recent_scores[i+1] for i in range(len(recent_scores)-1))
     
-    # Different exit thresholds based on trade type
+    # Different thresholds based on trade type
     thresholds = {
-        "Scalp": 5.0,
-        "Intraday": 5.5,
-        "Swing": 5.0
+        "Scalp": 4.0,     # More tolerant for scalps
+        "Intraday": 3.5,  # More tolerant for intraday
+        "Swing": 3.0      # More tolerant for swings
     }
     
-    threshold = thresholds.get(trade_type, 5.0)
+    threshold = thresholds.get(trade_type, 4.0)
     
-    # Exit only if scores consistently dropping AND last score far below threshold
-    should_exit = is_deteriorating and recent_scores[-1] < threshold and \
-                 (recent_scores[0] - recent_scores[-1]) > 1.5  # Major score drop
+    # Exit criteria - must meet ALL conditions:
+    # 1. Consistent score drop over recent cycles
+    # 2. Current score below threshold
+    # 3. Significant absolute drop from peak (at least 2 points)
+    # 4. Significant percentage drop from peak (at least 30%)
+    should_exit = (
+        is_deteriorating and
+        current_score < threshold and
+        absolute_drop >= 2.0 and
+        pct_drop >= 30
+    )
     
     if should_exit:
-        log(f"📉 Score deterioration exit for {symbol}: Recent scores {recent_scores} below threshold {threshold}")
-        
+        log(f"📉 Score deterioration exit for {symbol}: Current: {current_score}, Peak: {max_score}, " 
+            f"Drop: {absolute_drop:.2f} ({pct_drop:.1f}%), Threshold: {threshold}")
+    
     return should_exit
 
 async def validate_sl_price(symbol, direction, sl_price, market_type="linear"):
