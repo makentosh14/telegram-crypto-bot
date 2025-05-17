@@ -203,4 +203,4 @@ async def test_sl_configurations():
     log(f"\nFinal cleanup result: {cleanup}")
 
 if __name__ == "__main__":
-    asyncio.run(test_direct_api_call())
+    asyncio.run(test_sl_configurations())
