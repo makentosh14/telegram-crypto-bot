@@ -27,8 +27,24 @@ MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
 def save_active_trades():
     try:
+        # Create a copy of the trades dictionary to avoid modifying the original
+        trades_to_save = {}
+        
+        for symbol, trade in active_trades.items():
+            # Create a copy of the trade dictionary
+            trade_copy = dict(trade)
+            
+            # Convert any datetime objects to string format
+            for key, value in trade_copy.items():
+                if isinstance(value, datetime):
+                    trade_copy[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+                    
+            trades_to_save[symbol] = trade_copy
+            
+        # Save the modified trades dictionary
         with open(PERSIST_PATH, 'w') as f:
-            json.dump(active_trades, f, indent=2)
+            json.dump(trades_to_save, f, indent=2)
+            
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
 
