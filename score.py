@@ -280,7 +280,7 @@ def score_symbol(symbol, candles_by_timeframe):
     
     # Add momentum information to timeframe scores
     if has_momentum:
-        tf_scores["momentum"] = 1.5
+        tf_scores["momentum_signal"] = 1.5
         if "momentum" not in used_indicators:
             used_indicators.add("momentum")
 
@@ -301,7 +301,7 @@ def score_symbol(symbol, candles_by_timeframe):
 def determine_direction(tf_scores):
     values = list(tf_scores.values())
     # Remove momentum from direction calculation
-    if "momentum" in tf_scores:
+    if "momentum_signal" in tf_scores:
         values.remove(tf_scores["momentum"])
         
     negative_count = sum(1 for v in values if v < 0)
@@ -321,7 +321,7 @@ def calculate_confidence(score, tf_scores, trend_context, trade_type):
     tf_alignment = sum(1 for s in tf_scores.values() if s > 0)
     
     # Add momentum bonus to confidence if present
-    momentum_bonus = 3 if "momentum" in tf_scores else 0
+    momentum_bonus = 3 if "momentum_signal" in tf_scores else 0
     
     # Calculate base confidence
     base_confidence = (score + trend_boost + tf_alignment + momentum_bonus) / (max_score + 3 + 3) * 100
