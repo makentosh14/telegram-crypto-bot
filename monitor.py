@@ -26,6 +26,7 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
 def save_active_trades():
+    """Save active trades data with backup and atomic write protections"""
     try:
         # Create a copy of the trades dictionary to avoid modifying the original
         trades_to_save = {}
@@ -40,37 +41,133 @@ def save_active_trades():
                     trade_copy[key] = value.strftime("%Y-%m-%d %H:%M:%S")
                     
             trades_to_save[symbol] = trade_copy
-            
-        # Save the modified trades dictionary
-        with open(PERSIST_PATH, 'w') as f:
+        
+        # Use a temporary file for atomic writes
+        temp_path = f"{PERSIST_PATH}.temp"
+        
+        # First write to a temporary file
+        with open(temp_path, 'w') as f:
             json.dump(trades_to_save, f, indent=2)
+            
+        # Then rename the temp file to the actual file (atomic operation)
+        import os
+        if os.path.exists(PERSIST_PATH):
+            os.replace(temp_path, PERSIST_PATH)
+        else:
+            os.rename(temp_path, PERSIST_PATH)
             
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
 
 def load_active_trades():
+    """Load active trades with fallback to backup file if main file is corrupted"""
     global active_trades
-    if os.path.exists(PERSIST_PATH):
+    
+    backup_path = f"{PERSIST_PATH}.backup"
+    
+    def try_load_file(file_path):
         try:
-            now = datetime.utcnow()
-            with open(PERSIST_PATH, 'r') as f:
-                loaded_trades = json.load(f)
-            for symbol, trade in loaded_trades.items():
-                trade_time = trade.get("timestamp")
-                if trade.get("exited"):
-                    continue
-                if trade_time:
-                    try:
-                        trade_dt = datetime.strptime(trade_time, "%Y-%m-%d %H:%M:%S")
-                        if now - trade_dt > timedelta(hours=24):
-                            continue
-                    except:
-                        continue
-                trade["exited"] = False
-                active_trades[symbol] = trade
-            log(f"🔁 Loaded {len(active_trades)} active trades from disk")
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    loaded_trades = json.load(f)
+                return loaded_trades, True
+            return {}, False
+        except json.JSONDecodeError as je:
+            log(f"⚠️ JSON error in {file_path}: {je}", level="ERROR")
+            return {}, False
         except Exception as e:
-            log(f"❌ Failed to load active trades: {e}", level="ERROR")
+            log(f"❌ Error loading {file_path}: {e}", level="ERROR")
+            return {}, False
+    
+    # Try to load the main file
+    loaded_trades, success = try_load_file(PERSIST_PATH)
+    
+    # If main file failed, try the backup
+    if not success:
+        log(f"⚠️ Primary trades file corrupted, trying backup...", level="WARN")
+        loaded_trades, success = try_load_file(backup_path)
+        
+        if success:
+            log(f"✅ Successfully loaded from backup file", level="INFO")
+            # Save the recovered data back to the main file
+            with open(PERSIST_PATH, 'w') as f:
+                json.dump(loaded_trades, f, indent=2)
+        else:
+            log(f"❌ Both primary and backup files corrupted. Starting with empty trades.", level="ERROR")
+            loaded_trades = {}
+    
+    # Process loaded trades, filtering out exited or old trades
+    now = datetime.utcnow()
+    active_trades = {}
+    loaded_count = 0
+    
+    for symbol, trade in loaded_trades.items():
+        # Skip exited trades
+        if trade.get("exited"):
+            continue
+            
+        # Check if trade is too old
+        trade_time = trade.get("timestamp")
+        if trade_time:
+            try:
+                trade_dt = datetime.strptime(trade_time, "%Y-%m-%d %H:%M:%S")
+                if now - trade_dt > timedelta(hours=24):
+                    continue
+            except:
+                continue
+                
+        # Mark as not exited (in case it was somehow set to true but still in file)
+        trade["exited"] = False
+        active_trades[symbol] = trade
+        loaded_count += 1
+    
+    log(f"🔁 Loaded {loaded_count} active trades")
+    
+    # Create a backup of the successfully loaded file
+    if loaded_count > 0:
+        try:
+            import shutil
+            shutil.copy2(PERSIST_PATH, backup_path)
+            log(f"✅ Created backup of active trades file")
+        except Exception as e:
+            log(f"⚠️ Failed to create backup: {e}", level="WARN")
+
+def backup_trades_file():
+    """Create a timestamped backup of the trades file"""
+    if not os.path.exists(PERSIST_PATH):
+        return
+        
+    try:
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{PERSIST_PATH}.{timestamp}"
+        import shutil
+        shutil.copy2(PERSIST_PATH, backup_path)
+        
+        # Keep only the 5 most recent backups
+        import glob
+        backups = glob.glob(f"{PERSIST_PATH}.*")
+        backups.sort(reverse=True)
+        
+        for old_backup in backups[5:]:  # Delete all but the 5 newest
+            os.remove(old_backup)
+            
+        log(f"✅ Created backup of trades file: {backup_path}")
+    except Exception as e:
+        log(f"⚠️ Failed to create backup: {e}", level="WARN")
+
+# Call this function periodically, e.g., once an hour
+# You can add it to your monitor function:
+
+async def periodic_backups():
+    """Run backups every hour"""
+    while True:
+        try:
+            backup_trades_file()
+        except Exception as e:
+            log(f"❌ Error in backup task: {e}", level="ERROR")
+        
+        # Wait for an hour
+        await asyncio.sleep(3600)  # 1 hour
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False):
     """
@@ -929,6 +1026,10 @@ async def emergency_exit_monitor():
                 
         except Exception as e:
             log(f"❌ Error in emergency exit monitor: {e}", level="ERROR")
+
+        # Create a new, empty active trades file
+        with open("monitor_active_trades.json", "w") as f:
+            f.write("{}\n")  # Empty JSON object
             
         # Check every 30 seconds
         await asyncio.sleep(30)
