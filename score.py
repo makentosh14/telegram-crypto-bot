@@ -1,3 +1,5 @@
+# Import logger at the top of the file
+from logger import log
 from rsi import calculate_rsi
 from macd import detect_macd_cross
 from supertrend import calculate_supertrend_signal
@@ -9,7 +11,6 @@ from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
-from logger import log, write_log
 
 # Enhanced weights to better identify potential pumps
 WEIGHTS = {
@@ -113,9 +114,13 @@ def score_symbol(symbol, candles_by_timeframe):
     
     # Aggregate momentum data across timeframes
     has_momentum = any(data[0] for tf, data in momentum_data.items() if data[0])
-    momentum_direction = next((data[1] for tf, data in momentum_data.items() if data[0]), None)
+    momentum_direction = None
+    for tf, data in momentum_data.items():
+        if data[0]:
+            momentum_direction = data[1]
+            break
     
-    if has_momentum:
+    if has_momentum and momentum_direction:
         log(f"🚀 Momentum detected for {symbol}: {momentum_direction} direction")
 
     for tf, candles in candles_by_timeframe.items():
@@ -269,7 +274,6 @@ def score_symbol(symbol, candles_by_timeframe):
                 used_indicators.update(["rsi", "ema", "supertrend", "bollinger", "pattern", "whale"])
 
         except Exception as e:
-            from logger import log
             log(f"❌ Scoring error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
 
         tf_scores[tf] = round(score, 2)
@@ -285,7 +289,7 @@ def score_symbol(symbol, candles_by_timeframe):
     best_score = type_scores[best_type]
     
     # Bonus for aligned momentum with strong scores
-    if has_momentum and best_score > 6.0:
+    if has_momentum and best_score > 6.0 and momentum_direction:
         expected_direction = "bullish" if determine_direction(tf_scores) == "Long" else "bearish"
         if momentum_direction == expected_direction:
             bonus = 0.8  # Bonus for aligned momentum and trade direction
