@@ -499,6 +499,7 @@ async def run_bot():
     # Add the new SL verification loop
     asyncio.create_task(sl_verification_loop())
 
+    await check_for_open_positions()
     await asyncio.sleep(5)
 
     while True:
