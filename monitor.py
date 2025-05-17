@@ -56,7 +56,24 @@ def load_active_trades():
         except Exception as e:
             log(f"❌ Failed to load active trades: {e}", level="ERROR")
 
-def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None):
+def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False):
+    """
+    Track a new active trade with enhanced exit strategy parameters
+    
+    Args:
+        symbol: Trading symbol
+        trade_type: "Scalp", "Intraday", or "Swing"
+        initial_score: Initial trade score
+        entry_price: Entry price
+        direction: "Long" or "Short"
+        trailing_pct: Trailing stop percentage
+        tp2: Second take profit level (for big moves)
+        sl: Initial stop loss level
+        sl_order_id: Stop loss order ID
+        qty: Position size
+        exit_tranches: List of quantities for staged exits
+        has_pump_potential: Flag indicating if this setup has pump potential
+    """
     active_trades[symbol] = {
         "score_history": [initial_score],
         "trade_type": trade_type,
@@ -69,13 +86,30 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "original_sl": sl,
         "tp1_hit": False,
         "tp1_partial_exit": False,
+        "tp2_hit": False,
+        "tp2_exit_executed": False,
         "sl_order_id": sl_order_id,
         "qty": qty,
         "break_even_triggered": False,
         "tp1_price": None,
+        "tp2_price": tp2,  # Store TP2 level for bigger targets
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "exit_tranches": []  # Track exit tranches for partial exits
+        "exit_tranches": exit_tranches or [],  # Store exit tranches for partial exits
+        "smart_pump_alerted": False,  # Flag for pump alert
+        "in_momentum": False,  # Flag for current momentum state
+        "has_pump_potential": has_pump_potential,  # Flag to indicate potential pump setup
+        "exit_timed": False,  # Flag for time-based exit
+        "exit_score": False,  # Flag for score-based exit
     }
+    
+    # Log pump potential if detected
+    if has_pump_potential:
+        log(f"🚀 Trade for {symbol} flagged with pump potential - using optimized exit strategy")
+        
+    # If exit tranches are provided, log them
+    if exit_tranches:
+        log(f"📊 Exit tranches for {symbol}: {exit_tranches}")
+        
     save_active_trades()
 
 def remove_trade(symbol):
