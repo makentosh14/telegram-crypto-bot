@@ -187,7 +187,11 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
         API response from Bybit
     """
     side = "Sell" if direction.lower() == "long" else "Buy"
-    trigger_direction = 1 if direction.lower() == "long" else 2
+    
+    # CRITICAL FIX: Corrected trigger direction logic
+    # For long positions: use 2 (Falling) - triggers when price falls below SL
+    # For short positions: use 1 (Rising) - triggers when price rises above SL
+    trigger_direction = 2 if direction.lower() == "long" else 1
     
     # Verify the SL price is valid
     try:
@@ -215,7 +219,7 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
         "side": side,
         "orderType": "Market",
         "triggerPrice": str(sl_price),
-        "triggerDirection": trigger_direction,
+        "triggerDirection": trigger_direction,  # FIXED: Now correctly set based on position direction
         "triggerBy": "MarkPrice",  # Use MarkPrice for more reliable triggering
         "qty": str(qty),
         "reduceOnly": True,
@@ -250,6 +254,7 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
     
     return result
 
+# --- STOP LOSS WITH RETRY FUNCTION ---
 async def place_stop_loss_with_retry(symbol, direction, qty, sl_price, market_type="linear", max_attempts=3):
     """Enhanced stop loss placement with exponential backoff retries"""
     attempt = 0
@@ -285,11 +290,15 @@ async def place_stop_loss_with_retry(symbol, direction, qty, sl_price, market_ty
     await send_telegram_message(f"⚠️ <b>Critical SL Failure</b> for {symbol} after {max_attempts} attempts")
     return {"retCode": -1, "retMsg": f"Failed after {max_attempts} attempts"}
 
+# --- FALLBACK STOP LOSS FUNCTION ---
 async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="linear"):
     """Alternative approach for placing stop loss when standard method fails"""
     
     # Try a conditional order approach as fallback
     side = "Sell" if direction.lower() == "long" else "Buy"
+    
+    # CRITICAL FIX: Correctly set trigger direction
+    trigger_direction = 2 if direction.lower() == "long" else 1
     
     # First, try a StopLimit order 
     fallback_payload = {
@@ -299,6 +308,7 @@ async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="line
         "orderType": "Limit",  # Try limit instead of market
         "price": str(sl_price),  # Add limit price
         "triggerPrice": str(sl_price),
+        "triggerDirection": trigger_direction,  # FIXED: Use correct trigger direction
         "triggerBy": "LastPrice",  # Try LastPrice as another alternative
         "qty": str(qty),
         "reduceOnly": True,
@@ -350,7 +360,7 @@ async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="line
             log(f"❌ Error in last resort SL approach: {e}", level="ERROR")
     
     return result
-
+    
 async def check_order_exists(order_id, symbol, category="linear"):
     """Check if a specific order exists"""
     try:
