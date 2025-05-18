@@ -252,35 +252,35 @@ async def scan_for_new_signals(symbols):
         elif trade_type == "Intraday" and score >= adj_intraday:
             min_score_met = True
         elif trade_type == "Swing" and score >= adj_swing:
-    # Check cooldown period for this symbol
-    current_time = time.time()
-    if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
-        log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active ({int((current_time - recent_swing_trades[symbol])/60)} minutes elapsed)")
-        min_score_met = False
-    # Check for required technical conditions specific to swing trades
-    elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
-        log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
-        min_score_met = False
-    else:
-        min_score_met = True
-        # Record this swing trade for cooldown tracking
-        recent_swing_trades[symbol] = current_time
-# Only allow ALWAYS_ALLOW_SWING exception if score is at least 70% of threshold (increased from 50%)
-elif trade_type == "Swing" and ALWAYS_ALLOW_SWING and score >= adj_swing * 0.7:
-    log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — checking additional conditions.")
+            # Check cooldown period for this symbol
+            current_time = time.time()
+            if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
+                log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active ({int((current_time - recent_swing_trades[symbol])/60)} minutes elapsed)")
+                min_score_met = False
+            # Check for required technical conditions specific to swing trades
+            elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
+                log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
+                min_score_met = False
+            else:
+                min_score_met = True
+                # Record this swing trade for cooldown tracking
+                recent_swing_trades[symbol] = current_time
+        # Only allow ALWAYS_ALLOW_SWING exception if score is at least 70% of threshold (increased from 50%)
+        elif trade_type == "Swing" and ALWAYS_ALLOW_SWING and score >= adj_swing * 0.7:
+            log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — checking additional conditions.")
     
-    # Apply the same additional validation even when using ALWAYS_ALLOW_SWING
-    current_time = time.time()
-    if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
-        log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active")
-        min_score_met = False
-    elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
-        log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
-        min_score_met = False
-    else:
-        min_score_met = True
-        # Record this swing trade for cooldown tracking
-        recent_swing_trades[symbol] = current_time
+            # Apply the same additional validation even when using ALWAYS_ALLOW_SWING
+            current_time = time.time()
+            if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
+                log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active")
+                min_score_met = False
+            elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
+                log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
+                min_score_met = False
+            else:
+                min_score_met = True
+                # Record this swing trade for cooldown tracking
+                recent_swing_trades[symbol] = current_time
         
         # Skip if minimum score not met
         if not min_score_met:
