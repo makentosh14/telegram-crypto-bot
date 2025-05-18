@@ -500,18 +500,8 @@ def evaluate_score_exit(symbol, trade, score_history, min_exit_cycles=3):
     Evaluate whether to exit based on score deterioration pattern
     Returns True if exit is recommended based on score trend
     """
-    # Guard clauses
-    if len(score_history) < min_exit_cycles:
-        return False
-        
-    # Don't exit too early after entry
-    min_cycles_before_exit = 5
-    if trade.get("cycles", 0) < min_cycles_before_exit:
-        return False
-    
-    # Don't exit if TP1 just hit (give it time to develop)
-    if trade.get("tp1_hit") and trade.get("cycles", 0) - trade.get("tp1_hit_cycle", 0) < 3:
-        return False
+    # Disabled to prevent premature exits - using SL for protection instead
+    return False
     
     trade_type = trade.get("trade_type", "Intraday")
     recent_scores = score_history[-min_exit_cycles:]
