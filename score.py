@@ -37,7 +37,7 @@ TRADE_TYPE_TF = {
 MIN_TF_REQUIRED = {
     "Scalp": 1,
     "Intraday": 1,
-    "Swing": 1,
+    "Swing": 2,
 }
 
 def detect_momentum_strength(candles, lookback=5):
