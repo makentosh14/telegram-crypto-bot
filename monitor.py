@@ -1098,3 +1098,174 @@ async def emergency_exit_monitor():
         
         # Check every 30 seconds
         await asyncio.sleep(30)
+
+# Check for missed TP1 hits on startup
+async def check_missed_tp1_hits():
+    """
+    Scan active trades to detect if any TP1 targets have been hit but not processed
+    This is especially useful after bot restarts
+    """
+    log("🔍 Checking for missed TP1 hits...")
+    
+    for symbol, trade in active_trades.items():
+        if trade.get("exited") or trade.get("tp1_hit"):
+            continue
+            
+        try:
+            # Skip if necessary data is missing
+            if not trade.get("entry_price") or not trade.get("direction"):
+                continue
+            
+            entry_price = trade.get("entry_price")
+            direction = trade.get("direction", "").lower()
+                
+            # Get current price
+            ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
+            current_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
+            
+            if current_price <= 0:
+                continue
+                
+            # Get candles if available
+            candles = None
+            if symbol in live_candles and '1' in live_candles[symbol]:
+                candles = list(live_candles[symbol]['1'])
+                
+            # Calculate TP1 level - using the standard 1.8% for both directions
+            tp1_level = entry_price * 1.018 if direction == "long" else entry_price * 0.982
+            
+            # Check if TP1 has been hit based on current price
+            tp1_hit = (direction == "long" and current_price >= tp1_level) or \
+                    (direction == "short" and current_price <= tp1_level)
+                     
+            # Also check candle wicks for a more robust detection
+            if not tp1_hit and candles and len(candles) >= 3:
+                for i in range(min(3, len(candles))):
+                    candle = candles[-(i+1)]
+                    if direction == "long" and float(candle["high"]) >= tp1_level:
+                        tp1_hit = True
+                        break
+                    elif direction == "short" and float(candle["low"]) <= tp1_level:
+                        tp1_hit = True
+                        break
+            
+            if tp1_hit:
+                log(f"🎯 Missed TP1 hit detected for {symbol}")
+                
+                # Mark TP1 as hit
+                trade["tp1_hit"] = True
+                trade["tp1_hit_cycle"] = trade.get("cycles", 0)
+                trade["tp1_price"] = current_price
+                trade["break_even_triggered"] = True
+                
+                # Update SL to breakeven
+                await update_stop_loss_order(symbol, trade, entry_price)
+                
+                # Send notification
+                await send_telegram_message(
+                    f"🎯 <b>Missed TP1 Hit Detected</b> for {symbol}\n"
+                    f"<b>Current Price:</b> {current_price}\n"
+                    f"<b>TP1 Level:</b> {tp1_level}\n"
+                    f"🛡️ SL moved to breakeven"
+                )
+                
+                log(f"✅ Recovered missed TP1 hit for {symbol}")
+                write_log(f"MISSED TP1 RECOVERY: {symbol} | Current price: {current_price} | TP1 level: {tp1_level}")
+                
+                # Execute partial TP1 exit if possible
+                try:
+                    await execute_partial_exit(symbol, trade, 33)
+                    trade["tp1_partial_exit"] = True
+                    log(f"💰 Executed partial exit for missed TP1 on {symbol}")
+                except Exception as exit_error:
+                    log(f"❌ Failed to execute partial exit for missed TP1: {exit_error}", level="ERROR")
+                
+                save_active_trades()
+                
+        except Exception as e:
+            log(f"❌ Error checking missed TP1 for {symbol}: {e}", level="ERROR")
+    
+    log("✅ Missed TP1 check complete")
+
+async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_attempts=3):
+    """
+    Execute a partial exit with retry logic
+    
+    Args:
+        symbol: Trading symbol
+        trade: Trade object from active_trades
+        exit_percentage: Percentage of position to exit (e.g., 33 for 33%)
+        max_attempts: Maximum retry attempts
+        
+    Returns:
+        bool: True if partial exit was successful
+    """
+    direction = trade.get("direction", "").lower()
+    total_qty = trade.get("qty", 0)
+    
+    if not direction or not total_qty or total_qty <= 0:
+        log(f"❌ Cannot execute partial exit for {symbol}: Invalid trade data", level="ERROR")
+        return False
+    
+    # Calculate exit quantity
+    exit_qty = total_qty * (exit_percentage / 100)
+    
+    # Ensure exit quantity meets minimum requirements
+    from symbol_info import round_qty
+    min_qty = 0.001  # Default minimum quantity
+    
+    exit_qty = max(round_qty(symbol, exit_qty), min_qty)
+    
+    # Don't exit more than we have
+    exit_qty = min(exit_qty, total_qty)
+    
+    log(f"🔍 Attempting partial exit for {symbol}: {exit_qty} units ({exit_percentage}% of {total_qty})")
+    
+    # Try to execute the exit with retries
+    for attempt in range(max_attempts):
+        try:
+            # Execute market order
+            side = "Sell" if direction == "long" else "Buy"
+            
+            result = await place_market_order(
+                symbol=symbol,
+                side=side,
+                qty=str(exit_qty),
+                market_type="linear",
+                reduce_only=True
+            )
+            
+            if result.get("retCode") == 0:
+                # Update trade record with remaining quantity
+                trade["qty"] = round_qty(symbol, total_qty - exit_qty)
+                
+                # Log the partial exit
+                log(f"💰 Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
+                write_log(f"PARTIAL EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
+                
+                # Record in exit tranches history
+                if "exit_tranches_history" not in trade:
+                    trade["exit_tranches_history"] = []
+                
+                trade["exit_tranches_history"].append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "percentage": exit_percentage,
+                    "qty": exit_qty
+                })
+                
+                save_active_trades()
+                return True
+            else:
+                log(f"❌ Partial exit attempt {attempt+1}/{max_attempts} failed: {result.get('retMsg')}", level="ERROR")
+                
+                # Brief pause before retry
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+        except Exception as e:
+            log(f"❌ Error in partial exit attempt {attempt+1}/{max_attempts}: {e}", level="ERROR")
+            
+            # Brief pause before retry
+            await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+    
+    # If we get here, all attempts failed
+    log(f"❌ All partial exit attempts failed for {symbol}", level="ERROR")
+    return False
