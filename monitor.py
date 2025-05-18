@@ -25,6 +25,20 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
+def log_tp1_event(symbol, event_type, data):
+    """Enhanced TP1 logging function"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = f"[{timestamp}] TP1_{event_type}: {symbol} | {json.dumps(data)}"
+    log(msg, level="INFO")
+    write_log(msg)
+
+def log_trailing_event(symbol, event_type, data):
+    """Enhanced trailing stop logging function"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    msg = f"[{timestamp}] TRAILING_{event_type}: {symbol} | {json.dumps(data)}"
+    log(msg, level="INFO")
+    write_log(msg)
+
 def save_active_trades():
     """Save active trades data with backup and atomic write protections"""
     try:
