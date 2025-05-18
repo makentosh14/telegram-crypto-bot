@@ -34,11 +34,96 @@ TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
 recent_exits = {}
 EXIT_COOLDOWN = 10
+recent_swing_trades = {}  # Track recent swing trades by symbol with timestamp
+SWING_COOLDOWN = 3600  # 1 hour cooldown in seconds
 
 # Slightly reduced thresholds in volatile regime to capture more potential pumps
 MIN_SCALP_SCORE = 6.5
 MIN_INTRADAY_SCORE = 7
 MIN_SWING_SCORE = 8.5
+
+def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
+    """
+    Enhanced validation for swing trades to reduce false signals
+    
+    Args:
+        candles_by_tf: Dictionary of candles by timeframe
+        tf_scores: Dictionary of timeframe scores
+        direction: Trade direction ("Long" or "Short")
+        trend_context: Dictionary with market trend information
+        indicator_scores: Dictionary of indicator scores
+        used_indicators: List of indicators used in scoring
+        
+    Returns:
+        bool: True if conditions are met, False otherwise
+    """
+    # 1. Check for trend alignment with BTC
+    btc_trend = trend_context.get("btc_trend", "ranging")
+    trend_aligned = (btc_trend == "uptrend" and direction == "Long") or \
+                    (btc_trend == "downtrend" and direction == "Short")
+    
+    # 2. Verify agreement across multiple timeframes
+    # Count how many higher timeframes (30m, 60m, 240m) are aligned with direction
+    higher_tf_keys = ["30", "60", "240"]
+    aligned_timeframes = 0
+    for tf in higher_tf_keys:
+        if tf in tf_scores:
+            if (direction == "Long" and tf_scores[tf] > 0) or \
+               (direction == "Short" and tf_scores[tf] < 0):
+                aligned_timeframes += 1
+    
+    # 3. Check for strong technical indicators
+    has_strong_pattern = False
+    has_supertrend = False
+    has_ema = False
+    
+    # Search for pattern indicators in higher timeframes
+    for key, score in indicator_scores.items():
+        if "pattern" in key and abs(score) >= 0.5:
+            if (direction == "Long" and score > 0) or (direction == "Short" and score < 0):
+                has_strong_pattern = True
+        if "supertrend" in key and abs(score) >= 0.8:
+            if (direction == "Long" and score > 0) or (direction == "Short" and score < 0):
+                has_supertrend = True
+        if "ema" in key and abs(score) >= 0.8:
+            if (direction == "Long" and score > 0) or (direction == "Short" and score < 0):
+                has_ema = True
+    
+    # 4. Check for volume support
+    has_volume_support = False
+    for key, score in indicator_scores.items():
+        if "volume" in key and score > 0:
+            has_volume_support = True
+            break
+    
+    # 5. Check volatility conditions
+    regime = trend_context.get("regime", "trending")
+    is_volatile = regime == "volatile"
+    
+    # For volatile markets, we require stronger confirmation
+    if is_volatile:
+        # In volatile markets, require more confirmation factors
+        valid = (aligned_timeframes >= 2 and  # At least 2 higher timeframes aligned
+                has_strong_pattern and       # Must have a strong pattern
+                (has_supertrend or has_ema) and  # Must have trend confirmation
+                has_volume_support)          # Must have volume support
+    else:
+        # In trending/ranging markets, can be slightly more lenient
+        valid = (aligned_timeframes >= 1 and  # At least 1 higher timeframe aligned
+                (has_strong_pattern or has_supertrend or has_ema) and  # Need at least one strong indicator
+                (trend_aligned or has_volume_support))  # Either trend aligned or volume support
+    
+    # Log detailed validation results for debugging
+    log(f"🔍 Swing validation for {direction} trade: " +
+        f"Aligned TFs: {aligned_timeframes}, " +
+        f"Trend aligned: {trend_aligned}, " +
+        f"Pattern: {has_strong_pattern}, " +
+        f"Supertrend: {has_supertrend}, " +
+        f"EMA: {has_ema}, " +
+        f"Volume: {has_volume_support}, " +
+        f"Result: {'✅ PASS' if valid else '❌ FAIL'}")
+    
+    return valid
 
 def extract_last_pattern(candles_by_tf):
     for tf in sorted(candles_by_tf, key=lambda x: int(x)):
@@ -46,6 +131,29 @@ def extract_last_pattern(candles_by_tf):
         if pattern:
             return pattern
     return None
+
+# Add this function to main.py
+async def cleanup_cooldowns():
+    """Periodically clean up expired cooldown entries"""
+    while True:
+        try:
+            current_time = time.time()
+            expired_symbols = []
+            
+            for symbol, timestamp in recent_swing_trades.items():
+                if current_time - timestamp > SWING_COOLDOWN:
+                    expired_symbols.append(symbol)
+                    
+            for symbol in expired_symbols:
+                del recent_swing_trades[symbol]
+                
+            log(f"🧹 Cleaned up {len(expired_symbols)} expired swing trade cooldowns")
+            
+        except Exception as e:
+            log(f"❌ Error in cooldown cleanup: {e}", level="ERROR")
+            
+        # Run every 30 minutes
+        await asyncio.sleep(1800)
 
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
@@ -144,11 +252,35 @@ async def scan_for_new_signals(symbols):
         elif trade_type == "Intraday" and score >= adj_intraday:
             min_score_met = True
         elif trade_type == "Swing" and score >= adj_swing:
-            min_score_met = True
-        # Only allow ALWAYS_ALLOW_SWING exception if score is at least 50% of threshold
-        elif trade_type == "Swing" and ALWAYS_ALLOW_SWING and score >= adj_swing * 0.5:
-            log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — proceeding anyways.")
-            min_score_met = True
+    # Check cooldown period for this symbol
+    current_time = time.time()
+    if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
+        log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active ({int((current_time - recent_swing_trades[symbol])/60)} minutes elapsed)")
+        min_score_met = False
+    # Check for required technical conditions specific to swing trades
+    elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
+        log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
+        min_score_met = False
+    else:
+        min_score_met = True
+        # Record this swing trade for cooldown tracking
+        recent_swing_trades[symbol] = current_time
+# Only allow ALWAYS_ALLOW_SWING exception if score is at least 70% of threshold (increased from 50%)
+elif trade_type == "Swing" and ALWAYS_ALLOW_SWING and score >= adj_swing * 0.7:
+    log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — checking additional conditions.")
+    
+    # Apply the same additional validation even when using ALWAYS_ALLOW_SWING
+    current_time = time.time()
+    if symbol in recent_swing_trades and (current_time - recent_swing_trades[symbol] < SWING_COOLDOWN):
+        log(f"⚠️ Skipping {symbol}: Swing trade cooldown period active")
+        min_score_met = False
+    elif not has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
+        log(f"⚠️ Skipping {symbol}: Failed additional swing trade validation checks")
+        min_score_met = False
+    else:
+        min_score_met = True
+        # Record this swing trade for cooldown tracking
+        recent_swing_trades[symbol] = current_time
         
         # Skip if minimum score not met
         if not min_score_met:
@@ -495,6 +627,7 @@ async def run_bot():
     asyncio.create_task(pattern_discovery_loop(symbols))
     asyncio.create_task(pattern_match_loop(symbols))
     asyncio.create_task(pattern_summary_loop())
+    asyncio.create_task(cleanup_cooldowns())
     
     # Add the new SL verification loop
     asyncio.create_task(sl_verification_loop())
