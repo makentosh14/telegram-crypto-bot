@@ -1,3 +1,5 @@
+# monitor.py - Enhanced with improved TP1 and trailing stop functionality
+
 import json
 import os
 import time
@@ -15,6 +17,15 @@ from bybit_api import signed_request, check_order_exists, place_stop_loss, place
 from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
 
+# NEW IMPORTS for enhanced functionality
+from enhanced_exit import (
+    detect_tp1_hit,
+    calculate_smart_trailing_stop,
+    should_trail_stop_enhanced,
+    execute_partial_exit_with_retry
+)
+from trade_verification import verify_position_and_orders
+
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
 startup_time = time.time()
@@ -25,6 +36,7 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
+# NEW LOGGING FUNCTIONS for enhanced tracking
 def log_tp1_event(symbol, event_type, data):
     """Enhanced TP1 logging function"""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -168,9 +180,6 @@ def backup_trades_file():
         log(f"✅ Created backup of trades file: {backup_path}")
     except Exception as e:
         log(f"⚠️ Failed to create backup: {e}", level="WARN")
-
-# Call this function periodically, e.g., once an hour
-# You can add it to your monitor function:
 
 async def periodic_backups():
     """Run backups every hour"""
@@ -670,12 +679,77 @@ async def monitor_trades(live_candles):
             except Exception as e:
                 log(f"❌ Error scoring {symbol}: {e}", level="ERROR")
                 continue
-                
+            
             # 3. Check for momentum surge - important for managing big pumps
             has_momentum = await check_for_momentum_surge(symbol, candles_by_tf)
             trade["in_momentum"] = has_momentum
             
-            # 4. Check for profit protection milestones
+            # 4. ENHANCED TP1 DETECTION using improved detection method
+            if not trade.get("tp1_hit"):
+                # Get candles for TP1 detection
+                candles = candles_by_tf.get('1', [])
+                
+                # Use enhanced TP1 detection
+                if detect_tp1_hit(symbol, trade, current_price, candles):
+                    # Log TP1 detection with details
+                    log_tp1_event(symbol, "DETECTED", {
+                        "price": float(current_price),
+                        "entry_price": float(entry_price),
+                        "direction": direction
+                    })
+                    
+                    # Mark TP1 as hit in trade object
+                    trade["tp1_hit"] = True
+                    trade["tp1_hit_cycle"] = trade.get("cycles", 0)
+                    trade["break_even_triggered"] = True
+                    trade["tp1_price"] = current_price
+                    
+                    # Execute partial exit with improved retry logic
+                    if not trade.get("tp1_partial_exit"):
+                        # Use enhanced partial exit function with retry
+                        exit_success = await execute_partial_exit_with_retry(symbol, trade, 33)  # 33% of position
+                        
+                        if exit_success:
+                            trade["tp1_partial_exit"] = True
+                            write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price} | Success")
+                        else:
+                            write_log(f"TP1 PARTIAL EXIT FAILED: {symbol} | Price: {current_price}")
+                    
+                    # Move SL to breakeven with enhanced error handling
+                    new_sl = entry_price  # Breakeven
+                    
+                    # Update SL to breakeven using centralized function with retry
+                    sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
+                    
+                    if sl_updated:
+                        write_log(f"TP1 SL UPDATE: {symbol} | New SL: {new_sl} (breakeven)")
+                    else:
+                        write_log(f"TP1 SL UPDATE FAILED: {symbol}")
+                    
+                    # Send Telegram notification
+                    await send_telegram_message(f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price}")
+                    
+                    # Log for analysis
+                    log_trade_to_file(
+                        symbol=symbol, 
+                        direction=direction, 
+                        entry=entry_price, 
+                        sl=new_sl,  # Now at breakeven
+                        tp1=current_price, 
+                        tp2=None, 
+                        result="tp1", 
+                        score=score, 
+                        trade_type=trade_type, 
+                        confidence=0,
+                        tf_scores=tf_scores,
+                        indicator_scores=indicator_scores,
+                        used_indicators=used_list
+                    )
+                    
+                    # Save updated trade state
+                    save_active_trades()
+            
+            # 5. Check for profit protection milestones (before TP1)
             if not trade.get("tp1_hit"):  # Before TP1
                 # If we're in profit but haven't hit TP1 yet, consider profit protection
                 profit_sl = adjust_profit_protection(
@@ -692,75 +766,73 @@ async def monitor_trades(live_candles):
                     # Update SL to profit-locking level
                     await update_stop_loss_order(symbol, trade, profit_sl)
             
-            # 5. Handle partial exits at TP1
-            if not trade.get("tp1_hit") and direction and entry_price:
-                tp1_level = entry_price * (1.018 if direction.lower() == "long" else 0.982)
-                
-                if (direction.lower() == "long" and current_price >= tp1_level) or (direction.lower() == "short" and current_price <= tp1_level):
-                    trade["tp1_hit"] = True
-                    trade["tp1_hit_cycle"] = trade.get("cycles", 0)  # Record which cycle TP1 was hit
-                    trade["break_even_triggered"] = True
-                    trade["tp1_price"] = current_price
-                    
-                    # Execute partial exit if we haven't done so already
-                    if not trade.get("tp1_partial_exit"):
-                        # Calculate exit tranches - this gives us a strategy for staged exits
-                        # The first tranche is taken at TP1
-                        tranches = calculate_exit_tranches(symbol, trade.get("qty", 0))
-                        
-                        if tranches and len(tranches) >= 3:
-                            # Save tranches for future exits
-                            trade["exit_tranches"] = tranches
-                            
-                            # Execute first tranche exit (approximately 1/3 of position)
-                            if await execute_partial_exit(symbol, trade, 33):
-                                trade["tp1_partial_exit"] = True
-                                await send_telegram_message(f"💰 <b>Partial Exit</b> on <b>{symbol}</b> — 33% of position exited at TP1")
-                                write_log(f"PARTIAL EXIT: {symbol} | First tranche (33%) exited at TP1")
-                    
-                    # Set trailing SL to entry price initially (break-even)
-                    new_sl = entry_price
-                    
-                    # Update SL order to break-even using centralized function
-                    await update_stop_loss_order(symbol, trade, new_sl)
-                    
-                    await send_telegram_message(f"🌟 <b>TP1 Hit</b> on <b>{symbol}</b> — Smart Trailing SL Activated at Break-even")
-                    write_log(f"TP1 HIT: {symbol} | SL moved to break-even: {entry_price}")
-                    log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), entry_price, None, "tp1", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
-                    strategy = "core_strategy"
-                    if tf_scores.get("mean_reversion"):
-                        strategy = "mean_reversion"
-                    elif tf_scores.get("breakout_sniper"):
-                        strategy = "breakout_sniper"
-                    log_strategy_result(strategy, "breakeven", 0)
-                    save_active_trades()
-            
-            # 6. Handle trailing stop if TP1 hit
+            # 6. ENHANCED TRAILING STOP LOGIC after TP1
             if trade.get("tp1_hit") and trailing_pct:
                 try:
-                    current_trailing_sl = trade.get("trailing_sl")
-                    new_sl = should_trail_stop(
-                        symbol=symbol,
-                        entry_price=entry_price,
-                        current_price=current_price,
-                        direction=direction.lower(),
-                        candles=candles_by_tf.get('1', []),
-                        trigger_pct=trailing_pct * 2,
-                        trail_pct=trailing_pct,
-                        current_trailing_sl=current_trailing_sl
-                    )
+                    # Get 1m candles for enhanced trailing calculation
+                    candles = candles_by_tf.get('1', [])
                     
-                    if new_sl and (current_trailing_sl is None or
-                                  (direction.lower() == "long" and new_sl > current_trailing_sl) or
-                                  (direction.lower() == "short" and new_sl < current_trailing_sl)):
+                    # Use enhanced trailing calculation first
+                    new_sl = should_trail_stop_enhanced(symbol, trade, current_price, candles)
+                    
+                    # If enhanced method returns None, fall back to original method
+                    if not new_sl and candles:
+                        current_trailing_sl = trade.get("trailing_sl")
+                        new_sl = should_trail_stop(
+                            symbol=symbol,
+                            entry_price=entry_price,
+                            current_price=current_price,
+                            direction=direction.lower(),
+                            candles=candles,
+                            trigger_pct=trailing_pct * 2,  # Double trailing percentage as trigger
+                            trail_pct=trailing_pct,
+                            current_trailing_sl=current_trailing_sl
+                        )
+                    
+                    # Update trailing stop if valid and better than current
+                    if new_sl and (trade.get("trailing_sl") is None or
+                                  (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
+                                  (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
                         
-                        # Update the trailing stop using the centralized function
+                        # Log the trailing update with details
+                        log_trailing_event(symbol, "UPDATE", {
+                            "old_sl": float(trade.get("trailing_sl", 0)) if trade.get("trailing_sl") else None,
+                            "new_sl": float(new_sl),
+                            "current_price": float(current_price),
+                            "trailing_pct": float(trailing_pct),
+                            "profit_pct": float((current_price - entry_price) / entry_price * 100) if direction.lower() == "long" else 
+                                         float((entry_price - current_price) / entry_price * 100)
+                        })
+                        
+                        # Update the stop loss order
                         await update_stop_loss_order(symbol, trade, new_sl)
                         
                 except Exception as e:
                     log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
+                    log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
 
-            # 7. Trail SL hit check
+            # 7. Handle post-TP1 pump detection
+            if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("tp2_exit_executed"):
+                recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
+                pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
+                
+                # If price pumps significantly after TP1, alert and consider second exit
+                if pump_move >= TP1_PUMP_THRESHOLD:
+                    if not trade.get("smart_pump_alerted"):
+                        trade["smart_pump_alerted"] = True
+                        await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
+                        write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
+                    
+                    # Execute second exit tranche if we're in a big move and have momentum
+                    if has_momentum and not trade.get("tp2_exit_executed"):
+                        # Take 33% more off during pump (leaving ~33% to ride momentum)
+                        if await execute_partial_exit_with_retry(symbol, trade, 50): # 50% of REMAINING position
+                            trade["tp2_exit_executed"] = True
+                            await send_telegram_message(f"💰 <b>Second Partial Exit</b> on <b>{symbol}</b> — 50% of remaining position exited during pump")
+                            write_log(f"PUMP EXIT: {symbol} | Second tranche (50% of remainder) exited during +{pump_move:.2f}% pump")
+                            save_active_trades()
+            
+            # 8. Trail SL hit check
             if trade.get("tp1_hit") and trade.get("trailing_sl"):
                 trailing_sl = trade["trailing_sl"]
                 if (direction.lower() == "long" and current_price <= trailing_sl) or (direction.lower() == "short" and current_price >= trailing_sl):
@@ -803,7 +875,7 @@ async def monitor_trades(live_candles):
                     save_active_trades()
                     continue
 
-            # 8. Original SL hit check
+            # 9. Original SL hit check (before TP1)
             if not trade.get("tp1_hit") and trade.get("original_sl"):
                 sl_price = trade["original_sl"]
                 if (direction.lower() == "long" and current_price <= sl_price) or (direction.lower() == "short" and current_price >= sl_price):
@@ -822,27 +894,6 @@ async def monitor_trades(live_candles):
                     save_active_trades()
                     continue
 
-           # 9. Post-TP1 pump detection - for second exit tranche during big pumps
-            if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("tp2_exit_executed"):
-                recent_high = max(float(candle["high"]) for candle in candles_by_tf['1'][-TP1_PUMP_CANDLE_LOOKAHEAD:])
-                pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
-                
-                # If price pumps significantly after TP1, take another partial exit
-                if pump_move >= TP1_PUMP_THRESHOLD:
-                    if not trade.get("smart_pump_alerted"):
-                        trade["smart_pump_alerted"] = True
-                        await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
-                        write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
-                    
-                    # Execute second exit tranche if we're in a big move
-                    if has_momentum and not trade.get("tp2_exit_executed"):
-                        # Take 33% more off during pump (leaving ~33% to ride momentum)
-                        if await execute_partial_exit(symbol, trade, 50): # 50% of REMAINING position
-                            trade["tp2_exit_executed"] = True
-                            await send_telegram_message(f"💰 <b>Second Partial Exit</b> on <b>{symbol}</b> — 50% of remaining position exited during pump")
-                            write_log(f"PUMP EXIT: {symbol} | Second tranche (50% of remainder) exited during +{pump_move:.2f}% pump")
-                            save_active_trades()
-            
             # 10. Time-based exit check with momentum override
             # Don't exit on time during a strong momentum move
             if not has_momentum and not trade.get("exit_timed"):
@@ -891,9 +942,9 @@ async def monitor_trades(live_candles):
                     except Exception as e:
                         log(f"❌ Error executing time-based exit: {e}", level="ERROR")
             
-            # 11. Score-based exit check with momentum override - IMPROVED VERSION
+            # 11. Score-based exit check with momentum override
             if not has_momentum and not trade.get("exit_score"):
-                # Use our enhanced exit evaluation that's more tolerant
+                # Use enhanced exit evaluation that's more tolerant
                 if evaluate_score_exit(symbol, trade, trade.get("score_history", [])):
                     # Log detailed information about the score-based exit decision
                     recent_scores = trade.get("score_history", [])[-5:] if len(trade.get("score_history", [])) >= 5 else trade.get("score_history", [])
@@ -944,6 +995,10 @@ async def monitor_trades(live_candles):
                             continue
                     except Exception as e:
                         log(f"❌ Error executing score-based exit: {e}", level="ERROR")
+            
+            # 12. Periodically verify position and orders (every 10 cycles, to avoid API rate limits)
+            if trade.get("cycles") % 10 == 0:
+                await verify_position_and_orders(symbol, trade, auto_repair=True)
                     
         except Exception as e:
             log(f"❌ Unhandled error monitoring {symbol}: {e}", level="ERROR")
@@ -1040,10 +1095,6 @@ async def emergency_exit_monitor():
                 
         except Exception as e:
             log(f"❌ Error in emergency exit monitor: {e}", level="ERROR")
-
-        # Create a new, empty active trades file
-        with open("monitor_active_trades.json", "w") as f:
-            f.write("{}\n")  # Empty JSON object
-            
+        
         # Check every 30 seconds
         await asyncio.sleep(30)
