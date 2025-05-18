@@ -36,9 +36,9 @@ recent_exits = {}
 EXIT_COOLDOWN = 10
 
 # Slightly reduced thresholds in volatile regime to capture more potential pumps
-MIN_SCALP_SCORE = 6.0
-MIN_INTRADAY_SCORE = 6.5
-MIN_SWING_SCORE = 7.0
+MIN_SCALP_SCORE = 6.5
+MIN_INTRADAY_SCORE = 7
+MIN_SWING_SCORE = 8.5
 
 def extract_last_pattern(candles_by_tf):
     for tf in sorted(candles_by_tf, key=lambda x: int(x)):
