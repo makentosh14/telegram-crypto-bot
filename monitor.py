@@ -771,35 +771,35 @@ async def monitor_trades(live_candles):
             # 6. ENHANCED TRAILING STOP LOGIC after TP1
             if trade.get("tp1_hit") and trailing_pct:
                 try:
-                  # Get 1m candles for enhanced trailing calculation
-                  candles = candles_by_tf.get('1', [])
+                    # Get 1m candles for enhanced trailing calculation
+                    candles = candles_by_tf.get('1', [])
         
-                  # Use improved trailing stop logic
-                  from improved_sl_tp_utils import should_trail_stop
+                    # Use improved trailing stop logic
+                    from improved_sl_tp_utils import should_trail_stop
         
-                  new_sl = should_trail_stop(
-                      symbol=symbol,
-                      entry_price=entry_price,
-                      current_price=current_price,
-                      direction=direction,
-                      candles=candles,
-                      trailing_pct=trailing_pct
-                  )
+                    new_sl = should_trail_stop(
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        direction=direction,
+                        candles=candles,
+                        trailing_pct=trailing_pct
+                    )
         
-                  # Update trailing stop if valid
-                  if new_sl and (trade.get("trailing_sl") is None or
-                                (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
-                                (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
+                    # Update trailing stop if valid
+                    if new_sl and (trade.get("trailing_sl") is None or
+                                  (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
+                                  (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
             
-                      # Log the trailing update with details
-                      log(f"🔐 Trailing stop updated for {symbol}: {trade.get('trailing_sl')} → {new_sl}")
+                        # Log the trailing update with details
+                        log(f"🔐 Trailing stop updated for {symbol}: {trade.get('trailing_sl')} → {new_sl}")
             
-                      # Update the stop loss order
-                      await update_stop_loss_order(symbol, trade, new_sl)
+                        # Update the stop loss order
+                        await update_stop_loss_order(symbol, trade, new_sl)
             
-            except Exception as e:
-                  log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
-                  log(traceback.format_exc(), level="ERROR")
+                except Exception as e:
+                    log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
+                    log(traceback.format_exc(), level="ERROR")
 
             # 7. Handle post-TP1 pump detection
             if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("tp2_exit_executed"):
