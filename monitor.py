@@ -16,8 +16,8 @@ from activity_logger import log_trade_to_file
 from bybit_api import signed_request, check_order_exists, place_stop_loss, place_stop_loss_with_retry, place_market_order
 from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
-from improved_sl_tp_utils import should_exit_by_time
-from improved_sl_tp_utils import evaluate_score_exit
+from exit_manager import should_exit_by_time
+from exit_manager import evaluate_score_exit
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
