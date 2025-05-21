@@ -28,6 +28,7 @@ from pattern_discovery import pattern_discovery_scan
 from pattern_matcher import pattern_match_scan
 from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
+from active_trade_scanner import high_frequency_scanner
 
 load_memory()
 
@@ -630,8 +631,7 @@ async def run_bot():
     asyncio.create_task(pattern_summary_loop())
     asyncio.create_task(cleanup_cooldowns())
     asyncio.create_task(verify_all_positions(frequency_minutes=15))
-    
-    # Add the new SL verification loop
+    asyncio.create_task(high_frequency_scanner(live_candles))
     asyncio.create_task(sl_verification_loop())
 
     await asyncio.sleep(5)
