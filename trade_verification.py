@@ -39,7 +39,8 @@ async def verify_position_and_orders(symbol, trade, auto_repair=True):
         
         position_resp = await signed_request("GET", "/v5/position/list", {
             "category": "linear",
-            "symbol": symbol
+            "symbol": symbol,
+            "settleCoin": "USDT"
         })
         
         if position_resp.get("retCode") == 0:
