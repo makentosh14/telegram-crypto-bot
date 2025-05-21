@@ -1,22 +1,23 @@
 import asyncio
 import json
-import time
+import traceback
 import numpy as np
-from datetime import datetime
-from logger import log
+from datetime import datetime, timedelta
+from logger import log, write_log
 from atr import calculate_atr
 
-# Risk configuration constants
+# Constants for risk models
 DEFAULT_RISK_PER_TRADE = 0.02  # 2% per trade default
-MAX_RISK_PER_TRADE = 0.05      # 5% maximum risk per trade 
+MAX_RISK_PER_TRADE = 0.05      # 5% maximum risk per trade
 MIN_RISK_PER_TRADE = 0.005     # 0.5% minimum risk per trade
-MAX_DAILY_RISK = 0.15          # 15% maximum daily risk
 RISK_FREE_RATE = 0.04          # 4% annualized (for Kelly calculations)
+MAX_DAILY_RISK = 0.10          # 10% maximum daily risk
+MAX_DRAWDOWN_PAUSE = 0.15      # 15% drawdown triggers trading pause
 
 # Volatility bands for adjusting position size
 VOLATILITY_BANDS = {
-    "very_low": 1.5,    # 150% of base risk
-    "low": 1.2,         # 120% of base risk
+    "very_low": 0.5,    # 50% of base risk
+    "low": 0.75,        # 75% of base risk
     "normal": 1.0,      # 100% of base risk (baseline)
     "high": 0.7,        # 70% of base risk
     "very_high": 0.5,   # 50% of base risk
@@ -36,12 +37,25 @@ STRATEGY_RISK_WEIGHTS = {
 # Cache of strategy performance for risk allocation
 strategy_performance = {}
 
+# Cache for volatility calculations to avoid redundant computations
+volatility_cache = {}
+
 # Daily risk tracking
 daily_risk = {
     "date": None,
     "used_risk": 0.0,
     "remaining_risk": MAX_DAILY_RISK,
     "trades": []
+}
+
+# Drawdown tracking
+drawdown_tracking = {
+    "peak_balance": 0.0,
+    "current_balance": 0.0,
+    "current_drawdown": 0.0,
+    "max_drawdown": 0.0,
+    "is_paused": False,
+    "pause_timestamp": None
 }
 
 def reset_daily_risk():
@@ -58,17 +72,38 @@ def reset_daily_risk():
 def save_risk_state():
     """Save risk management state to disk for persistence"""
     try:
+        state = {
+            "daily_risk": daily_risk,
+            "drawdown_tracking": drawdown_tracking,
+            "strategy_performance": strategy_performance,
+            "volatility_cache": {k: v for k, v in volatility_cache.items() if isinstance(k, str)}
+        }
+        
         with open("risk_state.json", "w") as f:
-            json.dump(daily_risk, f, default=str)
+            json.dump(state, f, default=str)
     except Exception as e:
         log(f"❌ Failed to save risk state: {e}", level="ERROR")
 
 def load_risk_state():
     """Load risk management state from disk"""
-    global daily_risk
+    global daily_risk, drawdown_tracking, strategy_performance, volatility_cache
+    
     try:
         with open("risk_state.json", "r") as f:
-            daily_risk = json.load(f)
+            state = json.load(f)
+            
+        # Only restore if the date matches today
+        today = datetime.now().date()
+        if state["daily_risk"]["date"] == today.strftime("%Y-%m-%d"):
+            daily_risk = state["daily_risk"]
+        else:
+            reset_daily_risk()
+            
+        drawdown_tracking = state["drawdown_tracking"]
+        strategy_performance = state["strategy_performance"]
+        volatility_cache = state["volatility_cache"]
+        
+        log(f"✅ Loaded risk state with {len(strategy_performance)} strategy records")
     except FileNotFoundError:
         log("⚠️ No risk state file found, starting fresh")
         reset_daily_risk()
@@ -139,7 +174,7 @@ def calculate_market_volatility(candles, lookback=20):
 
 async def calculate_symbol_volatility(symbol, candles_by_tf, timeframe='15'):
     """
-    Calculate volatility for a specific symbol
+    Calculate and cache volatility for a specific symbol
     
     Args:
         symbol: Trading symbol
@@ -149,11 +184,29 @@ async def calculate_symbol_volatility(symbol, candles_by_tf, timeframe='15'):
     Returns:
         tuple: (normalized_volatility, volatility_band)
     """
+    # Use cached value if less than 15 minutes old
+    cache_key = f"{symbol}_{timeframe}"
+    now = datetime.now()
+    
+    if cache_key in volatility_cache:
+        timestamp, volatility, band = volatility_cache[cache_key]
+        cache_age = (now - timestamp).total_seconds() / 60
+        
+        if cache_age < 15:  # Use cache if less than 15 minutes old
+            return volatility, band
+    
+    # Calculate fresh volatility
     candles = candles_by_tf.get(timeframe, [])
     if not candles:
         return 1.0, "normal"
         
-    return calculate_market_volatility(candles)
+    volatility, band = calculate_market_volatility(candles)
+    
+    # Update cache
+    volatility_cache[cache_key] = (now, volatility, band)
+    
+    log(f"🔄 Calculated volatility for {symbol} ({timeframe}m): {volatility:.2f} ({band})")
+    return volatility, band
 
 def calculate_strategy_risk_weight(strategy, win_rate=None, profit_factor=None):
     """
@@ -364,6 +417,63 @@ def register_trade_risk(symbol, risk_amount, strategy):
     log(f"💹 Risk registered: {symbol} {risk_amount:.2%} ({strategy}) - Daily: {daily_risk['used_risk']:.2%}/{MAX_DAILY_RISK:.2%}")
     save_risk_state()
 
+def update_account_balance(balance):
+    """
+    Update account balance tracking for drawdown calculations
+    
+    Args:
+        balance: Current account balance
+    """
+    drawdown_tracking["current_balance"] = balance
+    
+    # Update peak balance if current balance is higher
+    if balance > drawdown_tracking["peak_balance"]:
+        drawdown_tracking["peak_balance"] = balance
+    
+    # Calculate current drawdown
+    if drawdown_tracking["peak_balance"] > 0:
+        drawdown = 1 - (balance / drawdown_tracking["peak_balance"])
+        drawdown_tracking["current_drawdown"] = drawdown
+        
+        # Update max drawdown if current drawdown is higher
+        if drawdown > drawdown_tracking["max_drawdown"]:
+            drawdown_tracking["max_drawdown"] = drawdown
+        
+        # Check if we need to pause trading
+        if drawdown >= MAX_DRAWDOWN_PAUSE and not drawdown_tracking["is_paused"]:
+            drawdown_tracking["is_paused"] = True
+            drawdown_tracking["pause_timestamp"] = datetime.now()
+            log(f"🛑 Trading paused: Max drawdown threshold reached ({drawdown:.2%})", level="ALERT")
+    
+    save_risk_state()
+
+def check_trading_allowed():
+    """
+    Check if trading is currently allowed based on drawdown limits
+    
+    Returns:
+        bool: True if trading is allowed, False if paused
+    """
+    # If not paused, trading is allowed
+    if not drawdown_tracking["is_paused"]:
+        return True
+    
+    # Check if pause duration has expired (24 hours)
+    if drawdown_tracking["pause_timestamp"]:
+        pause_time = datetime.fromisoformat(drawdown_tracking["pause_timestamp"] 
+                                           if isinstance(drawdown_tracking["pause_timestamp"], str) 
+                                           else drawdown_tracking["pause_timestamp"].isoformat())
+        now = datetime.now()
+        
+        # Resume trading after 24 hours
+        if (now - pause_time).total_seconds() > 24 * 60 * 60:
+            drawdown_tracking["is_paused"] = False
+            log("✅ Trading resumed: Pause duration expired", level="INFO")
+            save_risk_state()
+            return True
+    
+    return False
+
 async def calculate_position_size(symbol, candles_by_tf, account_balance, entry_price, stop_loss, 
                                   trade_type, strategy, confidence, market_type="linear"):
     """
@@ -383,6 +493,11 @@ async def calculate_position_size(symbol, candles_by_tf, account_balance, entry_
     Returns:
         tuple: (position_size, risk_amount, leverage)
     """
+    # Verify trading is allowed
+    if not check_trading_allowed():
+        log(f"🛑 Position sizing blocked for {symbol}: Trading currently paused due to drawdown", level="WARN")
+        return 0, 0, 1
+    
     # Base risk by trade type
     base_risk_map = {"Scalp": 0.02, "Intraday": 0.015, "Swing": 0.01}
     base_risk = base_risk_map.get(trade_type, 0.015)
@@ -435,44 +550,25 @@ async def calculate_position_size(symbol, candles_by_tf, account_balance, entry_
     
     return position_size, dollar_risk, leverage
 
-# Simple wrapper function for main.py integration
-def calculate_dynamic_risk(symbol, confidence, strategy, base_risk=0.02):
-    """
-    Calculate dynamic risk percentage based on confidence and strategy
-    Simple wrapper for main.py integration
-    
-    Args:
-        symbol: Trading symbol
-        confidence: Confidence score (0-100)
-        strategy: Strategy name
-        base_risk: Base risk percentage
-        
-    Returns:
-        float: Adjusted risk percentage
-    """
-    # Strategy weight
-    strategy_weight = calculate_strategy_risk_weight(strategy)
-    
-    # Confidence adjustment (0.7x - 1.3x)
-    confidence_factor = 0.7 + (confidence / 100 * 0.6)
-    
-    # Calculate adjusted risk
-    adjusted_risk = base_risk * strategy_weight * confidence_factor
-    
-    # Enforce min/max bounds
-    adjusted_risk = max(min(adjusted_risk, MAX_RISK_PER_TRADE), MIN_RISK_PER_TRADE)
-    
-    return adjusted_risk
-
 async def update_risk_metrics():
     """Periodic task to update risk metrics from trading activity"""
     while True:
         try:
-            # Update daily risk tracking
-            reset_daily_risk()
-            log(f"📊 Daily Risk: {daily_risk['used_risk']:.2%} used, {daily_risk['remaining_risk']:.2%} remaining")
+            # Update account balance from Bybit
+            from bybit_api import get_futures_available_balance
+            balance = await get_futures_available_balance()
+            
+            if balance > 0:
+                update_account_balance(balance)
+                
+                # Log daily risk status
+                reset_daily_risk()  # Ensure daily tracking is current
+                log(f"📊 Daily Risk: {daily_risk['used_risk']:.2%} used, {daily_risk['remaining_risk']:.2%} remaining")
+                log(f"📉 Drawdown: Current {drawdown_tracking['current_drawdown']:.2%}, Max {drawdown_tracking['max_drawdown']:.2%}")
+            
         except Exception as e:
             log(f"❌ Error updating risk metrics: {e}", level="ERROR")
+            log(traceback.format_exc(), level="ERROR")
         
         # Update every 15 minutes
         await asyncio.sleep(900)
