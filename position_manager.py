@@ -12,7 +12,7 @@ from bybit_api import place_market_order, get_futures_available_balance, signed_
 from error_handler import send_telegram_message, send_error_to_telegram
 
 # Import the new advanced risk manager
-from advanced_risk_manager import (
+from risk_manager import (
     calculate_position_size,
     update_strategy_performance,
     check_trading_allowed,
