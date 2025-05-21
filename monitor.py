@@ -497,6 +497,7 @@ async def verify_trade_integrity():
             position_resp = await signed_request("GET", "/v5/position/list", {
                 "category": "linear",
                 "symbol": symbol
+                "settleCoin": "USDT"
             })
             
             if position_resp.get("retCode") != 0:
