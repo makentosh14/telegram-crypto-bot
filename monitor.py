@@ -496,7 +496,7 @@ async def verify_trade_integrity():
             # Get actual position from exchange
             position_resp = await signed_request("GET", "/v5/position/list", {
                 "category": "linear",
-                "symbol": symbol
+                "symbol": symbol,
                 "settleCoin": "USDT"
             })
             
