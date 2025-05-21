@@ -775,7 +775,7 @@ async def monitor_trades(live_candles):
                     candles = candles_by_tf.get('1', [])
         
                     # Use improved trailing stop logic
-                    from improved_sl_tp_utils import should_trail_stop
+                    from exit_manager import should_trail_stop
         
                     new_sl = should_trail_stop(
                         symbol=symbol,
