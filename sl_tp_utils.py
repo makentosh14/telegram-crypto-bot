@@ -433,7 +433,7 @@ async def validate_sl_placement(symbol, direction, sl_price, market_type="linear
             log(f"⚠️ Invalid market price for {symbol}", level="WARN")
             return sl_price  # Return original if we can't validate
         
-        # Add safety buffer (increased to 1.0% from 0.5% for more reliable stop placement)
+        # Add safety buffer (1.0% buffer for more reliable stop placement)
         buffer_pct = 0.01  # 1.0%
         
         # For long positions, SL must be below current price
