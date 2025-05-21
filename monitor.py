@@ -797,7 +797,7 @@ async def monitor_trades(live_candles):
                       # Update the stop loss order
                       await update_stop_loss_order(symbol, trade, new_sl)
             
-              except Exception as e:
+            except Exception as e:
                   log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
                   log(traceback.format_exc(), level="ERROR")
 
