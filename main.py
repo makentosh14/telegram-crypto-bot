@@ -407,7 +407,7 @@ async def scan_for_new_signals(symbols):
                 )
 
                 # OPTIMIZATION: Execute trade BEFORE notification for mean reversion strategy
-                mr_trade = await execute_trade_if_valid({
+                mr_trade = await position_manager.execute_trade({
                     "symbol": symbol,
                     "price": price,
                     "trade_type": "Scalp",
@@ -471,7 +471,7 @@ async def scan_for_new_signals(symbols):
                 bo_pump_potential = has_pump_potential(candles_by_tf, bo_dir)
 
                 # OPTIMIZATION: Execute trade BEFORE notification for breakout strategy
-                bo_trade = await execute_trade_if_valid({
+                bo_trade = await position_manager.execute_trade({
                     "symbol": symbol,
                     "price": price,
                     "trade_type": "Scalp",
