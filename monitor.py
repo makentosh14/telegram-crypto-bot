@@ -16,6 +16,8 @@ from activity_logger import log_trade_to_file
 from bybit_api import signed_request, check_order_exists, place_stop_loss, place_stop_loss_with_retry, place_market_order
 from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
+from improved_sl_tp_utils import should_exit_by_time
+from improved_sl_tp_utils import evaluate_score_exit
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
@@ -769,47 +771,35 @@ async def monitor_trades(live_candles):
             # 6. ENHANCED TRAILING STOP LOGIC after TP1
             if trade.get("tp1_hit") and trailing_pct:
                 try:
-                    # Get 1m candles for enhanced trailing calculation
-                    candles = candles_by_tf.get('1', [])
-                    
-                    # Use enhanced trailing calculation first
-                    new_sl = should_trail_stop_enhanced(symbol, trade, current_price, candles)
-                    
-                    # If enhanced method returns None, fall back to original method
-                    if not new_sl and candles:
-                        current_trailing_sl = trade.get("trailing_sl")
-                        new_sl = should_trail_stop(
-                            symbol=symbol,
-                            entry_price=entry_price,
-                            current_price=current_price,
-                            direction=direction.lower(),
-                            candles=candles,
-                            trigger_pct=trailing_pct * 2,  # Double trailing percentage as trigger
-                            trail_pct=trailing_pct,
-                            current_trailing_sl=current_trailing_sl
-                        )
-                    
-                    # Update trailing stop if valid and better than current
-                    if new_sl and (trade.get("trailing_sl") is None or
-                                  (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
-                                  (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
-                        
-                        # Log the trailing update with details
-                        log_trailing_event(symbol, "UPDATE", {
-                            "old_sl": float(trade.get("trailing_sl", 0)) if trade.get("trailing_sl") else None,
-                            "new_sl": float(new_sl),
-                            "current_price": float(current_price),
-                            "trailing_pct": float(trailing_pct),
-                            "profit_pct": float((current_price - entry_price) / entry_price * 100) if direction.lower() == "long" else 
-                                         float((entry_price - current_price) / entry_price * 100)
-                        })
-                        
-                        # Update the stop loss order
-                        await update_stop_loss_order(symbol, trade, new_sl)
-                        
-                except Exception as e:
-                    log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
-                    log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
+                  # Get 1m candles for enhanced trailing calculation
+                  candles = candles_by_tf.get('1', [])
+        
+                  # Use improved trailing stop logic
+                  from improved_sl_tp_utils import should_trail_stop
+        
+                  new_sl = should_trail_stop(
+                      symbol=symbol,
+                      entry_price=entry_price,
+                      current_price=current_price,
+                      direction=direction,
+                      candles=candles,
+                      trailing_pct=trailing_pct
+                  )
+        
+                  # Update trailing stop if valid
+                  if new_sl and (trade.get("trailing_sl") is None or
+                                (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
+                                (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
+            
+                      # Log the trailing update with details
+                      log(f"🔐 Trailing stop updated for {symbol}: {trade.get('trailing_sl')} → {new_sl}")
+            
+                      # Update the stop loss order
+                      await update_stop_loss_order(symbol, trade, new_sl)
+            
+              except Exception as e:
+                  log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
+                  log(traceback.format_exc(), level="ERROR")
 
             # 7. Handle post-TP1 pump detection
             if trade.get("tp1_hit") and trade.get("tp1_price") and not trade.get("tp2_exit_executed"):
@@ -897,7 +887,7 @@ async def monitor_trades(live_candles):
             # 10. Time-based exit check with momentum override
             # Don't exit on time during a strong momentum move
             if not has_momentum and not trade.get("exit_timed"):
-                if should_exit_by_time(trade, current_price, candles_by_tf.get('1', [])):
+                if should_exit_by_time(trade, datetime.utcnow(), candles_by_tf.get('1', [])):
                     # Mark the trade for exit
                     trade["exit_timed"] = True
                     
@@ -945,7 +935,7 @@ async def monitor_trades(live_candles):
             # 11. Score-based exit check with momentum override
             if not has_momentum and not trade.get("exit_score"):
                 # Use enhanced exit evaluation that's more tolerant
-                if evaluate_score_exit(symbol, trade, trade.get("score_history", [])):
+                if evaluate_score_exit(symbol, trade.get("score_history", []), min_exit_cycles=3, trade_type=trade.get("trade_type", "Intraday")):
                     # Log detailed information about the score-based exit decision
                     recent_scores = trade.get("score_history", [])[-5:] if len(trade.get("score_history", [])) >= 5 else trade.get("score_history", [])
                     max_score = trade.get("max_score", 0)
@@ -1005,6 +995,25 @@ async def monitor_trades(live_candles):
             write_log(f"MONITOR ERROR: {symbol} | {str(e)}", level="ERROR")
 
     save_active_trades()
+
+async def log_trade_result(symbol, result: str, profit: float):
+    """Called when a trade closes (for win/loss tracking)"""
+    if symbol in active_trades:
+        trade = active_trades[symbol]
+        
+        # Process the trade result with the new system
+        from position_manager import process_trade_result
+        await process_trade_result(trade, result, profit)
+        
+        # Remove from active trades
+        active_trades.pop(symbol)
+
+    if result == "win":
+        daily_stats["wins"] += 1
+    elif result == "loss":
+        daily_stats["losses"] += 1
+
+    daily_stats["profit"] += profit
 
 # Periodic SL verification task
 async def verify_all_stop_losses(frequency_minutes=15):
