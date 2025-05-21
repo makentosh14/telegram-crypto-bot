@@ -30,6 +30,7 @@ from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
 from active_trade_scanner import high_frequency_scanner
 from position_manager import execute_trade
+from advanced_risk_manager import load_risk_state, update_risk_metrics
 
 load_memory()
 
@@ -624,6 +625,9 @@ async def run_bot():
     await fetch_symbol_info()
     symbols = await fetch_symbols()
     log(f"✅ Fetched {len(symbols)} symbols.")
+
+    load_risk_state()
+    asyncio.create_task(update_risk_metrics())
 
     load_active_trades()
     asyncio.create_task(stream_candles(symbols))
