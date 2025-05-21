@@ -21,7 +21,7 @@ from advanced_risk_manager import (
 )
 
 # Import the improved SL/TP utilities
-from improved_sl_tp_utils import (
+from sl_tp_utils import (
     calculate_dynamic_sl_tp,
     calculate_exit_tranches,
     validate_sl_placement
