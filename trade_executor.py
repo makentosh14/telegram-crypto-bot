@@ -11,7 +11,7 @@ from volume import get_average_volume
 from exit_manager import calculate_exit_tranches, detect_momentum_surge
 from position_manager import execute_trade
 from sl_tp_utils import calculate_dynamic_sl_tp
-from advanced_risk_manager import calculate_position_size
+from risk_manager import calculate_position_size
 import asyncio
 import json
 import traceback
