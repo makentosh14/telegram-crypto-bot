@@ -29,6 +29,7 @@ from pattern_matcher import pattern_match_scan
 from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
 from active_trade_scanner import high_frequency_scanner
+from position_manager import execute_trade
 
 load_memory()
 
@@ -320,7 +321,7 @@ async def scan_for_new_signals(symbols):
         track_signal(symbol, score)
 
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
-        trade = await execute_trade_if_valid({
+        trade = await execute_trade({
             "symbol": symbol,
             "price": price,
             "trade_type": trade_type,
@@ -336,7 +337,8 @@ async def scan_for_new_signals(symbols):
             "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
             "regime": regime,
             "pump_potential": pump_potential,
-            "always_allow_swing": ALWAYS_ALLOW_SWING and trade_type == "Swing"  # Pass ALWAYS_ALLOW_SWING flag
+            "always_allow_swing": ALWAYS_ALLOW_SWING and trade_type == "Swing",
+            "market_type": get_symbol_category(symbol)
         })
 
         # Format and send notification message after trade is placed
