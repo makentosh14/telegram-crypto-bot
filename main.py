@@ -323,7 +323,7 @@ async def scan_for_new_signals(symbols):
         track_signal(symbol, score)
 
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
-        trade = await execute_trade({
+        trade = await execute_trade_if_valid({
             "symbol": symbol,
             "price": price,
             "trade_type": trade_type,
