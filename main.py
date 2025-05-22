@@ -230,9 +230,10 @@ async def scan_for_new_signals(symbols):
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
 
         # Calculate SL, TP levels
-        sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+        result = calculate_dynamic_sl_tp(
             candles_by_tf, price, trade_type, direction, score, confidence, regime
         )
+        sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
 
         # Check for early pump signals
         pump_data = await detect_early_pump(candles_by_tf, symbol)
@@ -401,9 +402,10 @@ async def scan_for_new_signals(symbols):
                 log_signal(symbol)
                 track_signal(symbol, rev_score)
 
-                sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-                    candles_by_tf, price, "Scalp", rev_dir, rev_score, rev_conf, regime
+                result = calculate_dynamic_sl_tp(
+                    candles_by_tf, price, trade_type, direction, score, confidence, regime
                 )
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
 
                 # OPTIMIZATION: Execute trade BEFORE notification for mean reversion strategy
                 mr_trade = await execute_trade_if_valid({
@@ -462,9 +464,10 @@ async def scan_for_new_signals(symbols):
                 log_signal(symbol)
                 track_signal(symbol, bo_score)
 
-                sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-                    candles_by_tf, price, "Scalp", bo_dir, bo_score, bo_conf, regime
+                result = calculate_dynamic_sl_tp(
+                    candles_by_tf, price, trade_type, direction, score, confidence, regime
                 )
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
 
                 # Check for pump potential in breakout strategy
                 bo_pump_potential = has_pump_potential(candles_by_tf, bo_dir)
