@@ -120,49 +120,67 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     except Exception as e:
         log(f"⚠️ Enhanced SL/TP calculation failed, using fallback: {e}", level="WARN")
     
-    # Fallback to original implementation
+    # Fallback to original implementation with FIXED PERCENTAGES
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
     atr_tf = atr_tf_map.get(trade_type, '15')
     candles = candles_by_tf.get(atr_tf)
     atr = calculate_atr(candles) if candles else None
 
-    # Adjust ATR factor based on confidence
-    atr_factor = 1.2 if confidence >= 75 else 1.6
+    # FIXED: More reasonable base SL percentages for crypto
+    base_sl_percentages = {
+        "Scalp": 1.8,      # 1.8% for scalps (was too low)
+        "Intraday": 2.2,   # 2.2% for intraday (was too low) 
+        "Swing": 2.8       # 2.8% for swing trades (was too low)
+    }
     
-    if atr:
-        sl_distance = atr * atr_factor
-        sl_pct = (sl_distance / price) * 100
-        # Ensure minimum SL percentage for crypto
-        sl_pct = max(sl_pct, 1.5)  # Minimum 1.5% SL
-    else:
-        # More reasonable stops for different confidence levels
-        if confidence >= 85 and score >= 7.5:
-            sl_pct = 2.0   # High confidence: 2% SL
-        elif confidence < 60 or score < 6:
-            sl_pct = 3.0   # Low confidence: 3% SL
-        else:
-            sl_pct = 2.5   # Default: 2.5% SL
-
-    # Adjust SL based on market regime
+    # Start with base percentage
+    sl_pct = base_sl_percentages.get(trade_type, 2.2)
+    
+    # Adjust based on confidence - LESS aggressive adjustments
+    if confidence >= 85 and score >= 8.0:
+        sl_pct *= 0.9   # Only 10% tighter for very high confidence (was 0.8)
+    elif confidence < 60 or score < 6:
+        sl_pct *= 1.3   # 30% wider for low confidence (was 1.5)
+    
+    # Adjust SL based on market regime - MORE conservative
     if regime == "volatile":
-        sl_pct *= 1.5
+        sl_pct *= 1.6   # Much wider in volatile markets (was 1.5)
     elif regime == "ranging":
-        sl_pct *= 1.3
+        sl_pct *= 1.4   # Wider in ranging markets (was 1.3)
+
+    # FIXED: Ensure minimum SL percentage for crypto volatility
+    min_sl_pct = {
+        "Scalp": 1.5,      # Minimum 1.5% for scalps
+        "Intraday": 1.8,   # Minimum 1.8% for intraday
+        "Swing": 2.0       # Minimum 2.0% for swing trades
+    }
+    
+    sl_pct = max(sl_pct, min_sl_pct.get(trade_type, 1.8))
+
+    # If we have ATR, use it as additional validation but don't make SL too tight
+    if atr:
+        atr_factor = 1.8 if confidence >= 75 else 2.2  # More conservative ATR factors
+        atr_sl_distance = atr * atr_factor
+        atr_sl_pct = (atr_sl_distance / price) * 100
+        
+        # Use the WIDER of ATR-based or percentage-based SL
+        sl_pct = max(sl_pct, atr_sl_pct)
+        log(f"📊 ATR-based SL: {atr_sl_pct:.2f}%, Percentage-based: {sl_pct:.2f}%, Using: {max(sl_pct, atr_sl_pct):.2f}%")
 
     # Enhanced TP ratios optimized for catching bigger moves
     tp_ratio_map = {
-        "Scalp": 2.0,
-        "Intraday": 2.5,
-        "Swing": 3.0
+        "Scalp": 2.2,      # Increased from 2.0
+        "Intraday": 2.8,   # Increased from 2.5
+        "Swing": 3.5       # Increased from 3.0
     }
     
-    tp1_ratio = tp_ratio_map.get(trade_type, 2.5)
+    tp1_ratio = tp_ratio_map.get(trade_type, 2.8)
     
     # Adjust TP ratio based on regime
     if regime == "volatile":
-        tp1_ratio *= 1.3
+        tp1_ratio *= 1.4   # Higher targets in volatile markets for pumps
     elif regime == "ranging":
-        tp1_ratio *= 0.85
+        tp1_ratio *= 0.8   # Lower targets in ranging markets
     
     # Check for momentum to set even more aggressive targets
     has_momentum = False
@@ -171,18 +189,18 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         has_momentum = detect_momentum_surge(candles_1m)
         if has_momentum:
             log(f"🚀 Momentum detected during setup - setting aggressive targets")
-            tp1_ratio *= 1.2
+            tp1_ratio *= 1.3
     
     # Calculate TP percentage and trailing stop percentage
     tp1_pct = sl_pct * tp1_ratio
     
-    # Adjusted trailing percentages to better catch big pumps
+    # FIXED: More reasonable trailing percentages
     trailing_pct_map = {
-        "Scalp": 0.5,
-        "Intraday": 0.6,
-        "Swing": 0.7
+        "Scalp": 0.7,      # 70% of SL distance for scalps
+        "Intraday": 0.8,   # 80% of SL distance for intraday
+        "Swing": 0.9       # 90% of SL distance for swing trades
     }
-    trailing_pct = sl_pct * trailing_pct_map.get(trade_type, 0.5)
+    trailing_pct = sl_pct * trailing_pct_map.get(trade_type, 0.8)
     
     # Calculate actual price levels
     if direction.lower() == "long":
@@ -192,7 +210,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl = round(price * (1 + sl_pct / 100), 6)
         tp1 = round(price * (1 - tp1_pct / 100), 6)
 
-    log(f"📊 SL/TP calculated: {direction} {trade_type} ({regime}) | SL: {sl_pct:.2f}% | TP: {tp1_pct:.2f}% | Ratio: {tp1_ratio:.1f}x | Trailing: {trailing_pct:.2f}%")
+    log(f"📊 SL/TP calculated: {direction} {trade_type} ({regime}) | Entry: {price} | SL: {sl} ({sl_pct:.2f}%) | TP: {tp1} ({tp1_pct:.2f}%) | RR: {tp1_ratio:.1f}x | Trail: {trailing_pct:.2f}%")
     return sl, tp1, sl_pct, trailing_pct, tp1_pct
 
 async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance, 
