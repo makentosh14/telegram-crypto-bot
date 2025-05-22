@@ -78,46 +78,82 @@ async def get_wallet_balance():
 # === FUTURES BALANCE FUNCTION (FIXED DUPLICATE) ===
 async def get_futures_available_balance():
     try:
-        # Request MARGIN account type instead of UNIFIED
+        # Use UNIFIED account but look for margin trading balance
         response = await signed_request("GET", "/v5/account/wallet-balance", {
-            "accountType": "MARGIN",  # Changed from UNIFIED to MARGIN
-            "coin": "USDT"
+            "accountType": "UNIFIED"
         })
         
-        log(f"📊 Margin balance response: {response}")
+        log(f"📊 Unified account response: {response}")
         
         if response.get("retCode") != 0:
-            log(f"❌ Failed to fetch margin wallet balance: {response.get('retMsg')}", level="ERROR")
+            log(f"❌ Failed to fetch unified wallet balance: {response.get('retMsg')}", level="ERROR")
             return 0.0
                 
-        # Parse MARGIN account USDT balance
+        # Parse UNIFIED account for margin trading balance
         try:
             if "list" in response["result"] and len(response["result"]["list"]) > 0:
                 account_info = response["result"]["list"][0]
                 
-                # Check if we have a direct USDT coin entry
+                # Log the full account structure to understand what's available
+                log(f"🔍 Account structure: {json.dumps(account_info, indent=2)}")
+                
+                # Check if we have coin entries
                 if "coin" in account_info and len(account_info["coin"]) > 0:
                     usdt_coins = [coin for coin in account_info["coin"] if coin["coin"] == "USDT"]
                     
                     if usdt_coins:
                         usdt = usdt_coins[0]
-                        # For margin account, look for available balance
-                        available = float(usdt.get("availableToTrade", usdt.get("availableBalance", usdt.get("free", 0))))
-                        log(f"💰 Margin USDT balance: {available}")
-                        return available
+                        log(f"🔍 USDT coin data: {json.dumps(usdt, indent=2)}")
+                        
+                        # In unified accounts, look for these balance types for margin trading:
+                        balance_priority = [
+                            "availableToTrade",    # Available for trading (margin)
+                            "availableBalance",    # Available balance
+                            "marginBalance",       # Specific margin balance
+                            "free",               # Free balance
+                            "walletBalance",      # Total wallet balance
+                            "equity"              # Account equity
+                        ]
+                        
+                        for balance_field in balance_priority:
+                            if balance_field in usdt:
+                                balance = float(usdt.get(balance_field, 0))
+                                if balance > 0:
+                                    log(f"💰 Found USDT {balance_field}: {balance}")
+                                    return balance
+                                else:
+                                    log(f"⚠️ {balance_field} is 0 or empty")
                 
-                # Fallback to account-level available balance
-                if "availableBalance" in account_info:
-                    balance = float(account_info["availableBalance"])
-                    log(f"💰 Margin account balance: {balance}")
-                    return balance
+                # If no USDT coin found, try account-level balances
+                log(f"⚠️ No USDT coin found, checking account-level balances")
+                account_balance_fields = [
+                    "totalAvailableBalance",
+                    "availableBalance", 
+                    "totalMarginBalance",
+                    "totalWalletBalance"
+                ]
+                
+                for field in account_balance_fields:
+                    if field in account_info:
+                        balance = float(account_info.get(field, 0))
+                        if balance > 0:
+                            log(f"💰 Found account {field}: {balance}")
+                            return balance
+                        else:
+                            log(f"⚠️ Account {field} is 0 or empty")
             
-            log("⚠️ No suitable balance field found in margin account response")
+            log("❌ No suitable balance field found in unified account")
             return 0.0
             
         except Exception as e:
-            log(f"❌ Failed to parse margin balance: {e}", level="ERROR")
+            log(f"❌ Failed to parse unified account balance: {e}", level="ERROR")
+            log(f"💡 Full parsing error: {traceback.format_exc()}")
             return 0.0
+            
+    except Exception as e:
+        log(f"❌ Failed to fetch unified account balance: {e}", level="ERROR")
+        log(f"💡 Full error: {traceback.format_exc()}")
+        return 0.0
             
     except Exception as e:
         log(f"❌ Failed to fetch available margin balance: {e}", level="ERROR")
