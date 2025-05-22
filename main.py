@@ -31,6 +31,7 @@ from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
 from active_trade_scanner import high_frequency_scanner
 from risk_manager import load_risk_state, update_risk_metrics
+from symbol_utils import get_symbol_category
 
 load_memory()
 
