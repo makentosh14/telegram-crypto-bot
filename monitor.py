@@ -4,6 +4,7 @@ import json
 import os
 import time
 import asyncio
+import traceback
 from datetime import datetime, timedelta
 from score import score_symbol
 from pattern_detector import detect_pattern
@@ -18,6 +19,7 @@ from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
 from exit_manager import should_trail_stop, adjust_profit_protection, should_exit_by_time, detect_momentum_surge, calculate_exit_tranches
 from sl_tp_utils import evaluate_score_exit
+
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
