@@ -466,7 +466,7 @@ def check_trading_allowed():
         now = datetime.now()
         
         # Resume trading after 24 hours
-        if (now - pause_time).total_seconds() > 24 * 60 * 60:
+        if (now - pause_time).total_seconds() > 30 * 60:
             drawdown_tracking["is_paused"] = False
             log("✅ Trading resumed: Pause duration expired", level="INFO")
             save_risk_state()
