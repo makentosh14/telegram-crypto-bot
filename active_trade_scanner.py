@@ -270,7 +270,16 @@ async def high_frequency_scanner(live_candles):
         
         try:
             # Only scan active trades (not exited)
-            active_symbols = [symbol for symbol, trade in active_trades.items() if not trade.get("exited")]
+            active_symbols = []
+            for symbol, trade in active_trades.items():
+                exited = trade.get("exited")
+                # More explicit checking - trade is active if exited is False/None AND has required data
+                if ((exited is False or exited is None or not exited) and 
+                    trade.get("direction") and trade.get("entry_price") and trade.get("qty")):
+                    active_symbols.append(symbol)
+                    log(f"🔍 HF SCANNER: {symbol} marked as active (exited={repr(exited)})")
+                else:
+                    log(f"🔍 HF SCANNER: {symbol} skipped - exited={repr(exited)}, has_data={bool(trade.get('direction') and trade.get('entry_price') and trade.get('qty'))}")
             
             if active_symbols:
                 # Process trades in small batches to avoid rate limits
