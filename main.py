@@ -224,7 +224,7 @@ async def scan_for_new_signals(symbols):
             strategy = "breakout_sniper"
         
         # Get dynamic risk percentage based on confidence, strategy, and past performance
-        risk_pct = calculate_dynamic_risk(symbol, confidence, strategy, base_risk)
+        risk_pct = base_risk
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
