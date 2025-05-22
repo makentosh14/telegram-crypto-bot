@@ -933,60 +933,6 @@ async def monitor_trades(live_candles):
                     except Exception as e:
                         log(f"❌ Error executing time-based exit: {e}", level="ERROR")
             
-            # 11. Score-based exit check with momentum override
-            if not has_momentum and not trade.get("exit_score"):
-                # Use enhanced exit evaluation that's more tolerant
-                if evaluate_score_exit(symbol, trade.get("score_history", []), min_exit_cycles=3, trade_type=trade.get("trade_type", "Intraday")):
-                    # Log detailed information about the score-based exit decision
-                    recent_scores = trade.get("score_history", [])[-5:] if len(trade.get("score_history", [])) >= 5 else trade.get("score_history", [])
-                    max_score = trade.get("max_score", 0)
-                    current_score = recent_scores[-1] if recent_scores else 0
-                    score_drop = max_score - current_score
-                    
-                    log(f"📉 Score deterioration exit triggered for {symbol}: Current: {current_score:.2f}, Peak: {max_score:.2f}, Drop: {score_drop:.2f}")
-                    
-                    # Mark trade for exit
-                    trade["exit_score"] = True
-                    
-                    # Execute market exit
-                    side = "Sell" if direction.lower() == "long" else "Buy"
-                    try:
-                        exit_result = await place_market_order(
-                            symbol=symbol,
-                            side=side,
-                            qty=str(trade.get("qty")),
-                            market_type="linear",
-                            reduce_only=True
-                        )
-                        
-                        if exit_result.get("retCode") == 0:
-                            trade["exited"] = True
-                            await send_telegram_message(
-                                f"📉 <b>Score Deterioration Exit</b> on <b>{symbol}</b>\n"
-                                f"Peak score: {max_score:.2f}, Current: {current_score:.2f}\n"
-                                f"Drop: {score_drop:.2f} points ({(score_drop/max_score*100):.1f}%)"
-                            )
-                            write_log(f"SCORE EXIT: {symbol} | Score trend: {recent_scores}, Peak: {max_score}, Current: {current_score}")
-                            
-                            # Calculate P&L
-                            profit_pct = ((current_price - entry_price) / entry_price * 100) if direction.lower() == "long" else ((entry_price - current_price) / entry_price * 100)
-                            result_type = "win" if profit_pct > 0 else "loss"
-                            
-                            log_trade_result(symbol, tf_scores, result_type)
-                            log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, current_price, result_type, score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
-                            
-                            strategy = "core_strategy"
-                            if tf_scores.get("mean_reversion"):
-                                strategy = "mean_reversion"
-                            elif tf_scores.get("breakout_sniper"):
-                                strategy = "breakout_sniper"
-                                
-                            log_strategy_result(strategy, result_type, round(profit_pct, 2))
-                            save_active_trades()
-                            continue
-                    except Exception as e:
-                        log(f"❌ Error executing score-based exit: {e}", level="ERROR")
-            
             # 12. Periodically verify position and orders (every 10 cycles, to avoid API rate limits)
             if trade.get("cycles") % 10 == 0:
                 await verify_position_and_orders(symbol, trade, auto_repair=True)
