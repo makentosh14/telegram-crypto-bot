@@ -624,6 +624,17 @@ async def pattern_summary_loop():
         pattern_stats['matches'] = 0
         pattern_stats['trades'] = 0
 
+async def startup_cleanup():
+    """Clean up any orphaned orders on startup"""
+    log("🧹 Performing startup cleanup...")
+    try:
+        result = await signed_request("POST", "/v5/order/cancel-all", {
+            "category": "linear",
+            "orderFilter": "Stop"
+        })
+        log(f"✅ Startup cleanup completed: {result}")
+    except Exception as e:
+        log(f"❌ Startup cleanup failed: {e}")
 
 async def run_bot():
     log("🚀 Bot starting...")
@@ -644,6 +655,8 @@ async def run_bot():
     asyncio.create_task(verify_all_positions(frequency_minutes=15))
     asyncio.create_task(high_frequency_scanner(live_candles))
     asyncio.create_task(sl_verification_loop())
+
+    await startup_cleanup()
 
     await asyncio.sleep(5)
 
