@@ -359,8 +359,9 @@ async def scan_for_new_signals(symbols):
             leverage=DEFAULT_LEVERAGE,
             risk_pct=risk_pct,
             confidence=confidence,
-            sl_pct=sl_pct
-        )
+            sl_pct=sl_pct,      # Add this line
+            tp1_pct=tp1_pct     # Add this line
+       )
 
         # Add pump potential info to message if detected
         if pump_potential:
