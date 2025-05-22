@@ -6,29 +6,28 @@ from logger import log, write_log
 from symbol_info import get_precision, round_qty
 from error_handler import send_telegram_message, send_error_to_telegram
 
-# Constants for SL/TP calculations
-MIN_SL_PERCENTAGE = 0.5       # Minimum SL distance (0.5%)
-MIN_SL_ATR_FACTOR = 1.0       # Minimum ATR factor for SL calculation
-MAX_SL_PERCENTAGE = 10.0      # Maximum SL distance (10%)
-MAX_SL_ATR_FACTOR = 3.0       # Maximum ATR factor for SL calculation
+MIN_SL_PERCENTAGE = 1.2       # Minimum SL distance (1.2% - was 0.5%)
+MIN_SL_ATR_FACTOR = 1.8       # Minimum ATR factor (1.8x - was 1.0x)
+MAX_SL_PERCENTAGE = 8.0       # Maximum SL distance (8.0% - was 10.0%)
+MAX_SL_ATR_FACTOR = 3.2       # Maximum ATR factor (3.2x - was 3.0x)
 
-# Target risk-reward ratios by trade type
+# Target risk-reward ratios by trade type - UPDATED
 TARGET_RR_RATIOS = {
-    "Scalp": 1.5,
-    "Intraday": 2.0,
-    "Swing": 2.5,
-    "mean_reversion": 1.8,
-    "breakout_sniper": 2.2,
+    "Scalp": 2.0,             # Was 1.5
+    "Intraday": 2.5,          # Was 2.0
+    "Swing": 3.0,             # Was 2.5
+    "mean_reversion": 2.2,    # Was 1.8
+    "breakout_sniper": 2.8,   # Was 2.2
 }
 
-# Trailing stop activation thresholds
-TRAILING_ACTIVATION_THRESHOLD = 1.0  # Minimum move % to activate trailing
+# Trailing stop activation thresholds - UPDATED  
+TRAILING_ACTIVATION_THRESHOLD = 1.5  # Minimum move % to activate trailing (was 1.0%)
 TRAILING_PERCENTAGE_MAP = {
-    "Scalp": 0.4,              # 40% of initial stop distance
-    "Intraday": 0.5,           # 50% of initial stop distance
-    "Swing": 0.6,              # 60% of initial stop distance
-    "mean_reversion": 0.3,     # 30% of initial stop distance
-    "breakout_sniper": 0.4,    # 40% of initial stop distance
+    "Scalp": 0.7,              # 70% of initial stop distance (was 0.4)
+    "Intraday": 0.8,           # 80% of initial stop distance (was 0.5)
+    "Swing": 0.9,              # 90% of initial stop distance (was 0.6)
+    "mean_reversion": 0.6,     # 60% of initial stop distance (was 0.3)
+    "breakout_sniper": 0.7,    # 70% of initial stop distance (was 0.4)
 }
 
 # Market regime adjustments
@@ -180,19 +179,7 @@ def detect_price_momentum(candles, lookback=5):
 def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, score, confidence, regime="trending", strategy="core_strategy"):
     """
     Calculate optimal SL/TP using ATR, volatility regime, confidence, and momentum
-    
-    Args:
-        candles_by_tf: Dictionary of candles organized by timeframe
-        entry_price: Entry price of the trade
-        trade_type: "Scalp", "Intraday", or "Swing"
-        direction: "long" or "short"
-        score: Trade setup score (0-10)
-        confidence: Confidence percentage (0-100)
-        regime: Market regime ("trending", "ranging", "volatile")
-        strategy: Trading strategy name
-        
-    Returns:
-        Tuple of (stop_loss, take_profit, sl_percentage, trailing_percentage, tp_percentage, tp2, tp2_percentage, tp3, tp3_percentage)
+    FIXED VERSION with more reasonable SL percentages for crypto
     """
     # Select appropriate timeframe for ATR calculation
     tf_mapping = {
@@ -216,10 +203,14 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
                 break
         
         if not candles or len(candles) < 30:
-            # If still no valid candles, use fixed percentages
-            log(f"⚠️ No valid candles for SL/TP calculation - using fixed percentages", level="WARN")
-            sl_pct = 2.0  # 2% default SL
-            tp_pct = sl_pct * TARGET_RR_RATIOS.get(trade_type, 2.0)  # Default RR ratio
+            # FIXED: More reasonable default percentages for crypto
+            sl_pct = {
+                "Scalp": 2.0,
+                "Intraday": 2.5, 
+                "Swing": 3.0
+            }.get(trade_type, 2.5)
+            
+            tp_pct = sl_pct * TARGET_RR_RATIOS.get(trade_type, 2.5)
             
             # Apply regime adjustments
             regime_factor = REGIME_ADJUSTMENTS.get(regime, REGIME_ADJUSTMENTS["trending"])
@@ -242,7 +233,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
                 round(sl_price, 6), 
                 round(tp_price, 6), 
                 round(sl_pct, 2), 
-                round(sl_pct * TRAILING_PERCENTAGE_MAP.get(trade_type, 0.5), 2),
+                round(sl_pct * TRAILING_PERCENTAGE_MAP.get(trade_type, 0.8), 2),  # FIXED: More reasonable trailing
                 round(tp_pct, 2),
                 round(tp2_price, 6),
                 round(tp_pct * 1.5, 2),
@@ -254,19 +245,40 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
     atr = calculate_atr(candles, period=14)
     if not atr:
         log(f"⚠️ Failed to calculate ATR - using fixed percentages", level="WARN")
-        sl_pct = 2.0
+        # FIXED: More reasonable fallback percentages
+        sl_pct = {
+            "Scalp": 2.0,
+            "Intraday": 2.5,
+            "Swing": 3.0
+        }.get(trade_type, 2.5)
     else:
-        # Adjust ATR factor based on confidence and score
-        confidence_factor = 0.8 + (confidence / 100 * 0.6)  # 0.8-1.4 based on confidence
-        score_factor = 0.8 + (score / 10 * 0.4)  # 0.8-1.2 based on score
+        # FIXED: More conservative ATR factors for crypto volatility
+        base_atr_factor = {
+            "Scalp": 2.0,      # Was 1.2, now more conservative
+            "Intraday": 2.2,   # Was 1.6, now more conservative  
+            "Swing": 2.5       # Was 2.0, now more conservative
+        }.get(trade_type, 2.2)
         
-        # Tighter stops for high confidence/score setups
-        atr_factor = MAX_SL_ATR_FACTOR - (confidence_factor * score_factor)
-        atr_factor = max(MIN_SL_ATR_FACTOR, min(atr_factor, MAX_SL_ATR_FACTOR))
+        # Adjust ATR factor based on confidence - LESS aggressive adjustments
+        confidence_factor = 0.9 + (confidence / 100 * 0.2)  # 0.9-1.1 range (was 0.8-1.4)
+        score_factor = 0.95 + (score / 10 * 0.1)            # 0.95-1.05 range (was 0.8-1.2)
+        
+        # Apply factors but keep it reasonable
+        atr_factor = base_atr_factor * confidence_factor * score_factor
+        atr_factor = max(1.8, min(atr_factor, 3.0))  # Clamp between 1.8x and 3.0x
         
         # Calculate SL distance as ATR-based percentage
         sl_distance = atr * atr_factor
         sl_pct = (sl_distance / entry_price) * 100
+        
+        # FIXED: Enforce minimum SL percentages for crypto
+        min_sl_pct = {
+            "Scalp": 1.5,
+            "Intraday": 1.8,
+            "Swing": 2.2
+        }.get(trade_type, 1.8)
+        
+        sl_pct = max(sl_pct, min_sl_pct)
     
     # Check for momentum which will affect our targets
     has_momentum, momentum_direction, momentum_strength = detect_price_momentum(
@@ -276,19 +288,19 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
     momentum_aligned = (direction.lower() == "long" and momentum_direction == "up") or \
                        (direction.lower() == "short" and momentum_direction == "down")
     
-    # Apply minimum and maximum bounds to SL percentage
-    sl_pct = max(MIN_SL_PERCENTAGE, min(sl_pct, MAX_SL_PERCENTAGE))
+    # Apply minimum and maximum bounds to SL percentage - FIXED bounds
+    sl_pct = max(1.2, min(sl_pct, 8.0))  # Between 1.2% and 8.0% (was 0.5% and 10.0%)
     
     # Apply market regime adjustments
     regime_factors = REGIME_ADJUSTMENTS.get(regime, REGIME_ADJUSTMENTS["trending"])
     sl_pct *= regime_factors["sl"]
     
     # Get target risk-reward ratio
-    base_rr = TARGET_RR_RATIOS.get(strategy, TARGET_RR_RATIOS.get(trade_type, 2.0))
+    base_rr = TARGET_RR_RATIOS.get(strategy, TARGET_RR_RATIOS.get(trade_type, 2.5))
     
     # Adjust RR ratio based on momentum and regime
     if has_momentum and momentum_aligned:
-        momentum_bonus = momentum_strength * 0.5  # 0-0.5 bonus factor
+        momentum_bonus = momentum_strength * 0.8  # Increased bonus for momentum
         base_rr += momentum_bonus
         log(f"🚀 Momentum aligned with {direction} trade: RR ratio increased by {momentum_bonus:.1f} to {base_rr:.1f}")
     
@@ -297,12 +309,13 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
     tp_pct = sl_pct * base_rr * tp_factor
     
     # Calculate additional TP levels
-    tp2_pct = tp_pct * 1.5  # TP2 is 1.5x TP1
-    tp3_pct = tp_pct * 2.0  # TP3 is 2x TP1
+    tp2_pct = tp_pct * 1.8  # TP2 is 1.8x TP1
+    tp3_pct = tp_pct * 2.5  # TP3 is 2.5x TP1
     
-    # Calculate trailing percentage (adjusted by regime)
+    # Calculate trailing percentage (adjusted by regime) - FIXED to be more reasonable
     trailing_factor = regime_factors["trailing"]
-    trailing_pct = sl_pct * TRAILING_PERCENTAGE_MAP.get(trade_type, 0.5) * trailing_factor
+    trailing_base = TRAILING_PERCENTAGE_MAP.get(trade_type, 0.8)  # Increased from 0.5
+    trailing_pct = sl_pct * trailing_base * trailing_factor
     
     # Calculate actual prices
     if direction.lower() == "long":
@@ -317,16 +330,16 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
         tp3_price = entry_price * (1 - tp3_pct/100)
     
     # Log detailed calculation
-    log(f"📊 SL/TP calculation for {direction} {trade_type} in {regime} regime:")
+    log(f"📊 Enhanced SL/TP for {direction} {trade_type} in {regime} regime:")
     log(f"  Entry: {entry_price} | ATR: {atr if atr else 'N/A'} | ATR Factor: {atr_factor if atr else 'N/A'}")
-    log(f"  SL%: {sl_pct:.2f}% | TP1%: {tp_pct:.2f}% | RR: {base_rr:.1f} | Trailing%: {trailing_pct:.2f}%")
+    log(f"  SL: {sl_price} ({sl_pct:.2f}%) | TP1: {tp1_price} ({tp_pct:.2f}%) | RR: {base_rr:.1f} | Trail: {trailing_pct:.2f}%")
     
     return (
         round(sl_price, 6),
         round(tp1_price, 6),
         round(sl_pct, 2),
         round(trailing_pct, 2),
-        round(tp_pct, 2),
+        round(tp1_pct, 2),
         round(tp2_price, 6),
         round(tp2_pct, 2),
         round(tp3_price, 6),
