@@ -783,8 +783,7 @@ async def monitor_trades(live_candles):
                         entry_price=entry_price,
                         current_price=current_price,
                         direction=direction,
-                        candles=candles,
-                        trailing_pct=trailing_pct
+                        candles=candles
                     )
         
                     # Update trailing stop if valid
