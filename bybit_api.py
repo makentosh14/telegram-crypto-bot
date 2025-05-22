@@ -78,38 +78,51 @@ async def get_wallet_balance():
 # === FUTURES BALANCE FUNCTION (FIXED DUPLICATE) ===
 async def get_futures_available_balance():
     try:
+        # Request MARGIN account type instead of UNIFIED
         response = await signed_request("GET", "/v5/account/wallet-balance", {
-            "accountType": "UNIFIED",  # Specifically request CONTRACT account type
-            "coin": "USDT"  # Specifically request USDT balance
+            "accountType": "MARGIN",  # Changed from UNIFIED to MARGIN
+            "coin": "USDT"
         })
         
-        log(f"📊 Futures balance response: {response}")
+        log(f"📊 Margin balance response: {response}")
         
         if response.get("retCode") != 0:
-            log(f"❌ Failed to fetch futures wallet balance: {response.get('retMsg')}", level="ERROR")
-            
-            # Try fallback to UNIFIED account if CONTRACT fails
-            fallback = await signed_request("GET", "/v5/account/wallet-balance", {
-                "accountType": "UNIFIED"
-            })
-            
-            log(f"📊 Fallback balance response: {fallback}")
-            
-            if fallback.get("retCode") != 0:
-                log(f"❌ All balance fetch attempts failed", level="ERROR")
-                return 0.0
+            log(f"❌ Failed to fetch margin wallet balance: {response.get('retMsg')}", level="ERROR")
+            return 0.0
                 
-            try:
-                # Try to get USDT from UNIFIED account
-                usdt = next(
-                    coin for coin in fallback["result"]["list"][0]["coin"] if coin["coin"] == "USDT"
-                )
-                balance = float(usdt.get("availableToTrade", 0))
-                log(f"💰 Using fallback UNIFIED USDT balance: {balance}")
-                return balance
-            except Exception as e:
-                log(f"❌ Failed to extract USDT from fallback: {e}", level="ERROR")
-                return 0.0
+        # Parse MARGIN account USDT balance
+        try:
+            if "list" in response["result"] and len(response["result"]["list"]) > 0:
+                account_info = response["result"]["list"][0]
+                
+                # Check if we have a direct USDT coin entry
+                if "coin" in account_info and len(account_info["coin"]) > 0:
+                    usdt_coins = [coin for coin in account_info["coin"] if coin["coin"] == "USDT"]
+                    
+                    if usdt_coins:
+                        usdt = usdt_coins[0]
+                        # For margin account, look for available balance
+                        available = float(usdt.get("availableToTrade", usdt.get("availableBalance", usdt.get("free", 0))))
+                        log(f"💰 Margin USDT balance: {available}")
+                        return available
+                
+                # Fallback to account-level available balance
+                if "availableBalance" in account_info:
+                    balance = float(account_info["availableBalance"])
+                    log(f"💰 Margin account balance: {balance}")
+                    return balance
+            
+            log("⚠️ No suitable balance field found in margin account response")
+            return 0.0
+            
+        except Exception as e:
+            log(f"❌ Failed to parse margin balance: {e}", level="ERROR")
+            return 0.0
+            
+    except Exception as e:
+        log(f"❌ Failed to fetch available margin balance: {e}", level="ERROR")
+        log(f"💡 Full error: {traceback.format_exc()}")
+        return 0.0
                 
         # Parse CONTRACT account USDT balance
         try:
