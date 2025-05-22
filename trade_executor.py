@@ -132,14 +132,16 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     if atr:
         sl_distance = atr * atr_factor
         sl_pct = (sl_distance / price) * 100
+        # Ensure minimum SL percentage for crypto
+        sl_pct = max(sl_pct, 1.5)  # Minimum 1.5% SL
     else:
-        # More conservative stops for high confidence setups
+        # More reasonable stops for different confidence levels
         if confidence >= 85 and score >= 7.5:
-            sl_pct = 1.5
+            sl_pct = 2.0   # High confidence: 2% SL
         elif confidence < 60 or score < 6:
-            sl_pct = 0.8
+            sl_pct = 3.0   # Low confidence: 3% SL
         else:
-            sl_pct = 1.0
+            sl_pct = 2.5   # Default: 2.5% SL
 
     # Adjust SL based on market regime
     if regime == "volatile":
