@@ -30,7 +30,6 @@ from pattern_matcher import pattern_match_scan
 from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
 from active_trade_scanner import high_frequency_scanner
-from position_manager import execute_trade
 from advanced_risk_manager import load_risk_state, update_risk_metrics
 
 load_memory()
