@@ -18,7 +18,7 @@ from activity_logger import log_trade_to_file
 from symbol_info import round_qty, symbol_precisions, get_precision
 
 # Enhanced imports from position_manager.py
-from advanced_risk_manager import (
+from risk_manager import (
     calculate_position_size,
     update_strategy_performance,
     check_trading_allowed,
