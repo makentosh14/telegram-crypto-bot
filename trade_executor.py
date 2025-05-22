@@ -545,9 +545,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         EXECUTION_STATES[exec_id]["stage"] = "balance_checked"
         
         # Step 2: Calculate SL/TP levels using enhanced calculation
-        sl, tp1, sl_pct, sl_pct, tp1_pct = calculate_dynamic_sl_tp(
+        # FIX: Properly unpack all 5 values including trailing_pct
+        sl_tp_result = calculate_dynamic_sl_tp(
             candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
         )
+        
+        # Ensure we have at least 5 values
+        if len(sl_tp_result) >= 5:
+            sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+        else:
+            # Fallback if function returns fewer values
+            sl, tp1, sl_pct = sl_tp_result[:3]
+            trailing_pct = sl_pct * 0.5  # Default trailing percentage
+            tp1_pct = sl_pct * 2.0      # Default TP percentage
         
         EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
         
@@ -610,11 +620,19 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         
         EXECUTION_STATES[exec_id]["stage"] = "entry_executed"
         
-        # Step 7: Recalculate SL/TP based on actual entry price
+        # Step 7: Recalculate SL/TP based on actual entry price if different
         if executed_entry != entry_price:
-            sl, tp1, sl_pct, sl_pct, tp1_pct = calculate_dynamic_sl_tp(
+            sl_tp_result = calculate_dynamic_sl_tp(
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence, regime
             )
+            
+            # FIX: Properly unpack the recalculated values
+            if len(sl_tp_result) >= 5:
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+            else:
+                sl, tp1, sl_pct = sl_tp_result[:3]
+                trailing_pct = sl_pct * 0.5
+                tp1_pct = sl_pct * 2.0
         
         # Step 8: Calculate exit tranches with enhanced logic
         volatility = "normal"
@@ -708,7 +726,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "sl_pct": sl_pct,
             "tp1_pct": tp1_pct,
             "tp2_pct": tp2_pct,
-            "trailing_pct": trailing_pct,
+            "trailing_pct": trailing_pct,  # Now properly defined
             "indicator_scores": indicator_scores,
             "used_indicators": used_indicators,
             "sl_order_id": sl_order_id,
