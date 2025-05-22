@@ -545,7 +545,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         EXECUTION_STATES[exec_id]["stage"] = "balance_checked"
         
         # Step 2: Calculate SL/TP levels using enhanced calculation
-        sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+        sl, tp1, sl_pct, sl_pct, tp1_pct = calculate_dynamic_sl_tp(
             candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
         )
         
@@ -612,7 +612,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         
         # Step 7: Recalculate SL/TP based on actual entry price
         if executed_entry != entry_price:
-            sl, tp1, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+            sl, tp1, sl_pct, sl_pct, tp1_pct = calculate_dynamic_sl_tp(
                 candles_by_tf, executed_entry, trade_type, direction, score, confidence, regime
             )
         
