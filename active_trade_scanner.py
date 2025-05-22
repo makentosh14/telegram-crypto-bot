@@ -1,13 +1,14 @@
-# active_trade_scanner.py
+# active_trade_scanner.py - FIXED VERSION
 
 import asyncio
 import time
 import traceback
+import json
+import os
 from datetime import datetime
 from logger import log, write_log
 from bybit_api import signed_request, place_market_order
 from error_handler import send_telegram_message, send_error_to_telegram
-from monitor import active_trades, save_active_trades, update_stop_loss_order, execute_partial_exit_with_retry
 from activity_logger import log_trade_to_file
 from ai_memory import log_trade_result
 from strategy_performance import log_strategy_result
@@ -16,22 +17,209 @@ from exit_manager import detect_momentum_surge
 # Configuration for active trade scanner
 ACTIVE_SCAN_INTERVAL = 3  # Check active trades every 3 seconds
 MAX_CONCURRENT_CHECKS = 5  # Limit concurrent API calls
+PERSIST_PATH = "monitor_active_trades.json"
+
+# Cache for active trades to avoid constant file reads
+_active_trades_cache = {}
+_cache_timestamp = 0
+_cache_ttl = 10  # Cache TTL in seconds
+
+def load_active_trades_directly():
+    """Load active trades directly from file, bypassing potential import issues"""
+    global _active_trades_cache, _cache_timestamp
+    
+    # Use cache if recent enough
+    current_time = time.time()
+    if _active_trades_cache and (current_time - _cache_timestamp) < _cache_ttl:
+        return _active_trades_cache
+    
+    try:
+        if os.path.exists(PERSIST_PATH):
+            with open(PERSIST_PATH, 'r') as f:
+                trades = json.load(f)
+                
+            # Filter out exited trades and return only active ones
+            active_trades = {symbol: trade for symbol, trade in trades.items() 
+                           if not trade.get("exited", False)}
+            
+            # Update cache
+            _active_trades_cache = active_trades
+            _cache_timestamp = current_time
+            
+            log(f"🔍 HF SCANNER: Loaded {len(active_trades)} active trades from file")
+            return active_trades
+        else:
+            log(f"⚠️ HF SCANNER: No trades file found at {PERSIST_PATH}")
+            return {}
+    except Exception as e:
+        log(f"❌ HF SCANNER: Error loading active trades: {e}", level="ERROR")
+        return {}
+
+def save_active_trades_directly(trades):
+    """Save active trades directly to file"""
+    try:
+        # Load existing trades first to avoid overwriting
+        existing_trades = {}
+        if os.path.exists(PERSIST_PATH):
+            with open(PERSIST_PATH, 'r') as f:
+                existing_trades = json.load(f)
+        
+        # Update with modified trades
+        existing_trades.update(trades)
+        
+        with open(PERSIST_PATH, 'w') as f:
+            json.dump(existing_trades, f, indent=2)
+            
+        # Clear cache to force reload
+        global _active_trades_cache, _cache_timestamp
+        _active_trades_cache = {}
+        _cache_timestamp = 0
+        
+        log(f"💾 HF SCANNER: Saved {len(trades)} updated trades")
+    except Exception as e:
+        log(f"❌ HF SCANNER: Error saving trades: {e}", level="ERROR")
 
 async def fetch_current_price(symbol):
     """Fetch current price for a symbol with optimized API call"""
     try:
         ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
         if ticker_resp.get("retCode") == 0:
-            mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
-            last_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
-            return {
-                "mark_price": mark_price,
-                "last_price": last_price,
-                "timestamp": time.time()
-            }
+            result_list = ticker_resp.get("result", {}).get("list", [])
+            if result_list:
+                mark_price = float(result_list[0].get("markPrice", 0))
+                last_price = float(result_list[0].get("lastPrice", 0))
+                return {
+                    "mark_price": mark_price,
+                    "last_price": last_price,
+                    "timestamp": time.time()
+                }
     except Exception as e:
-        log(f"❌ Error fetching price for {symbol}: {e}", level="ERROR")
+        log(f"❌ HF SCANNER: Error fetching price for {symbol}: {e}", level="ERROR")
     return None
+
+async def update_stop_loss_order(symbol, trade, new_sl_price):
+    """Update stop loss order - simplified version for HF scanner"""
+    try:
+        from bybit_api import place_stop_loss_with_retry
+        
+        direction = trade.get("direction", "").lower()
+        qty = trade.get("qty")
+        old_sl_order_id = trade.get("sl_order_id")
+        
+        if not direction or not qty:
+            log(f"❌ HF SCANNER: Cannot update SL for {symbol}: Missing trade data", level="ERROR")
+            return False
+        
+        # Cancel existing SL if present
+        if old_sl_order_id:
+            try:
+                cancel_result = await signed_request("POST", "/v5/order/cancel", {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "orderId": old_sl_order_id
+                })
+                
+                if cancel_result.get("retCode") != 0:
+                    log(f"⚠️ HF SCANNER: Failed to cancel old SL for {symbol}: {cancel_result.get('retMsg')}", level="WARN")
+            except Exception as e:
+                log(f"❌ HF SCANNER: Error cancelling SL order: {e}", level="ERROR")
+        
+        # Place new SL order with retry
+        sl_resp = await place_stop_loss_with_retry(
+            symbol=symbol,
+            direction=direction,
+            qty=qty,
+            sl_price=new_sl_price
+        )
+        
+        if sl_resp.get("retCode") == 0:
+            # Update trade record
+            trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
+            trade["trailing_sl"] = new_sl_price
+            
+            await send_telegram_message(f"🔐 <b>HF Scanner: SL Updated</b> for {symbol} | New SL: {new_sl_price}")
+            log(f"🔐 HF SCANNER: SL updated for {symbol} to {new_sl_price}")
+            write_log(f"HF_SCANNER_SL_UPDATE: {symbol} | New SL: {new_sl_price}")
+            return True
+        else:
+            log(f"❌ HF SCANNER: Failed to place new SL: {sl_resp.get('retMsg')}", level="ERROR")
+            return False
+            
+    except Exception as e:
+        log(f"❌ HF SCANNER: Error placing new SL order: {e}", level="ERROR")
+        return False
+
+async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_attempts=3):
+    """Execute a partial exit with retry logic - HF scanner version"""
+    direction = trade.get("direction", "").lower()
+    total_qty = trade.get("qty", 0)
+    
+    if not direction or not total_qty or total_qty <= 0:
+        log(f"❌ HF SCANNER: Cannot execute partial exit for {symbol}: Invalid trade data", level="ERROR")
+        return False
+    
+    # Calculate exit quantity
+    exit_qty = total_qty * (exit_percentage / 100)
+    
+    # Ensure exit quantity meets minimum requirements
+    from symbol_info import round_qty
+    min_qty = 0.001  # Default minimum quantity
+    
+    exit_qty = max(round_qty(symbol, exit_qty), min_qty)
+    
+    # Don't exit more than we have
+    exit_qty = min(exit_qty, total_qty)
+    
+    log(f"🔍 HF SCANNER: Attempting partial exit for {symbol}: {exit_qty} units ({exit_percentage}% of {total_qty})")
+    
+    # Try to execute the exit with retries
+    for attempt in range(max_attempts):
+        try:
+            # Execute market order
+            side = "Sell" if direction == "long" else "Buy"
+            
+            result = await place_market_order(
+                symbol=symbol,
+                side=side,
+                qty=str(exit_qty),
+                market_type="linear",
+                reduce_only=True
+            )
+            
+            if result.get("retCode") == 0:
+                # Update trade record with remaining quantity
+                trade["qty"] = round_qty(symbol, total_qty - exit_qty)
+                
+                # Log the partial exit
+                log(f"💰 HF SCANNER: Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
+                write_log(f"HF_SCANNER_PARTIAL_EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
+                
+                # Record in exit tranches history
+                if "exit_tranches_history" not in trade:
+                    trade["exit_tranches_history"] = []
+                
+                trade["exit_tranches_history"].append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "percentage": exit_percentage,
+                    "qty": exit_qty,
+                    "source": "hf_scanner"
+                })
+                
+                return True
+            else:
+                log(f"❌ HF SCANNER: Partial exit attempt {attempt+1}/{max_attempts} failed: {result.get('retMsg')}", level="ERROR")
+                
+                # Brief pause before retry
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+        except Exception as e:
+            log(f"❌ HF SCANNER: Error in partial exit attempt {attempt+1}/{max_attempts}: {e}", level="ERROR")
+            
+            # Brief pause before retry
+            await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+    
+    # If we get here, all attempts failed
+    log(f"❌ HF SCANNER: All partial exit attempts failed for {symbol}", level="ERROR")
+    return False
 
 async def process_active_trade(symbol, trade, live_candles):
     """Process a single active trade with high-frequency monitoring"""
@@ -42,17 +230,21 @@ async def process_active_trade(symbol, trade, live_candles):
     direction = trade.get("direction", "").lower()
     entry_price = trade.get("entry_price")
     
+    if not direction or not entry_price:
+        log(f"❌ HF SCANNER: Invalid trade data for {symbol}: direction={direction}, entry={entry_price}")
+        return
+    
     # Calculate TP1 level if not already stored
     tp1_level = trade.get("tp1_target")
     if not tp1_level:
         tp1_level = entry_price * 1.018 if direction == "long" else entry_price * 0.982
         trade["tp1_target"] = tp1_level
         log(f"📊 HF SCANNER: Setting explicit TP1 target for {symbol}: {tp1_level}")
-        save_active_trades()
 
     # Get current price data
     price_data = await fetch_current_price(symbol)
     if not price_data:
+        log(f"⚠️ HF SCANNER: Could not fetch price for {symbol}")
         return
 
     current_price = price_data["mark_price"]  # Use mark price for more reliable triggering
@@ -112,7 +304,7 @@ async def process_active_trade(symbol, trade, live_candles):
                 exit_success = await execute_partial_exit_with_retry(symbol, trade, 33)
                 if exit_success:
                     trade["tp1_partial_exit"] = True
-                    write_log(f"HF SCANNER: TP1 PARTIAL EXIT: {symbol} | Price: {current_price} | Success")
+                    write_log(f"HF_SCANNER_TP1_PARTIAL_EXIT: {symbol} | Price: {current_price} | Success")
                 else:
                     log(f"⚠️ HF SCANNER: Partial exit failed for {symbol}", level="WARN")
             
@@ -121,7 +313,7 @@ async def process_active_trade(symbol, trade, live_candles):
                 sl_updated = await update_stop_loss_order(symbol, trade, entry_price)
                 if sl_updated:
                     trade["tp1_sl_moved"] = True
-                    write_log(f"HF SCANNER: TP1 SL UPDATE: {symbol} | New SL: {entry_price} (breakeven)")
+                    write_log(f"HF_SCANNER_TP1_SL_UPDATE: {symbol} | New SL: {entry_price} (breakeven)")
                 else:
                     log(f"⚠️ HF SCANNER: SL update failed for {symbol}", level="WARN")
             
@@ -141,7 +333,8 @@ async def process_active_trade(symbol, trade, live_candles):
                 confidence=0
             )
             
-            save_active_trades()
+            # Save the updated trade data
+            save_active_trades_directly({symbol: trade})
     
     # PRIORITY 2: Check trailing stop (after TP1 hit)
     elif trade.get("tp1_hit") and trade.get("trailing_pct"):
@@ -168,8 +361,9 @@ async def process_active_trade(symbol, trade, live_candles):
                    (direction == "short" and new_sl < current_trailing_sl):
                     
                     log(f"🔒 HF SCANNER: Trailing SL update for {symbol}: {current_trailing_sl} → {new_sl}")
-                    await update_stop_loss_order(symbol, trade, new_sl)
-                    save_active_trades()
+                    sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
+                    if sl_updated:
+                        save_active_trades_directly({symbol: trade})
                     
         except Exception as e:
             log(f"❌ HF SCANNER: Error updating trailing SL for {symbol}: {e}", level="ERROR")
@@ -255,7 +449,7 @@ async def process_active_trade(symbol, trade, live_candles):
                 log_strategy_result(strategy, result, round(profit_pct, 2))
                 
                 # Save updated trade status
-                save_active_trades()
+                save_active_trades_directly({symbol: trade})
                 
             except Exception as e:
                 log(f"❌ HF SCANNER: Error processing SL hit for {symbol}: {e}", level="ERROR")
@@ -263,41 +457,81 @@ async def process_active_trade(symbol, trade, live_candles):
 
 async def high_frequency_scanner(live_candles):
     """Main high-frequency scanner loop for active trades only"""
-    log("🚀 Starting high-frequency active trade scanner")
+    log("🚀 HF SCANNER: Starting high-frequency active trade scanner")
+    
+    # Give some time for the main bot to initialize
+    await asyncio.sleep(10)
+    
+    consecutive_empty_checks = 0
+    max_empty_checks = 10  # Log warning after 10 consecutive empty checks
     
     while True:
         start_time = time.time()
         
         try:
-            # Only scan active trades (not exited)
-            active_symbols = []
-            for symbol, trade in active_trades.items():
-                exited = trade.get("exited")
-                # More explicit checking - trade is active if exited is False/None AND has required data
-                if ((exited is False or exited is None or not exited) and 
-                    trade.get("direction") and trade.get("entry_price") and trade.get("qty")):
-                    active_symbols.append(symbol)
-                    log(f"🔍 HF SCANNER: {symbol} marked as active (exited={repr(exited)})")
-                else:
-                    log(f"🔍 HF SCANNER: {symbol} skipped - exited={repr(exited)}, has_data={bool(trade.get('direction') and trade.get('entry_price') and trade.get('qty'))}")
+            # Load active trades directly from file to avoid import issues
+            active_trades = load_active_trades_directly()
+            
+            # Filter to only non-exited trades
+            active_symbols = [symbol for symbol, trade in active_trades.items() 
+                            if not trade.get("exited", False)]
             
             if active_symbols:
+                consecutive_empty_checks = 0  # Reset counter
+                
                 # Process trades in small batches to avoid rate limits
                 for i in range(0, len(active_symbols), MAX_CONCURRENT_CHECKS):
                     batch = active_symbols[i:i+MAX_CONCURRENT_CHECKS]
-                    tasks = [process_active_trade(symbol, active_trades[symbol], live_candles) for symbol in batch]
-                    await asyncio.gather(*tasks)
+                    tasks = []
+                    
+                    for symbol in batch:
+                        if symbol in active_trades:
+                            tasks.append(process_active_trade(symbol, active_trades[symbol], live_candles))
+                    
+                    if tasks:
+                        await asyncio.gather(*tasks, return_exceptions=True)
                     
                     # Small delay between batches to avoid rate limits
                     if i + MAX_CONCURRENT_CHECKS < len(active_symbols):
                         await asyncio.sleep(0.5)
                         
-                log(f"⚡ HF SCANNER: Checked {len(active_symbols)} active trades")
+                log(f"⚡ HF SCANNER: Processed {len(active_symbols)} active trades")
+                
+                # Save any updated trades back to file
+                updated_trades = {symbol: active_trades[symbol] for symbol in active_symbols 
+                                if symbol in active_trades}
+                if updated_trades:
+                    save_active_trades_directly(updated_trades)
+                    
             else:
-                log("⚡ HF SCANNER: No active trades to monitor", level="DEBUG")
+                consecutive_empty_checks += 1
+                
+                if consecutive_empty_checks == 1:
+                    log("⚡ HF SCANNER: No active trades to monitor")
+                elif consecutive_empty_checks >= max_empty_checks:
+                    log(f"⚠️ HF SCANNER: No active trades found for {consecutive_empty_checks} consecutive checks. "
+                        f"File exists: {os.path.exists(PERSIST_PATH)}", level="WARN")
+                    
+                    # Try to debug the file contents
+                    if os.path.exists(PERSIST_PATH):
+                        try:
+                            with open(PERSIST_PATH, 'r') as f:
+                                content = f.read()
+                                if content.strip():
+                                    trades_data = json.loads(content)
+                                    total_trades = len(trades_data)
+                                    exited_trades = sum(1 for t in trades_data.values() if t.get("exited", False))
+                                    log(f"📊 HF SCANNER: File contains {total_trades} total trades, {exited_trades} exited, {total_trades - exited_trades} should be active")
+                                else:
+                                    log("📊 HF SCANNER: Trade file is empty")
+                        except Exception as e:
+                            log(f"📊 HF SCANNER: Error reading trade file: {e}")
+                    
+                    # Reset counter to avoid spam
+                    consecutive_empty_checks = 0
         
         except Exception as e:
-            log(f"❌ Error in high-frequency scanner: {e}", level="ERROR")
+            log(f"❌ HF SCANNER: Error in high-frequency scanner: {e}", level="ERROR")
             log(traceback.format_exc(), level="ERROR")
         
         # Calculate elapsed time and adjust sleep to maintain consistent interval
