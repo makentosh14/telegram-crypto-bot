@@ -70,7 +70,8 @@ def format_trade_signal(
     leverage,
     risk_pct,
     confidence=None,
-    sl_pct=None
+    sl_pct=None,
+    tp1_pct=None  # Add this parameter
 ):
     relevant_tfs = {
         "Scalp": [1, 3],
@@ -81,6 +82,16 @@ def format_trade_signal(
     filtered_tf_scores = {k: v for k, v in tf_scores.items() if int(k) in relevant_tfs}
     emoji = "🟢" if direction == "Long" else "🔴"
 
+    # Calculate percentages if not provided
+    if sl_pct is None and sl and entry_price:
+        sl_pct = abs((sl - entry_price) / entry_price * 100)
+    
+    if tp1_pct is None and tp1 and entry_price:
+        if direction.lower() == "long":
+            tp1_pct = (tp1 - entry_price) / entry_price * 100
+        else:
+            tp1_pct = (entry_price - tp1) / entry_price * 100
+
     message = (
         f"{emoji} <b>{direction} {trade_type} Signal</b>\n"
         f"<b>Symbol:</b> {symbol}\n"
@@ -88,7 +99,7 @@ def format_trade_signal(
         f"<b>TF Breakdown:</b> {filtered_tf_scores}\n\n"
         f"<b>Entry:</b> {entry_price}\n"
         f"<b>SL:</b> {sl}" + (f" ({sl_pct:.2f}%)" if sl_pct is not None else "") + "\n"
-        f"<b>TP1:</b> {tp1} (Trigger only)\n\n"
+        f"<b>TP1:</b> {tp1}" + (f" ({tp1_pct:.2f}%)" if tp1_pct is not None else "") + "\n\n"
         f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
         f"📈 <b>Leverage:</b> {leverage}x\n"
         f"📉 <b>Smart Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
@@ -96,7 +107,7 @@ def format_trade_signal(
     )
 
     if confidence is not None:
-        message += f"\n🔍 <b>Confidence:</b> {confidence:.1f}%"
+        message += f"🔍 <b>Confidence:</b> {confidence:.1f}%"
 
     return message
 
