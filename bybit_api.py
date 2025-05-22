@@ -186,6 +186,34 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "reduceOnly": reduce_only
     })
 
+async def cleanup_old_orders():
+    """Clean up old/orphaned orders across all symbols"""
+    try:
+        # Get all open orders
+        orders_resp = await signed_request("GET", "/v5/order/realtime", {
+            "category": "linear",
+            "orderFilter": "Stop"
+        })
+        
+        if orders_resp.get("retCode") == 0:
+            orders = orders_resp.get("result", {}).get("list", [])
+            log(f"🧹 Found {len(orders)} stop orders to clean up")
+            
+            for order in orders:
+                symbol = order.get("symbol")
+                order_id = order.get("orderId")
+                
+                # Cancel orphaned orders
+                await signed_request("POST", "/v5/order/cancel", {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "orderId": order_id
+                })
+                await asyncio.sleep(0.1)  # Rate limit protection
+                
+    except Exception as e:
+        log(f"❌ Error in cleanup: {e}")
+
 # === STOP LOSS FUNCTIONS ===
 async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"):
     """
@@ -207,6 +235,17 @@ async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"
     # For long positions: use 2 (Falling) - triggers when price falls below SL
     # For short positions: use 1 (Rising) - triggers when price rises above SL
     trigger_direction = 2 if direction.lower() == "long" else 1
+
+    try:
+        cancel_result = await signed_request("POST", "/v5/order/cancel-all", {
+            "category": market_type,
+            "symbol": symbol,
+            "orderFilter": "Stop"  # Only cancel stop orders
+        })
+        log(f"🧹 Cleaned up existing stop orders for {symbol}: {cancel_result}")
+        await asyncio.sleep(0.5)  # Brief pause after cleanup
+    except Exception as e:
+        log(f"⚠️ Error cleaning up orders: {e}")
     
     # Verify the SL price is valid
     try:
