@@ -339,7 +339,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
         round(tp1_price, 6),
         round(sl_pct, 2),
         round(trailing_pct, 2),
-        round(tp1_pct, 2),
+        round(tp_pct, 2),
         round(tp2_price, 6),
         round(tp2_pct, 2),
         round(tp3_price, 6),
