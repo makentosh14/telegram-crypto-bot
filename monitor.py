@@ -235,6 +235,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "entry_time": datetime.utcnow(),
         "last_score_update": datetime.utcnow()
     }
+
+    if tp1_target:
+        log(f"🎯 TP1 target stored for {symbol}: {tp1_target} ({tp1_pct:.2f}%)")
     
     # Log pump potential if detected
     if has_pump_potential:
