@@ -910,7 +910,7 @@ async def monitor_trades(live_candles):
             # 10. Time-based exit check with momentum override
             # Don't exit on time during a strong momentum move
             if not has_momentum and not trade.get("exit_timed"):
-                if should_exit_by_time(trade, datetime.utcnow(), candles_by_tf.get('1', [])):
+                if should_exit_by_time(trade, datetime.utcnow(), candles_by_tf.get('1', []), current_price):
                     # Mark the trade for exit
                     trade["exit_timed"] = True
                     
