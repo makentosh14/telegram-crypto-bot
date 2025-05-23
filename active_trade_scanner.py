@@ -237,37 +237,28 @@ async def process_active_trade(symbol, trade, live_candles):
     # Calculate TP1 level if not already stored
     tp1_level = trade.get("tp1_target")
     if not tp1_level:
-        tp1_level = entry_price * 1.018 if direction == "long" else entry_price * 0.982
+        # Try to get from stored TP1 percentage
+        tp1_pct = trade.get("tp1_pct")
+        if tp1_pct:
+            tp1_level = entry_price * (1 + tp1_pct/100) if direction == "long" else entry_price * (1 - tp1_pct/100)
+            log(f"📊 HF SCANNER: Calculated TP1 from stored percentage for {symbol}: {tp1_pct}% = {tp1_level}")
+        else:
+            # Last resort fallback to 1.8% (but log this as a warning)
+            tp1_level = entry_price * 1.018 if direction == "long" else entry_price * 0.982
+            log(f"⚠️ HF SCANNER: No TP1 data found for {symbol}, using fallback 1.8%: {tp1_level}", level="WARN")
+    
+        # Store the calculated TP1 for future use
         trade["tp1_target"] = tp1_level
-        log(f"📊 HF SCANNER: Setting explicit TP1 target for {symbol}: {tp1_level}")
-
-    # Get current price data
-    price_data = await fetch_current_price(symbol)
-    if not price_data:
-        log(f"⚠️ HF SCANNER: Could not fetch price for {symbol}")
-        return
-
-    current_price = price_data["mark_price"]  # Use mark price for more reliable triggering
-    
-    # Get candles if available
-    candles = []
-    if symbol in live_candles and '1' in live_candles[symbol]:
-        candles = list(live_candles[symbol]['1'])
-    
-    # Check for momentum (important for decision making)
-    has_momentum = False
-    if candles:
-        has_momentum = detect_momentum_surge(candles)
 
     # PRIORITY 1: Check for TP1 hit if not already hit
     if not trade.get("tp1_hit"):
-        # Custom TP1 hit detection
+        # Custom TP1 hit detection using the ACTUAL target
         tp1_hit = False
         if direction == "long" and current_price >= tp1_level:
             tp1_hit = True
         elif direction == "short" and current_price <= tp1_level:
             tp1_hit = True
-            
+        
         # Also check recent candle wicks
         if not tp1_hit and candles and len(candles) >= 2:
             last_candle = candles[-1]
@@ -275,27 +266,29 @@ async def process_active_trade(symbol, trade, live_candles):
                 tp1_hit = True
             elif direction == "short" and float(last_candle["low"]) <= tp1_level:
                 tp1_hit = True
-        
+    
         if tp1_hit:
             # Log TP1 detection
-            log(f"🎯 HF SCANNER: TP1 hit detected for {symbol} at {current_price}")
-            
+            log(f"🎯 HF SCANNER: TP1 hit detected for {symbol} at {current_price} (target was {tp1_level})")
+        
+            # Calculate actual profit percentage achieved
+            profit_pct = ((tp1_level - entry_price) / entry_price * 100) if direction == "long" else \
+                        ((entry_price - tp1_level) / entry_price * 100)
+        
             # Mark TP1 as hit in trade object
             trade["tp1_hit"] = True
             trade["tp1_hit_cycle"] = trade.get("cycles", 0)
-            trade["tp1_price"] = tp1_level  # Use explicit target
+            trade["tp1_price"] = tp1_level  # Use the target that was actually hit
             trade["break_even_triggered"] = True
             trade["tp1_hit_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Send detailed notification
-            profit_pct = ((tp1_level - entry_price) / entry_price * 100) if direction == "long" else \
-                        ((entry_price - tp1_level) / entry_price * 100)
+        
+            # Send detailed notification with ACTUAL profit percentage
             await send_telegram_message(
                 f"🎯 <b>HF Scanner: TP1 Hit</b> on <b>{symbol}</b>\n"
                 f"Target: {tp1_level:.6f}\n"
                 f"Current: {current_price:.6f}\n"
                 f"Entry: {entry_price:.6f}\n"
-                f"Profit: {profit_pct:.2f}%\n"
+                f"Profit: {profit_pct:.2f}%\n"  # This will now show the ACTUAL profit percentage
                 f"Time: {datetime.now().strftime('%H:%M:%S')}"
             )
             
