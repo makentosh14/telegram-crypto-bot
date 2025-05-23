@@ -21,13 +21,13 @@ TARGET_RR_RATIOS = {
 }
 
 # Trailing stop activation thresholds - UPDATED  
-TRAILING_ACTIVATION_THRESHOLD = 1.5  # Minimum move % to activate trailing (was 1.0%)
+TRAILING_ACTIVATION_THRESHOLD = 2.5  # Increased from 1.5% to 2.5% - require bigger move
 TRAILING_PERCENTAGE_MAP = {
-    "Scalp": 0.7,              # 70% of initial stop distance (was 0.4)
-    "Intraday": 0.8,           # 80% of initial stop distance (was 0.5)
-    "Swing": 0.9,              # 90% of initial stop distance (was 0.6)
-    "mean_reversion": 0.6,     # 60% of initial stop distance (was 0.3)
-    "breakout_sniper": 0.7,    # 70% of initial stop distance (was 0.4)
+    "Scalp": 1.0,              # Increased from 0.7% to 1.0% - wider trailing
+    "Intraday": 1.2,           # Increased from 0.8% to 1.2% - wider trailing
+    "Swing": 1.5,              # Increased from 0.9% to 1.5% - wider trailing
+    "mean_reversion": 0.8,     # Increased from 0.6% to 0.8%
+    "breakout_sniper": 1.0,    # Increased from 0.7% to 1.0%
 }
 
 # Market regime adjustments
@@ -39,9 +39,9 @@ REGIME_ADJUSTMENTS = {
 
 # Exit tranches configuration
 EXIT_TRANCHES = {
-    "Scalp": [0.4, 0.3, 0.3],     # 40% at TP1, 30% at TP2, 30% at TP3
-    "Intraday": [0.35, 0.35, 0.3], # 35% at TP1, 35% at TP2, 30% at TP3
-    "Swing": [0.3, 0.3, 0.4],      # 30% at TP1, 30% at TP2, 40% at TP3
+    "Scalp": [0.25, 0.25, 0.50],     # 25% at TP1, 25% at TP2, 50% rides trend (was 40/30/30)
+    "Intraday": [0.20, 0.30, 0.50],  # 20% at TP1, 30% at TP2, 50% rides trend (was 35/35/30)
+    "Swing": [0.15, 0.25, 0.60],     # 15% at TP1, 25% at TP2, 60% rides trend (was 30/30/40)
 }
 
 def calculate_atr(candles, period=14):
@@ -348,7 +348,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
 
 def calculate_exit_tranches(symbol, total_qty, trade_type="Intraday", volatility="normal", momentum=False):
     """
-    Calculate position size for each exit tranche
+    Calculate position size for each exit tranche - UPDATED for letting winners run
     
     Args:
         symbol: Trading symbol for precision lookup
@@ -358,7 +358,7 @@ def calculate_exit_tranches(symbol, total_qty, trade_type="Intraday", volatility
         momentum: Flag for momentum presence
         
     Returns:
-        List of quantities for each tranche
+        List of quantities for each tranche - now optimized to let winners run
     """
     if total_qty <= 0:
         return []
@@ -367,21 +367,22 @@ def calculate_exit_tranches(symbol, total_qty, trade_type="Intraday", volatility
     precision = get_precision(symbol)
     min_qty = 0.001  # Fallback min quantity
     
-    # Get base distribution by trade type
-    distribution = EXIT_TRANCHES.get(trade_type, [0.33, 0.33, 0.34])
+    # Get UPDATED base distribution by trade type - optimized for letting winners run
+    distribution = EXIT_TRANCHES.get(trade_type, [0.20, 0.30, 0.50])
     
-    # Adjust for volatility
+    # Adjust for volatility - but keep more conservative for letting winners run
     if volatility == "high":
-        # In high volatility, secure more profit early
-        distribution = [d * 1.2 if i == 0 else d * 0.9 for i, d in enumerate(distribution)]
+        # In high volatility, still secure some profit early but let most ride
+        distribution = [d * 1.1 if i == 0 else d * 0.95 for i, d in enumerate(distribution)]
     elif volatility == "low":
-        # In low volatility, aim for bigger targets
-        distribution = [d * 0.9 if i == 0 else d * 1.05 for i, d in enumerate(distribution)]
+        # In low volatility, can afford to let even more ride
+        distribution = [d * 0.8 if i < 2 else d * 1.2 for i, d in enumerate(distribution)]
     
-    # Adjust for momentum
+    # UPDATED: Adjust for momentum - let even MORE winners run during momentum
     if momentum:
-        # In momentum, keep more for the final target
-        distribution = [d * 0.8 if i < 2 else d * 1.4 for i, d in enumerate(distribution)]
+        # In momentum, keep much more for the final target
+        distribution = [d * 0.7 if i == 0 else d * 0.8 if i == 1 else d * 1.3 for i, d in enumerate(distribution)]
+        log(f"🚀 MOMENTUM DETECTED - letting even more winners run for {symbol}")
     
     # Normalize distribution to sum to 1.0
     total = sum(distribution)
@@ -411,7 +412,7 @@ def calculate_exit_tranches(symbol, total_qty, trade_type="Intraday", volatility
     if not valid_tranches:
         valid_tranches = [total_qty]
     
-    log(f"📊 Exit tranches for {symbol} ({trade_type}, {volatility}, momentum={momentum}): {valid_tranches}")
+    log(f"📊 LET WINNERS RUN - Exit tranches for {symbol} ({trade_type}, {volatility}, momentum={momentum}): {valid_tranches}")
     return valid_tranches
 
 async def validate_sl_placement(symbol, direction, sl_price, market_type="linear"):
@@ -473,7 +474,7 @@ async def validate_sl_placement(symbol, direction, sl_price, market_type="linear
 
 def calculate_smart_trailing_stop(symbol, entry_price, current_price, direction, candles, base_trail_pct=0.5):
     """
-    Calculate an adaptive trailing stop based on volatility and momentum
+    Calculate an adaptive trailing stop - UPDATED for letting winners run
     
     Args:
         symbol: Trading symbol
@@ -501,36 +502,38 @@ def calculate_smart_trailing_stop(symbol, entry_price, current_price, direction,
         # Determine relative profit percentage
         profit_pct = (price_move / entry_price) * 100
         
-        # Volatility-based adjustment
+        # UPDATED: Volatility-based adjustment - more conservative for letting winners run
         volatility_factor = 1.0
         
         # Detect volatility regime
         volatility = detect_volatility_regime(candles if candles else [])
         if volatility == "high":
-            volatility_factor = 1.5  # Wider trailing in high volatility
+            volatility_factor = 2.0  # Much wider trailing in high volatility (was 1.5)
         elif volatility == "low":
-            volatility_factor = 0.8  # Tighter trailing in low volatility
+            volatility_factor = 1.2  # Still wider than before (was 0.8)
         
-        # Check for momentum
+        # UPDATED: Check for momentum - use much wider trailing to let winners run
         has_momentum, momentum_direction, momentum_strength = detect_price_momentum(candles if candles else [])
         momentum_aligned = (direction.lower() == "long" and momentum_direction == "up") or \
                            (direction.lower() == "short" and momentum_direction == "down")
         
         if has_momentum and momentum_aligned:
-            # Momentum-based adjustment - looser trailing to let profits run
-            momentum_factor = 1.0 + (momentum_strength * 0.5)  # 1.0-1.5
-            volatility_factor *= momentum_factor
-            log(f"🚀 Momentum detected for {symbol} - using wider trail: {momentum_factor:.2f}x")
+            # Much wider trailing during momentum to let winners run
+            momentum_factor = 2.5 + (momentum_strength * 1.0)  # 2.5-3.5x factor (was 1.0-1.5x)
+            volatility_factor = max(volatility_factor, momentum_factor)
+            log(f"🚀 Momentum detected for {symbol} - using much wider trail for letting winners run: {momentum_factor:.2f}x")
         
-        # Profit-based adjustment (trailing width increases with profit)
+        # UPDATED: Profit-based adjustment - wider trailing for bigger profits
         profit_factor = 1.0
-        if profit_pct > 5.0:
-            profit_factor = 1.2  # Wider trail for bigger winners
+        if profit_pct > 3.0:
+            profit_factor = 1.3  # Wider trail for 3%+ profits
+        elif profit_pct > 6.0:
+            profit_factor = 1.6  # Even wider for 6%+ profits
         elif profit_pct > 10.0:
-            profit_factor = 1.5  # Even wider trail for huge winners
+            profit_factor = 2.0  # Much wider for 10%+ profits - let these big winners run!
         
-        # Combine all factors
-        adjustment_factor = min(max(volatility_factor * profit_factor, 0.8), 2.0)
+        # Combine all factors - but cap the maximum to avoid excessive risk
+        adjustment_factor = min(max(volatility_factor * profit_factor, 1.2), 4.0)  # 1.2x to 4.0x range
         adjusted_trail_pct = base_trail_pct * adjustment_factor
         
         # Calculate actual SL price
@@ -545,18 +548,19 @@ def calculate_smart_trailing_stop(symbol, entry_price, current_price, direction,
         log(f"❌ Error calculating smart trailing stop: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
         
-        # Fallback to simple trailing calculation
+        # Fallback to simple trailing calculation with wider percentage
         try:
+            wider_trail_pct = base_trail_pct * 1.5  # 50% wider fallback
             if direction.lower() == "long":
-                return round(current_price * (1 - (base_trail_pct / 100)), 6)
+                return round(current_price * (1 - (wider_trail_pct / 100)), 6)
             else:
-                return round(current_price * (1 + (base_trail_pct / 100)), 6)
+                return round(current_price * (1 + (wider_trail_pct / 100)), 6)
         except:
             return None
 
 def should_trail_stop(symbol, entry_price, current_price, direction, candles=None, trailing_pct=0.5):
     """
-    Determine if trailing stop should be activated and calculate new stop price
+    Determine if trailing stop should be activated - UPDATED for letting winners run
     
     Args:
         symbol: Trading symbol
@@ -564,13 +568,13 @@ def should_trail_stop(symbol, entry_price, current_price, direction, candles=Non
         current_price: Current market price
         direction: 'long' or 'short'
         candles: Recent candles for analysis
-        trailing_pct: Base trailing percentage
+        trailing_pct: Base trailing percentage (now more conservative)
         
     Returns:
         float or None: New stop loss price if trailing should activate, None otherwise
     """
     try:
-        # Check if we've reached the activation threshold
+        # UPDATED: Check if we've reached the higher activation threshold
         if direction.lower() == "long":
             activation_threshold = entry_price * (1 + TRAILING_ACTIVATION_THRESHOLD/100)
             if current_price < activation_threshold:
@@ -580,14 +584,14 @@ def should_trail_stop(symbol, entry_price, current_price, direction, candles=Non
             if current_price > activation_threshold:
                 return None  # Not enough move to activate trailing
         
-        # Calculate the new trailing stop price
+        # UPDATED: Use more conservative trailing calculation for letting winners run
         return calculate_smart_trailing_stop(
             symbol=symbol,
             entry_price=entry_price,
             current_price=current_price,
             direction=direction,
             candles=candles,
-            base_trail_pct=trailing_pct
+            base_trail_pct=trailing_pct * 1.2  # 20% wider trailing to let winners run
         )
     
     except Exception as e:
@@ -629,17 +633,7 @@ def calculate_breakeven_after_move(entry_price, direction, move_pct=1.0):
 
 def adjust_profit_protection(symbol, entry_price, current_price, direction, trade_type="Intraday"):
     """
-    Adjust stop loss based on profit milestones reached
-    
-    Args:
-        symbol: Trading symbol
-        entry_price: Entry price
-        current_price: Current price
-        direction: 'long' or 'short'
-        trade_type: Trade type for milestone selection
-        
-    Returns:
-        float or None: New stop loss price or None if no adjustment needed
+    Adjust stop loss based on profit milestones - UPDATED for letting winners run
     """
     try:
         precision = get_precision(symbol)
@@ -653,22 +647,22 @@ def adjust_profit_protection(symbol, entry_price, current_price, direction, trad
         else:  # short
             profit_pct = ((entry_price - current_price) / entry_price) * 100
         
-        # Define profit protection milestones based on trade type
+        # UPDATED: Define more conservative profit protection milestones
         milestones = {
             "Scalp": [
-                {"pct": 2.0, "sl_at": 0.3},  # At 2% profit, move SL to 0.3% profit
-                {"pct": 3.0, "sl_at": 1.0},  # At 3% profit, move SL to 1.0% profit
-                {"pct": 5.0, "sl_at": 2.0}   # At 5% profit, move SL to 2.0% profit
+                {"pct": 3.0, "sl_at": 0.5},  # At 3% profit, move SL to 0.5% profit (was 2.0/0.3)
+                {"pct": 5.0, "sl_at": 1.5},  # At 5% profit, move SL to 1.5% profit (was 3.0/1.0)
+                {"pct": 8.0, "sl_at": 3.0}   # At 8% profit, move SL to 3.0% profit (was 5.0/2.0)
             ],
             "Intraday": [
-                {"pct": 3.0, "sl_at": 0.5},  # At 3% profit, move SL to 0.5% profit
-                {"pct": 5.0, "sl_at": 1.5},  # At 5% profit, move SL to 1.5% profit
-                {"pct": 8.0, "sl_at": 3.0}   # At 8% profit, move SL to 3.0% profit
+                {"pct": 4.0, "sl_at": 0.8},  # At 4% profit, move SL to 0.8% profit (was 3.0/0.5)
+                {"pct": 7.0, "sl_at": 2.0},  # At 7% profit, move SL to 2.0% profit (was 5.0/1.5)
+                {"pct": 12.0, "sl_at": 4.0}  # At 12% profit, move SL to 4.0% profit (was 8.0/3.0)
             ],
             "Swing": [
-                {"pct": 5.0, "sl_at": 1.0},   # At 5% profit, move SL to 1.0% profit
-                {"pct": 8.0, "sl_at": 2.5},   # At 8% profit, move SL to 2.5% profit
-                {"pct": 12.0, "sl_at": 5.0}   # At 12% profit, move SL to 5.0% profit
+                {"pct": 6.0, "sl_at": 1.5},   # At 6% profit, move SL to 1.5% profit (was 5.0/1.0)
+                {"pct": 12.0, "sl_at": 3.5},  # At 12% profit, move SL to 3.5% profit (was 8.0/2.5)
+                {"pct": 20.0, "sl_at": 7.0}   # At 20% profit, move SL to 7.0% profit (was 12.0/5.0)
             ]
         }
         
