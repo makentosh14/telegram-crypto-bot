@@ -19,20 +19,21 @@ def calculate_quantity(symbol, raw_qty, min_qty=0.001):
 
 def calculate_exit_tranches(symbol, qty, tranches=3):
     """
-    Split position into multiple exit tranches
+    Split position into multiple exit tranches - UPDATED for "let winners run"
     Returns a list of quantities for each exit level
+    Now uses 20% / 30% / 50% distribution instead of 33% / 33% / 34%
     """
     if qty <= 0:
         return []
         
     min_qty = 0.001  # Use symbol info or fallback
     
-    # Calculate base tranche size
-    base_tranche = qty / tranches
+    # UPDATED: New distribution to let winners run
+    # 20% at TP1, 30% at TP2, 50% rides momentum
+    tranche_percentages = [0.20, 0.30, 0.50]  # Changed from [0.33, 0.33, 0.34]
     
-    # Create tranches with different sizes (first smaller, rest larger)
-    # This keeps more size for catching bigger moves
-    tranche_sizes = [base_tranche * 0.85, base_tranche * 0.9, base_tranche * 1.25]
+    # Calculate tranche sizes
+    tranche_sizes = [qty * pct for pct in tranche_percentages]
     
     # Ensure all tranches meet minimum quantity requirements
     precision = get_precision(symbol)
@@ -42,7 +43,7 @@ def calculate_exit_tranches(symbol, qty, tranches=3):
     sum_tranches = sum(valid_tranches[:-1])
     valid_tranches[-1] = round(max(qty - sum_tranches, min_qty), precision)
     
-    log(f"🔢 Exit tranches for {symbol}: {valid_tranches}")
+    log(f"🔢 EXIT TRANCHES (Let Winners Run): {symbol} - 20%: {valid_tranches[0]}, 30%: {valid_tranches[1]}, 50%: {valid_tranches[2]}")
     return valid_tranches
 
 def detect_momentum_surge(candles, lookback=5):
@@ -124,7 +125,7 @@ def calculate_trailing_stop(symbol, entry_price, current_price, direction="long"
 def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_trail_pct):
     """
     Adjust trailing percentage based on recent volatility and momentum.
-    Returns an adjusted trailing percentage - wider for momentum, tighter for consolidation
+    UPDATED: More conservative trailing to let winners run longer
     """
     try:
         # Use 7-period ATR for current volatility
@@ -140,17 +141,17 @@ def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_
             
             if vol_ratio > 1.5:
                 # Higher volatility = wider trailing to avoid noise
-                volatility_factor = 1.3
+                volatility_factor = 1.5  # Increased from 1.3 to let winners run
                 log(f"📊 High volatility detected for {symbol}: {vol_ratio:.2f}x - widening trail")
             elif vol_ratio < 0.7:
-                # Lower volatility = tighter trailing to lock profits
-                volatility_factor = 0.8
-                log(f"📊 Low volatility detected for {symbol}: {vol_ratio:.2f}x - tightening trail")
+                # Lower volatility = still use reasonable trailing
+                volatility_factor = 0.9  # Increased from 0.8 to let winners run
+                log(f"📊 Low volatility detected for {symbol}: {vol_ratio:.2f}x - using moderate trail")
         
-        # Check for momentum surge - uses wider trailing to catch bigger moves
+        # Check for momentum surge - uses MUCH wider trailing to catch bigger moves
         if detect_momentum_surge(candles):
-            momentum_factor = 1.5  # Much wider trail during strong momentum
-            log(f"🚀 Momentum surge detected for {symbol} - using wider trailing ({momentum_factor}x)")
+            momentum_factor = 2.0  # Increased from 1.5 to let winners run much longer
+            log(f"🚀 Momentum surge detected for {symbol} - using MUCH wider trailing ({momentum_factor}x)")
             volatility_factor = max(volatility_factor, momentum_factor)
         
         adjusted_pct = base_trail_pct * volatility_factor
@@ -163,25 +164,22 @@ def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_
 
 def should_trail_stop(symbol, entry_price, current_price, direction="long", candles=None, trigger_pct=0.018, trail_pct=0.009, current_trailing_sl=None):
     """
-    Checks if trailing stop should activate:
-      - price exceeds trigger threshold
-      - volume is at least 1.2x average (optional)
-      - SL must improve (never downgrade)
-      - Adjusts trailing based on volatility and momentum
+    Checks if trailing stop should activate - UPDATED for letting winners run
     """
-    # Check if we have enough volume to justify trailing
+    # UPDATED: Require higher volume confirmation for trailing activation
     if candles:
         avg_volume = get_average_volume(candles)
         current_volume = float(candles[-1]['volume'])
         
-        # Check for mega pump pattern - in strong momentum don't require high volume for trailing
+        # Check for mega pump pattern - in strong momentum be even more permissive
         in_momentum_surge = detect_momentum_surge(candles)
         
-        if current_volume < avg_volume * 1.2 and not in_momentum_surge:
-            write_log(f"🔕 Volume too low for trailing: {current_volume:.2f} < 1.2x avg {avg_volume:.2f}")
+        # UPDATED: Only trail if volume is significantly higher OR in momentum surge
+        if current_volume < avg_volume * 1.5 and not in_momentum_surge:  # Increased from 1.2x to 1.5x
+            write_log(f"🔕 Volume too low for trailing: {current_volume:.2f} < 1.5x avg {avg_volume:.2f}")
             return None
             
-        # Use adaptive trailing based on volatility
+        # Use adaptive trailing with more conservative settings
         adjusted_trail_pct = calculate_adaptive_trailing(symbol, candles, direction, current_price, trail_pct)
     else:
         adjusted_trail_pct = trail_pct
@@ -191,12 +189,18 @@ def should_trail_stop(symbol, entry_price, current_price, direction="long", cand
     if not new_sl:
         return None
 
-    # Only update SL if it's better (tighter) than current
+    # Only update SL if it's significantly better (tighter) than current
+    # UPDATED: Require bigger improvement to update trailing SL
     if current_trailing_sl:
-        if direction.lower() == "long" and new_sl <= current_trailing_sl:
-            return None
-        if direction.lower() == "short" and new_sl >= current_trailing_sl:
-            return None
+        min_improvement_pct = 0.5  # Require at least 0.5% improvement
+        if direction.lower() == "long":
+            improvement = (new_sl - current_trailing_sl) / current_trailing_sl * 100
+            if improvement < min_improvement_pct:
+                return None
+        else:  # short
+            improvement = (current_trailing_sl - new_sl) / current_trailing_sl * 100
+            if improvement < min_improvement_pct:
+                return None
 
     return new_sl
 
