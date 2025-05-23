@@ -234,6 +234,29 @@ async def process_active_trade(symbol, trade, live_candles):
         log(f"❌ HF SCANNER: Invalid trade data for {symbol}: direction={direction}, entry={entry_price}")
         return
     
+    # Get current price - FIXED: Define current_price variable
+    price_data = await fetch_current_price(symbol)
+    if not price_data:
+        log(f"❌ HF SCANNER: Failed to fetch current price for {symbol}")
+        return
+        
+    current_price = price_data.get("mark_price", price_data.get("last_price", 0))
+    if current_price <= 0:
+        log(f"❌ HF SCANNER: Invalid current price for {symbol}: {current_price}")
+        return
+    
+    # Get candles for momentum detection - FIXED: Define candles variable
+    candles = None
+    if symbol in live_candles and '1' in live_candles[symbol]:
+        candles = list(live_candles[symbol]['1'])
+    
+    # FIXED: Define has_momentum variable before using it
+    has_momentum = False
+    if candles and len(candles) >= 10:
+        has_momentum = detect_momentum_surge(candles)
+        if has_momentum:
+            log(f"🚀 HF SCANNER: Momentum detected for {symbol}")
+    
     # Calculate TP1 level if not already stored
     tp1_level = trade.get("tp1_target")
     if not tp1_level:
