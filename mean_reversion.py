@@ -1,12 +1,208 @@
-from bollinger import calculate_bollinger_bands
-from rsi import calculate_rsi
-from whale_detector import detect_whale_activity
-from volume import get_average_volume
-from pattern_detector import detect_pattern
+# mean_reversion.py - Enhanced Mean Reversion Strategy
 
-def score_mean_reversion(symbol, candles_by_tf, regime):
+import numpy as np
+from collections import deque
+from typing import Dict, List, Tuple, Optional
+from bollinger import calculate_bollinger_bands_advanced
+from rsi import calculate_rsi_with_bands
+from whale_detector import detect_whale_activity
+from volume import get_average_volume, get_volume_momentum, analyze_volume_trend
+from pattern_detector import detect_pattern
+from atr import calculate_atr
+from logger import log, write_log
+
+# Configuration constants
+MIN_MEAN_REVERSION_SCORE = 4.0
+RSI_OVERSOLD = 30
+RSI_OVERBOUGHT = 70
+VOLUME_THRESHOLD = 1000
+BB_SQUEEZE_THRESHOLD = 0.02
+
+# Cache for recent calculations to avoid redundant computations
+_mr_cache = {}
+_cache_ttl = 60  # 60 seconds cache TTL
+
+class MeanReversionAnalyzer:
     """
-    Score a potential mean reversion setup
+    Enhanced mean reversion analyzer with performance optimizations
+    """
+    def __init__(self):
+        self.score_history = deque(maxlen=100)
+        self.success_rate = 0.0
+        self.total_trades = 0
+        self.successful_trades = 0
+        
+    def update_performance(self, symbol: str, success: bool):
+        """Update performance metrics for mean reversion trades"""
+        self.total_trades += 1
+        if success:
+            self.successful_trades += 1
+        self.success_rate = self.successful_trades / self.total_trades if self.total_trades > 0 else 0.0
+        log(f"📊 Mean Reversion Performance: {self.success_rate:.2%} success rate ({self.total_trades} trades)")
+
+# Global analyzer instance
+_analyzer = MeanReversionAnalyzer()
+
+def calculate_mean_reversion_probability(candles: List[Dict], lookback: int = 20) -> float:
+    """
+    Calculate the probability of mean reversion based on historical price action
+    
+    Args:
+        candles: List of candle data
+        lookback: Period to analyze
+        
+    Returns:
+        float: Probability score (0-1)
+    """
+    if len(candles) < lookback:
+        return 0.0
+        
+    try:
+        closes = np.array([float(c['close']) for c in candles[-lookback:]])
+        highs = np.array([float(c['high']) for c in candles[-lookback:]])
+        lows = np.array([float(c['low']) for c in candles[-lookback:]])
+        
+        # Calculate price range and current position
+        price_range = highs.max() - lows.min()
+        current_price = closes[-1]
+        mean_price = closes.mean()
+        
+        # Calculate how far price is from mean
+        deviation = abs(current_price - mean_price) / mean_price
+        
+        # Calculate volatility
+        returns = np.diff(closes) / closes[:-1]
+        volatility = returns.std()
+        
+        # Higher probability when:
+        # 1. Price is far from mean (high deviation)
+        # 2. Volatility is moderate (not too high, not too low)
+        # 3. Price hasn't been trending strongly
+        
+        # Check for trending vs ranging
+        trend_strength = abs(closes[-1] - closes[0]) / price_range if price_range > 0 else 0
+        
+        # Calculate probability score
+        deviation_score = min(deviation * 10, 1.0)  # Cap at 1.0
+        volatility_score = 1.0 - abs(volatility - 0.02) * 20  # Optimal volatility around 2%
+        ranging_score = 1.0 - trend_strength
+        
+        probability = (deviation_score * 0.4 + volatility_score * 0.3 + ranging_score * 0.3)
+        
+        return max(0.0, min(1.0, probability))
+        
+    except Exception as e:
+        log(f"❌ Error calculating mean reversion probability: {e}", level="ERROR")
+        return 0.0
+
+def detect_extreme_conditions(candles: List[Dict], rsi_vals: List[float], bb_data: Dict) -> Dict[str, bool]:
+    """
+    Detect extreme market conditions that favor mean reversion
+    
+    Returns:
+        Dict with extreme condition flags
+    """
+    extreme_conditions = {
+        "extreme_rsi": False,
+        "bb_squeeze": False,
+        "price_exhaustion": False,
+        "volume_climax": False,
+        "momentum_divergence": False
+    }
+    
+    if not candles or not rsi_vals or not bb_data:
+        return extreme_conditions
+        
+    try:
+        # Check RSI extremes
+        current_rsi = rsi_vals[-1]
+        extreme_conditions["extreme_rsi"] = current_rsi < 25 or current_rsi > 75
+        
+        # Check Bollinger Band squeeze
+        if bb_data and bb_data[-1]:
+            bandwidth = bb_data[-1].get("bandwidth", 1.0)
+            extreme_conditions["bb_squeeze"] = bandwidth < BB_SQUEEZE_THRESHOLD
+            
+        # Check price exhaustion (multiple consecutive candles in same direction)
+        if len(candles) >= 5:
+            last_5_candles = candles[-5:]
+            consecutive_ups = sum(1 for c in last_5_candles if float(c['close']) > float(c['open']))
+            consecutive_downs = sum(1 for c in last_5_candles if float(c['close']) < float(c['open']))
+            extreme_conditions["price_exhaustion"] = consecutive_ups >= 4 or consecutive_downs >= 4
+            
+        # Check volume climax
+        if len(candles) >= 10:
+            volumes = [float(c['volume']) for c in candles[-10:]]
+            avg_volume = np.mean(volumes[:-1])
+            current_volume = volumes[-1]
+            extreme_conditions["volume_climax"] = current_volume > avg_volume * 2.5
+            
+        # Check momentum divergence
+        if len(candles) >= 10 and len(rsi_vals) >= 10:
+            # Price making new high/low but RSI not confirming
+            price_highs = [float(c['high']) for c in candles[-10:]]
+            price_lows = [float(c['low']) for c in candles[-10:]]
+            
+            if price_highs[-1] == max(price_highs) and rsi_vals[-1] < max(rsi_vals[-10:]):
+                extreme_conditions["momentum_divergence"] = True  # Bearish divergence
+            elif price_lows[-1] == min(price_lows) and rsi_vals[-1] > min(rsi_vals[-10:]):
+                extreme_conditions["momentum_divergence"] = True  # Bullish divergence
+                
+    except Exception as e:
+        log(f"❌ Error detecting extreme conditions: {e}", level="ERROR")
+        
+    return extreme_conditions
+
+def calculate_support_resistance_levels(candles: List[Dict], lookback: int = 50) -> Dict[str, float]:
+    """
+    Calculate key support and resistance levels for mean reversion
+    
+    Returns:
+        Dict with support and resistance levels
+    """
+    if len(candles) < lookback:
+        return {}
+        
+    try:
+        highs = np.array([float(c['high']) for c in candles[-lookback:]])
+        lows = np.array([float(c['low']) for c in candles[-lookback:]])
+        closes = np.array([float(c['close']) for c in candles[-lookback:]])
+        volumes = np.array([float(c['volume']) for c in candles[-lookback:]])
+        
+        # Volume-weighted average price as key level
+        vwap = np.sum(closes * volumes) / np.sum(volumes) if np.sum(volumes) > 0 else np.mean(closes)
+        
+        # Find local highs and lows
+        resistance_levels = []
+        support_levels = []
+        
+        for i in range(2, len(highs) - 2):
+            # Local high
+            if highs[i] > highs[i-1] and highs[i] > highs[i+1] and highs[i] > highs[i-2] and highs[i] > highs[i+2]:
+                resistance_levels.append(highs[i])
+            # Local low
+            if lows[i] < lows[i-1] and lows[i] < lows[i+1] and lows[i] < lows[i-2] and lows[i] < lows[i+2]:
+                support_levels.append(lows[i])
+                
+        # Get strongest levels (most recent and most tested)
+        primary_resistance = max(resistance_levels) if resistance_levels else highs.max()
+        primary_support = min(support_levels) if support_levels else lows.min()
+        
+        return {
+            "vwap": round(vwap, 8),
+            "resistance": round(primary_resistance, 8),
+            "support": round(primary_support, 8),
+            "range_high": round(highs.max(), 8),
+            "range_low": round(lows.min(), 8)
+        }
+        
+    except Exception as e:
+        log(f"❌ Error calculating support/resistance: {e}", level="ERROR")
+        return {}
+
+def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regime: str) -> Tuple[float, str, float, Dict]:
+    """
+    Enhanced mean reversion scoring with better performance and accuracy
     
     Args:
         symbol: Trading pair symbol
@@ -18,81 +214,255 @@ def score_mean_reversion(symbol, candles_by_tf, regime):
     """
     # Early exit if not in ranging regime
     if regime != "ranging":
-        return 0, "Not Ranging", "N/A", {}
-
-    tf_to_check = ["5", "15"]
+        return 0, None, 0, {"not_ranging": True}
+    
+    # Check cache first
+    cache_key = f"{symbol}_mr_{regime}"
+    if cache_key in _mr_cache:
+        cached_time, cached_result = _mr_cache[cache_key]
+        if time.time() - cached_time < _cache_ttl:
+            return cached_result
+    
+    tf_to_check = ["5", "15"]  # Focus on these timeframes for mean reversion
     score = 0
     reasons = {}
     direction = None
-
-    for tf in tf_to_check:
-        candles = candles_by_tf.get(tf)
-        if not candles or len(candles) < 30:
-            continue
-
-        close = float(candles[-1]["close"])
-        rsi_vals = calculate_rsi(candles)
-        bb = calculate_bollinger_bands(candles)
-        pattern = detect_pattern(candles)
-        avg_vol = get_average_volume(candles)
-
-        if not rsi_vals or not bb or not bb[-1]:
-            continue
-
-        rsi = rsi_vals[-1]
-        lower = bb[-1]["lower"]
-        upper = bb[-1]["upper"]
-
-        # Check for lower Bollinger band breakout and oversold RSI
-        if close < lower and rsi < 30:
-            direction = "Long"
-            score += 2
-            reasons[f"{tf}m_boll_rsi_long"] = True
-
-        # Check for upper Bollinger band breakout and overbought RSI
-        if close > upper and rsi > 70:
-            direction = "Short"
-            score += 2
-            reasons[f"{tf}m_boll_rsi_short"] = True
-
-        if pattern in ["hammer", "inside_bar"]:
-            score += 0.5
-            reasons[f"{tf}m_pattern_support"] = pattern
-
-        if pattern in ["inverted_hammer", "bearish_engulfing"]:
-            score += 0.5
-            reasons[f"{tf}m_pattern_resist"] = pattern
-
-        if avg_vol and avg_vol < 1000:
-            score -= 1
-            reasons[f"{tf}m_low_vol"] = True
-
-        if detect_whale_activity(candles):
-            score += 1
-            reasons[f"{tf}m_whale"] = True
-
-    # FIX: Add a clear minimum threshold for this strategy
-    min_mean_reversion_score = 4.0
-    if score < min_mean_reversion_score:
-        from logger import log, write_log
-        log(f"⚠️ Mean reversion score for {symbol} too low: {score:.2f} < {min_mean_reversion_score}")
-        return 0, "Score too low", 0, {}
+    confidence_factors = []
     
-    # Only return results if we have sufficient reasons
-    if len(reasons) < 2:
-        from logger import log, write_log
-        log(f"⚠️ Mean reversion for {symbol} has insufficient indicators: {len(reasons)} < 2")
-        return 0, "Not enough indicators", 0, {}
-
-    confidence = round((score / 5) * 100)
+    try:
+        for tf in tf_to_check:
+            candles = candles_by_tf.get(tf)
+            if not candles or len(candles) < 30:
+                continue
+                
+            # Current price and basic calculations
+            close = float(candles[-1]["close"])
+            
+            # Calculate RSI with bands
+            rsi_data = calculate_rsi_with_bands(candles)
+            if not rsi_data:
+                continue
+                
+            rsi = rsi_data["rsi"]
+            rsi_values = rsi_data.get("values", [])
+            
+            # Calculate Bollinger Bands with advanced features
+            bb = calculate_bollinger_bands_advanced(candles)
+            if not bb or not bb[-1]:
+                continue
+                
+            lower = bb[-1]["lower"]
+            upper = bb[-1]["upper"]
+            middle = bb[-1]["middle"]
+            bandwidth = bb[-1]["bandwidth"]
+            percent_b = bb[-1]["percent_b"]
+            
+            # Pattern detection
+            pattern = detect_pattern(candles)
+            
+            # Volume analysis
+            volume_analysis = analyze_volume_trend(candles)
+            avg_vol = get_average_volume(candles)
+            volume_momentum = get_volume_momentum(candles)
+            
+            # Calculate mean reversion probability
+            mr_probability = calculate_mean_reversion_probability(candles)
+            
+            # Detect extreme conditions
+            extreme_conditions = detect_extreme_conditions(candles, rsi_values, bb)
+            
+            # Calculate support/resistance levels
+            sr_levels = calculate_support_resistance_levels(candles)
+            
+            # Enhanced scoring logic
+            
+            # Strong oversold conditions
+            if close < lower and rsi < RSI_OVERSOLD:
+                if percent_b < -0.1:  # Well below lower band
+                    score += 2.5
+                    reasons[f"{tf}m_extreme_oversold"] = True
+                else:
+                    score += 2
+                    reasons[f"{tf}m_boll_rsi_long"] = True
+                direction = "Long"
+                confidence_factors.append(0.8)
+                
+                # Bonus for extreme conditions
+                if extreme_conditions["extreme_rsi"]:
+                    score += 0.5
+                    reasons[f"{tf}m_extreme_rsi"] = True
+                    
+            # Strong overbought conditions
+            elif close > upper and rsi > RSI_OVERBOUGHT:
+                if percent_b > 1.1:  # Well above upper band
+                    score += 2.5
+                    reasons[f"{tf}m_extreme_overbought"] = True
+                else:
+                    score += 2
+                    reasons[f"{tf}m_boll_rsi_short"] = True
+                direction = "Short"
+                confidence_factors.append(0.8)
+                
+                # Bonus for extreme conditions
+                if extreme_conditions["extreme_rsi"]:
+                    score += 0.5
+                    reasons[f"{tf}m_extreme_rsi"] = True
+            
+            # Bollinger squeeze bonus (coiled spring effect)
+            if extreme_conditions["bb_squeeze"]:
+                score += 0.5
+                reasons[f"{tf}m_bb_squeeze"] = True
+                confidence_factors.append(0.7)
+                
+            # Price exhaustion bonus
+            if extreme_conditions["price_exhaustion"]:
+                score += 0.5
+                reasons[f"{tf}m_exhaustion"] = True
+                confidence_factors.append(0.6)
+                
+            # Volume climax bonus
+            if extreme_conditions["volume_climax"]:
+                score += 0.5
+                reasons[f"{tf}m_volume_climax"] = True
+                confidence_factors.append(0.7)
+                
+            # Momentum divergence bonus
+            if extreme_conditions["momentum_divergence"]:
+                score += 0.8
+                reasons[f"{tf}m_divergence"] = True
+                confidence_factors.append(0.8)
+            
+            # Pattern confirmation
+            if pattern in ["hammer", "inside_bar"] and direction == "Long":
+                score += 0.5
+                reasons[f"{tf}m_pattern_support"] = pattern
+                confidence_factors.append(0.6)
+            elif pattern in ["inverted_hammer", "bearish_engulfing"] and direction == "Short":
+                score += 0.5
+                reasons[f"{tf}m_pattern_resist"] = pattern
+                confidence_factors.append(0.6)
+                
+            # Support/Resistance proximity bonus
+            if sr_levels:
+                if direction == "Long" and close <= sr_levels.get("support", close) * 1.01:
+                    score += 0.5
+                    reasons[f"{tf}m_near_support"] = True
+                    confidence_factors.append(0.7)
+                elif direction == "Short" and close >= sr_levels.get("resistance", close) * 0.99:
+                    score += 0.5
+                    reasons[f"{tf}m_near_resistance"] = True
+                    confidence_factors.append(0.7)
+            
+            # Volume confirmation
+            if avg_vol and avg_vol > VOLUME_THRESHOLD:
+                if volume_momentum > 1.2:  # Increasing volume
+                    score += 0.3
+                    reasons[f"{tf}m_volume_increasing"] = True
+                    confidence_factors.append(0.5)
+            else:
+                score -= 1
+                reasons[f"{tf}m_low_vol"] = True
+                confidence_factors.append(0.3)
+                
+            # Whale activity
+            if detect_whale_activity(candles):
+                score += 1
+                reasons[f"{tf}m_whale"] = True
+                confidence_factors.append(0.8)
+                
+            # Mean reversion probability bonus
+            if mr_probability > 0.7:
+                score += mr_probability
+                reasons[f"{tf}m_high_mr_probability"] = round(mr_probability, 2)
+                confidence_factors.append(mr_probability)
     
-    # FIX: Ensure we have a direction before returning a valid score
-    if not direction:
-        from logger import log, write_log
-        log(f"⚠️ Mean reversion for {symbol} has no clear direction")
-        return 0, "No direction", 0, {}
+        # Validate minimum requirements
+        if score < MIN_MEAN_REVERSION_SCORE:
+            log(f"⚠️ Mean reversion score for {symbol} too low: {score:.2f} < {MIN_MEAN_REVERSION_SCORE}")
+            result = (0, None, 0, {"score_too_low": score})
+            _mr_cache[cache_key] = (time.time(), result)
+            return result
         
-    from logger import log, write_log
-    log(f"✅ Valid mean reversion setup for {symbol}: Score {score:.2f}, Dir: {direction}, Conf: {confidence}%")
-    
-    return score, direction, confidence, reasons
+        # Require at least 3 confirmation signals
+        if len(reasons) < 3:
+            log(f"⚠️ Mean reversion for {symbol} has insufficient indicators: {len(reasons)} < 3")
+            result = (0, None, 0, {"insufficient_indicators": len(reasons)})
+            _mr_cache[cache_key] = (time.time(), result)
+            return result
+            
+        # Ensure we have a direction
+        if not direction:
+            log(f"⚠️ Mean reversion for {symbol} has no clear direction")
+            result = (0, None, 0, {"no_direction": True})
+            _mr_cache[cache_key] = (time.time(), result)
+            return result
+        
+        # Calculate confidence based on multiple factors
+        base_confidence = (score / 8) * 100  # Base confidence from score
+        
+        # Adjust confidence based on confirmation factors
+        if confidence_factors:
+            avg_factor = np.mean(confidence_factors)
+            confidence = base_confidence * avg_factor
+        else:
+            confidence = base_confidence
+            
+        # Boost confidence if multiple extreme conditions are met
+        extreme_count = sum(extreme_conditions.values())
+        if extreme_count >= 3:
+            confidence = min(confidence * 1.2, 100)
+            
+        # Apply analyzer's historical performance
+        if _analyzer.success_rate > 0:
+            confidence = confidence * (0.5 + _analyzer.success_rate * 0.5)
+            
+        confidence = round(min(confidence, 100), 1)
+        
+        log(f"✅ Valid mean reversion setup for {symbol}: Score {score:.2f}, Dir: {direction}, Conf: {confidence}%")
+        log(f"   Reasons: {list(reasons.keys())}")
+        log(f"   Extreme conditions: {[k for k, v in extreme_conditions.items() if v]}")
+        
+        # Cache the result
+        result = (score, direction, confidence, reasons)
+        _mr_cache[cache_key] = (time.time(), result)
+        
+        return result
+        
+    except Exception as e:
+        log(f"❌ Error in mean reversion scoring for {symbol}: {e}", level="ERROR")
+        import traceback
+        log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
+        return 0, None, 0, {"error": str(e)}
+
+def clear_cache():
+    """Clear the mean reversion cache"""
+    global _mr_cache
+    _mr_cache.clear()
+    log("🧹 Cleared mean reversion cache")
+
+# Periodic cache cleanup
+async def cache_cleanup_task():
+    """Periodically clean up old cache entries"""
+    import asyncio
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        current_time = time.time()
+        expired_keys = [k for k, (t, _) in _mr_cache.items() if current_time - t > _cache_ttl]
+        for key in expired_keys:
+            del _mr_cache[key]
+        if expired_keys:
+            log(f"🧹 Cleaned {len(expired_keys)} expired cache entries from mean reversion")
+
+# Export analyzer for performance tracking
+def get_mean_reversion_stats() -> Dict:
+    """Get mean reversion strategy statistics"""
+    return {
+        "total_trades": _analyzer.total_trades,
+        "successful_trades": _analyzer.successful_trades,
+        "success_rate": _analyzer.success_rate,
+        "cache_size": len(_mr_cache)
+    }
+
+def update_mean_reversion_performance(symbol: str, success: bool):
+    """Update performance metrics for a mean reversion trade"""
+    _analyzer.update_performance(symbol, success)
