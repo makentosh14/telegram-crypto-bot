@@ -419,39 +419,76 @@ def adjust_profit_protection(symbol, entry_price, current_price, direction, trad
         
     return None
 
-def should_exit_by_time(trade, current_price, candles):
-    """Check if trade should be exited based on time conditions"""
+def should_exit_by_time(trade, current_time=None, candles=None):
+    """
+    Check if trade should be exited based on time elapsed
+    FIXED: Proper datetime handling to avoid comparison errors
+    """
     from datetime import datetime
     
-    # Get trade age in hours
-    try:
-        entry_time = datetime.strptime(trade.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
+    if not current_time:
         current_time = datetime.utcnow()
+    
+    # Ensure current_time is a datetime object
+    if not isinstance(current_time, datetime):
+        try:
+            current_time = datetime.utcnow()
+        except:
+            return False
+    
+    try:
+        # Get trade entry time
+        entry_time_str = trade.get("timestamp")
+        if not entry_time_str:
+            return False
+            
+        # Parse entry time - handle different possible formats
+        try:
+            if isinstance(entry_time_str, str):
+                entry_time = datetime.strptime(entry_time_str, "%Y-%m-%d %H:%M:%S")
+            elif isinstance(entry_time_str, datetime):
+                entry_time = entry_time_str
+            else:
+                log(f"⚠️ Invalid timestamp format: {entry_time_str}", level="WARN")
+                return False
+        except ValueError:
+            # Try alternative format
+            try:
+                entry_time = datetime.fromisoformat(entry_time_str.replace('Z', '+00:00'))
+            except:
+                log(f"⚠️ Could not parse timestamp: {entry_time_str}", level="WARN")
+                return False
+        
+        # Calculate trade age in hours
         trade_age_hours = (current_time - entry_time).total_seconds() / 3600
         
-        trade_type = trade.get("trade_type", "Intraday")
+        trade_type = trade.get("trade_type")
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
         
         # Don't exit if we're in profit and in momentum
-        if candles and detect_momentum_surge(candles):
+        if candles:
+            has_momentum, momentum_direction, _ = detect_price_momentum(candles)
+            momentum_aligned = (direction == "long" and momentum_direction == "up") or \
+                              (direction == "short" and momentum_direction == "down")
+            
             # Check if in significant profit
             is_in_profit = False
-            if entry_price:
+            if entry_price and current_price:
                 if direction == "long":
                     is_in_profit = current_price > entry_price * 1.02  # 2% profit
                 else:
                     is_in_profit = current_price < entry_price * 0.98  # 2% profit
                     
-            if is_in_profit:
-                log(f"🚀 Momentum surge detected for {trade.get('symbol')} in profit - bypassing time-based exit")
+            if has_momentum and momentum_aligned and is_in_profit:
+                # Don't exit on time if in profitable momentum
                 return False
         
-        # Define max age based on trade type - INCREASED TIMES
+        # Define max age based on trade type
         max_age = {
-            "Scalp": 8,      # 8 hours for scalps (was 6)
-            "Intraday": 36,  # 36 hours for intraday (was 30)
-            "Swing": 120     # 120 hours (5 days) for swing trades (was 96)
+            "Scalp": 12,      # 12 hours for scalps
+            "Intraday": 36,   # 36 hours for intraday
+            "Swing": 120      # 120 hours (5 days) for swing trades
         }.get(trade_type, 36)
         
         # For scalps - check for progress
@@ -472,26 +509,16 @@ def should_exit_by_time(trade, current_price, candles):
         if trade.get("tp1_hit"):
             max_age *= 1.5  # 50% more time after TP1 is hit
         
-        # Exit any trade if max age exceeded AND no significant profit
+        # Exit any trade if max age exceeded
         if trade_age_hours > max_age:
-            # Check if we're in good profit
-            if entry_price:
-                profit_pct = ((current_price - entry_price) / entry_price * 100) if direction == "long" else \
-                             ((entry_price - current_price) / entry_price * 100)
-                
-                # If in good profit, allow more time
-                if profit_pct > 5.0:  # Increased from 3.0% to 5.0%
-                    # Only exit if extremely old
-                    if trade_age_hours > max_age * 2:  # Increased from 1.5x to 2x
-                        log(f"⏱ Time-based exit for {trade.get('symbol')}: Extended max age exceeded ({trade_age_hours:.1f} hours)")
-                        return True
-                    return False
-            
             log(f"⏱ Time-based exit for {trade.get('symbol')}: Max age of {max_age} hours exceeded ({trade_age_hours:.1f} hours)")
             return True
             
     except Exception as e:
         log(f"❌ Error in time-based exit check: {e}", level="ERROR")
+        log(f"Debug info - trade timestamp: {trade.get('timestamp')}, current_time type: {type(current_time)}")
+        import traceback
+        log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
     
     return False
 
