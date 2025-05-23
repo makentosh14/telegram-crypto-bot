@@ -385,6 +385,8 @@ async def scan_for_new_signals(symbols):
                 entry_price=price,
                 direction=direction,
                 trailing_pct=trade.get("trailing_pct"),
+                tp1_target=trade.get("tp1"),  # Store the actual TP1 price
+                tp1_pct=tp1_pct,             # Store the TP1 percentage used
                 tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
                 sl=trade.get("sl"),
                 qty=trade.get("qty"),
