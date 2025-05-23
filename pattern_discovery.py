@@ -1,4 +1,4 @@
-# pattern_discovery.py
+# pattern_discovery.py - FIXED VERSION
 
 import asyncio
 from collections import defaultdict
@@ -69,7 +69,9 @@ async def pattern_discovery_scan(symbols):
                 if len(live_candles[symbol][str(tf)]) >= 30
             }
 
-            score, tf_scores, trade_type = score_symbol(symbol, candles_by_tf)
+            # FIXED: Properly unpack all 5 values returned by score_symbol
+            score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
+            
             last_pattern = detect_pattern(candles[-2:])
             volume_now = float(candles[-1]['volume'])
             avg_vol = get_average_volume(candles, window=15)
@@ -84,6 +86,8 @@ async def pattern_discovery_scan(symbols):
                 "volume_spike": volume_now > avg_vol * 1.5,
                 "tf_scores": tf_scores,
                 "score": score,
+                "indicator_scores": indicator_scores,  # Include indicator scores
+                "used_indicators": used_indicators,    # Include used indicators
                 "context": {
                     "rsi": tf_scores.get('rsi', None),
                     "macd": tf_scores.get('macd', None),
@@ -100,3 +104,6 @@ async def pattern_discovery_scan(symbols):
 
         except Exception as e:
             log(f"❌ Pattern scan failed for {symbol}: {e}", level="ERROR")
+            # Log the full error for debugging
+            import traceback
+            log(f"Full error trace: {traceback.format_exc()}", level="ERROR")
