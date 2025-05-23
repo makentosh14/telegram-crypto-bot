@@ -202,6 +202,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     """
     Track a new active trade with enhanced exit strategy parameters
     """
+    if not exit_tranches and qty:
+        exit_tranches = calculate_exit_tranches(symbol, qty)
+                                                
     active_trades[symbol] = {
         "score_history": [initial_score],
         "trade_type": trade_type,
@@ -228,6 +231,7 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "smart_pump_alerted": False,
         "in_momentum": False,
         "has_pump_potential": has_pump_potential,
+        "let_winners_run": True,
         "exit_timed": False,
         "exit_score": False,
         "tp1_hit_cycle": 0,
@@ -733,11 +737,11 @@ async def monitor_trades(live_candles):
                     # Execute partial exit with improved retry logic
                     if not trade.get("tp1_partial_exit"):
                         # Use enhanced partial exit function with retry
-                        exit_success = await execute_partial_exit_with_retry(symbol, trade, 33)  # 33% of position
+                        exit_success = await execute_partial_exit_with_retry(symbol, trade, 20)  # 33% of position
                         
                         if exit_success:
                             trade["tp1_partial_exit"] = True
-                            write_log(f"TP1 PARTIAL EXIT: {symbol} | Price: {current_price} | Success")
+                            write_log(f"TP1 PARTIAL EXIT (20% - LET WINNERS RUN): {symbol} | Price: {current_price} | Success")
                         else:
                             write_log(f"TP1 PARTIAL EXIT FAILED: {symbol} | Price: {current_price}")
                     
@@ -830,19 +834,19 @@ async def monitor_trades(live_candles):
                 pump_move = ((recent_high - trade["tp1_price"]) / trade["tp1_price"]) * 100
                 
                 # If price pumps significantly after TP1, alert and consider second exit
-                if pump_move >= TP1_PUMP_THRESHOLD:
+                if pump_move >= 2.0:
                     if not trade.get("smart_pump_alerted"):
                         trade["smart_pump_alerted"] = True
                         await send_telegram_message(f"🚀 <b>Smart Pump After TP1</b> on {symbol}: +{pump_move:.2f}% detected after TP1")
                         write_log(f"SMART PUMP AFTER TP1: {symbol} | +{pump_move:.2f}% beyond TP1")
                     
                     # Execute second exit tranche if we're in a big move and have momentum
-                    if has_momentum and not trade.get("tp2_exit_executed"):
+                    if has_momentum and pump_move >= 3.0 and not trade.get("tp2_exit_executed"):
                         # Take 33% more off during pump (leaving ~33% to ride momentum)
-                        if await execute_partial_exit_with_retry(symbol, trade, 50): # 50% of REMAINING position
+                        if await execute_partial_exit_with_retry(symbol, trade, 25): # 50% of REMAINING position
                             trade["tp2_exit_executed"] = True
-                            await send_telegram_message(f"💰 <b>Second Partial Exit</b> on <b>{symbol}</b> — 50% of remaining position exited during pump")
-                            write_log(f"PUMP EXIT: {symbol} | Second tranche (50% of remainder) exited during +{pump_move:.2f}% pump")
+                            await send_telegram_message(f"💰 <b>Second Partial Exit (25%)</b> on <b>{symbol}</b> — Conservative exit during +{pump_move:.2f}% pump")
+                            write_log(f"PUMP EXIT (25% - LET WINNERS RUN): {symbol} | Second tranche exited during +{pump_move:.2f}% pump")
                             save_active_trades()
             
             # 8. Trail SL hit check
