@@ -199,6 +199,17 @@ def display_trade_table(df, title):
     
     df_display = df[selected_columns].copy()
 
+    def get_live_active_trades():
+    """Get current active trades from JSON file"""
+    try:
+        if os.path.exists("monitor_active_trades.json"):
+            with open("monitor_active_trades.json", 'r') as f:
+                trades = json.load(f)
+            return {k: v for k, v in trades.items() if not v.get("exited", False)}
+        return {}
+    except:
+        return {}
+
     # Apply conditional formatting
     def highlight_result(val):
         if val == "win": return "background-color: #b7f7b0"
@@ -993,6 +1004,14 @@ def display_summary_stats(df):
         metric1.metric("Win Rate", f"{win_rate:.1f}%")
         metric2.metric("Avg Score", f"{avg_score:.2f}")
         metric3.metric("Avg Confidence", f"{avg_conf:.2f}%")
+
+         live_active = get_live_active_trades()
+         st.write("### 🔴 Live Active Trades")
+         st.metric("Currently Active (Live)", len(live_active))
+         st.metric("CSV Open Trades", len(df[df.result == "open"]))
+    
+         if len(live_active) != len(df[df.result == "open"]):
+             st.warning(f"⚠️ Mismatch detected! Live: {len(live_active)}, CSV: {len(df[df.result == 'open'])}")
         
         # Calculate PnL metrics if available
         if 'move_pct' in df.columns:
