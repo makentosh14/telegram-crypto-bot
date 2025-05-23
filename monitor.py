@@ -693,21 +693,56 @@ async def monitor_trades(live_candles):
             if not trade.get("tp1_hit"):
                 # Get candles for TP1 detection
                 candles = candles_by_tf.get('1', [])
-                
-                # Use enhanced TP1 detection
-                if detect_tp1_hit(symbol, trade, current_price, candles):
+    
+                # Use the ACTUAL TP1 price from trade execution, not hardcoded 1.8%
+                tp1_level = trade.get("tp1_target")  # This should be set during trade execution
+    
+                if not tp1_level:
+                    # Fallback: Try to get from the original trade data
+                    if trade.get("tp1_price_target"):
+                        tp1_level = trade.get("tp1_price_target")
+                    else:
+                        # Last resort: Calculate from the actual TP percentage used
+                        tp1_pct = trade.get("tp1_pct", 1.8)  # Get the actual TP1 percentage used
+                        tp1_level = entry_price * (1 + tp1_pct/100) if direction.lower() == "long" else entry_price * (1 - tp1_pct/100)
+                        log(f"⚠️ No stored TP1 target for {symbol}, calculated from TP1%: {tp1_pct}% = {tp1_level}")
+    
+                 # Enhanced TP1 detection
+                 tp1_hit = False
+    
+                # Check current price
+                if direction.lower() == "long" and current_price >= tp1_level:
+                    tp1_hit = True
+                elif direction.lower() == "short" and current_price <= tp1_level:
+                    tp1_hit = True
+    
+                # Also check recent candle wicks for more robust detection
+                if not tp1_hit and candles and len(candles) >= 2:
+                    last_candle = candles[-1]
+        
+                    # For long positions, check if high price reached TP1
+                    if direction.lower() == "long" and float(last_candle["high"]) >= tp1_level:
+                        log(f"🔍 TP1 hit detected for {symbol} via high price: {last_candle['high']} >= {tp1_level}")
+                        tp1_hit = True
+                    # For short positions, check if low price reached TP1
+                    elif direction.lower() == "short" and float(last_candle["low"]) <= tp1_level:
+                        log(f"🔍 TP1 hit detected for {symbol} via low price: {last_candle['low']} <= {tp1_level}")
+                        tp1_hit = True
+    
+                if tp1_hit:
                     # Log TP1 detection with details
                     log_tp1_event(symbol, "DETECTED", {
                         "price": float(current_price),
                         "entry_price": float(entry_price),
+                        "tp1_target": float(tp1_level),
                         "direction": direction
                     })
-                    
+        
                     # Mark TP1 as hit in trade object
                     trade["tp1_hit"] = True
                     trade["tp1_hit_cycle"] = trade.get("cycles", 0)
                     trade["break_even_triggered"] = True
-                    trade["tp1_price"] = current_price
+                    trade["tp1_price"] = tp1_level  # Store the actual TP1 level that was hit
                     
                     # Execute partial exit with improved retry logic
                     if not trade.get("tp1_partial_exit"):
