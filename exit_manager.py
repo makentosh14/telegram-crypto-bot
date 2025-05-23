@@ -419,6 +419,63 @@ def adjust_profit_protection(symbol, entry_price, current_price, direction, trad
         
     return None
 
+def detect_price_momentum(candles, lookback=5):
+    """
+    Detect if price is showing strong momentum based on recent candles
+    Returns tuple of (has_momentum, direction, strength)
+    """
+    if len(candles) < lookback + 5:
+        return False, None, 0.0
+        
+    try:
+        recent = candles[-lookback:]
+        prior = candles[-(lookback+5):-lookback]
+        
+        # Calculate recent volume vs prior
+        recent_vol_avg = sum(float(c['volume']) for c in recent) / len(recent)
+        prior_vol_avg = sum(float(c['volume']) for c in prior) / len(prior)
+        vol_increase = recent_vol_avg / prior_vol_avg if prior_vol_avg > 0 else 1
+        
+        # Calculate consecutive up/down candles
+        consecutive_up = 0
+        consecutive_down = 0
+        
+        for i in range(len(recent)):
+            candle_close = float(recent[i]['close'])
+            candle_open = float(recent[i]['open'])
+            
+            if candle_close > candle_open:  # Bullish candle
+                consecutive_up += 1
+                consecutive_down = 0
+            elif candle_close < candle_open:  # Bearish candle
+                consecutive_down += 1
+                consecutive_up = 0
+        
+        # Calculate price movement percentage
+        first_candle_open = float(recent[0]['open'])
+        last_candle_close = float(recent[-1]['close'])  
+        price_change_pct = ((last_candle_close - first_candle_open) / first_candle_open) * 100
+        
+        # Determine momentum direction
+        direction = "up" if price_change_pct > 0 else "down"
+        
+        # Calculate momentum strength (0-1 scale)
+        strength = 0
+        if consecutive_up >= 3 or consecutive_down >= 3:
+            strength += 0.4
+        if vol_increase >= 1.5:
+            strength += 0.3
+        if abs(price_change_pct) >= 1.0:
+            strength += 0.3
+        
+        has_momentum = strength >= 0.6  # 60% of criteria met
+        
+        return has_momentum, direction, strength
+        
+    except Exception as e:
+        log(f"❌ Error detecting price momentum: {e}", level="ERROR")
+        return False, None, 0.0
+
 def should_exit_by_time(trade, current_time=None, candles=None):
     """
     Check if trade should be exited based on time elapsed
