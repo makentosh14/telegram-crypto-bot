@@ -196,23 +196,11 @@ async def periodic_backups():
         # Wait for an hour
         await asyncio.sleep(3600)  # 1 hour
 
-def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, trailing_pct=None, tp2=None, sl=None, sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False):
+def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, 
+                      trailing_pct=None, tp1_target=None, tp1_pct=None, tp2=None, sl=None, 
+                      sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False):
     """
     Track a new active trade with enhanced exit strategy parameters
-    
-    Args:
-        symbol: Trading symbol
-        trade_type: "Scalp", "Intraday", or "Swing"
-        initial_score: Initial trade score
-        entry_price: Entry price
-        direction: "Long" or "Short"
-        trailing_pct: Trailing stop percentage
-        tp2: Second take profit level (for big moves)
-        sl: Initial stop loss level
-        sl_order_id: Stop loss order ID
-        qty: Position size
-        exit_tranches: List of quantities for staged exits
-        has_pump_potential: Flag indicating if this setup has pump potential
     """
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -225,25 +213,27 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "trailing_sl": None,
         "original_sl": sl,
         "tp1_hit": False,
+        "tp1_target": tp1_target,      # Store the actual TP1 price target
+        "tp1_pct": tp1_pct,           # Store the TP1 percentage used
         "tp1_partial_exit": False,
         "tp2_hit": False,
         "tp2_exit_executed": False,
         "sl_order_id": sl_order_id,
         "qty": qty,
         "break_even_triggered": False,
-        "tp1_price": None,
-        "tp2_price": tp2,  # Store TP2 level for bigger targets
+        "tp1_price": None,  # This will be set when TP1 is actually hit
+        "tp2_price": tp2,
         "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "exit_tranches": exit_tranches or [],  # Store exit tranches for partial exits
-        "smart_pump_alerted": False,  # Flag for pump alert
-        "in_momentum": False,  # Flag for current momentum state
-        "has_pump_potential": has_pump_potential,  # Flag to indicate potential pump setup
-        "exit_timed": False,  # Flag for time-based exit
-        "exit_score": False,  # Flag for score-based exit
-        "tp1_hit_cycle": 0,  # Added to track which cycle TP1 was hit
-        "max_score": initial_score,  # Added to track the highest score achieved
-        "entry_time": datetime.utcnow(),  # Add entry time for clear timing
-        "last_score_update": datetime.utcnow()  # Track when the score was last updated
+        "exit_tranches": exit_tranches or [],
+        "smart_pump_alerted": False,
+        "in_momentum": False,
+        "has_pump_potential": has_pump_potential,
+        "exit_timed": False,
+        "exit_score": False,
+        "tp1_hit_cycle": 0,
+        "max_score": initial_score,
+        "entry_time": datetime.utcnow(),
+        "last_score_update": datetime.utcnow()
     }
     
     # Log pump potential if detected
