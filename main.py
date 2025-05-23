@@ -160,6 +160,40 @@ async def cleanup_cooldowns():
         # Run every 30 minutes
         await asyncio.sleep(1800)
 
+async def comprehensive_startup_cleanup():
+    """Enhanced cleanup on bot startup"""
+    log("🧹 Performing comprehensive startup cleanup...")
+    
+    try:
+        # Cancel ALL stop orders across all symbols
+        stop_cleanup_count = await cleanup_orphaned_stop_orders()
+        
+        # Also cancel any limit orders that might be orphaned
+        limit_orders_resp = await signed_request("GET", "/v5/order/realtime", {
+            "category": "linear",
+            "orderFilter": "Order"  # Regular orders
+        })
+        
+        if limit_orders_resp.get("retCode") == 0:
+            orders = limit_orders_resp.get("result", {}).get("list", [])
+            log(f"🧹 Found {len(orders)} regular orders to clean up")
+            
+            for order in orders:
+                try:
+                    cancel_resp = await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": order.get("symbol"),
+                        "orderId": order.get("orderId")
+                    })
+                    await asyncio.sleep(0.1)  # Rate limit protection
+                except Exception as e:
+                    log(f"⚠️ Error cancelling regular order: {e}")
+        
+        log(f"✅ Startup cleanup completed: {stop_cleanup_count} stop orders cleaned")
+        
+    except Exception as e:
+        log(f"❌ Error in startup cleanup: {e}", level="ERROR")
+
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
     regime = trend_context.get("regime", "trending")
