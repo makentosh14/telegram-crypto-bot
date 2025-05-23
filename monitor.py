@@ -707,13 +707,13 @@ async def monitor_trades(live_candles):
                     last_candle = candles[-1]
         
                     # For long positions, check if high price reached TP1
-                    if direction.lower() == "long" and float(last_candle["high"]) >= tp1_level:
-                        log(f"🔍 TP1 hit detected for {symbol} via high price: {last_candle['high']} >= {tp1_level}")
-                        tp1_hit = True
+            if direction.lower() == "long" and float(last_candle["high"]) >= tp1_level:
+                log(f"🔍 TP1 hit detected for {symbol} via high price: {last_candle['high']} >= {tp1_level}")
+                tp1_hit = True
                     # For short positions, check if low price reached TP1
-                    elif direction.lower() == "short" and float(last_candle["low"]) <= tp1_level:
-                        log(f"🔍 TP1 hit detected for {symbol} via low price: {last_candle['low']} <= {tp1_level}")
-                        tp1_hit = True
+            elif direction.lower() == "short" and float(last_candle["low"]) <= tp1_level:
+                log(f"🔍 TP1 hit detected for {symbol} via low price: {last_candle['low']} <= {tp1_level}")
+                tp1_hit = True
     
                 if tp1_hit:
                     # Log TP1 detection with details
