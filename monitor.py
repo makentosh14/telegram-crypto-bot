@@ -694,7 +694,7 @@ async def monitor_trades(live_candles):
                         log(f"⚠️ No stored TP1 target for {symbol}, calculated from TP1%: {tp1_pct}% = {tp1_level}")
     
                  # Enhanced TP1 detection
-                 tp1_hit = False
+            tp1_hit = False
     
                 # Check current price
                 if direction.lower() == "long" and current_price >= tp1_level:
