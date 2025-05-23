@@ -391,7 +391,7 @@ async def process_active_trade(symbol, trade, live_candles):
                     new_sl = current_price * (1 + trailing_pct/100)
                 
                 # Round to 6 decimal places
-                 new_sl = round(new_sl, 6)
+                new_sl = round(new_sl, 6)
                 
                 # UPDATED: Only update if improvement is significant (0.8% or more)
                 min_improvement = 0.008  # 0.8% minimum improvement
