@@ -345,7 +345,7 @@ async def execute_partial_exit(symbol, trade, exit_percentage):
         return False
 
 async def update_stop_loss_order(symbol, trade, new_sl_price):
-    """Centralized function to update a stop loss order"""
+    """Updated function with enhanced error handling and cleanup"""
     direction = trade.get("direction", "").lower()
     qty = trade.get("qty")
     old_sl_order_id = trade.get("sl_order_id")
@@ -354,21 +354,14 @@ async def update_stop_loss_order(symbol, trade, new_sl_price):
         log(f"❌ Cannot update SL for {symbol}: Missing trade data", level="ERROR")
         return False
     
-    # Cancel existing SL if present
-    if old_sl_order_id:
-        try:
-            cancel_result = await signed_request("POST", "/v5/order/cancel", {
-                "category": "linear",
-                "symbol": symbol,
-                "orderId": old_sl_order_id
-            })
-            
-            if cancel_result.get("retCode") != 0:
-                log(f"⚠️ Failed to cancel old SL for {symbol}: {cancel_result.get('retMsg')}", level="WARN")
-        except Exception as e:
-            log(f"❌ Error cancelling SL order: {e}", level="ERROR")
+    # Step 1: Clean up existing orders for this symbol
+    try:
+        await cleanup_orphaned_stop_orders(symbol)
+        await asyncio.sleep(0.5)  # Brief pause after cleanup
+    except Exception as e:
+        log(f"⚠️ Cleanup error for {symbol}: {e}", level="WARN")
     
-    # Place new SL order with retry
+    # Step 2: Place new SL order using the enhanced function
     try:
         sl_resp = await place_stop_loss_with_retry(
             symbol=symbol,
