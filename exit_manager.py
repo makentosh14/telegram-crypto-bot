@@ -476,7 +476,7 @@ def detect_price_momentum(candles, lookback=5):
         log(f"❌ Error detecting price momentum: {e}", level="ERROR")
         return False, None, 0.0
 
-def should_exit_by_time(trade, current_time=None, candles=None):
+def should_exit_by_time(trade, current_time=None, candles=None, current_price=None):
     """
     Check if trade should be exited based on time elapsed
     FIXED: Proper datetime handling to avoid comparison errors
