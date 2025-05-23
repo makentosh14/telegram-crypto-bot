@@ -186,6 +186,55 @@ async def place_market_order(symbol, side, qty, market_type="linear", reduce_onl
         "reduceOnly": reduce_only
     })
 
+
+async def cleanup_orphaned_stop_orders(symbol=None):
+    """
+    Clean up orphaned stop orders to prevent hitting the 10 order limit
+    """
+    try:
+        # Get all stop orders
+        params = {"category": "linear", "orderFilter": "Stop"}
+        if symbol:
+            params["symbol"] = symbol
+            
+        orders_resp = await signed_request("GET", "/v5/order/realtime", params)
+        
+        if orders_resp.get("retCode") == 0:
+            orders = orders_resp.get("result", {}).get("list", [])
+            log(f"🧹 Found {len(orders)} stop orders{'for ' + symbol if symbol else ''}")
+            
+            cancelled_count = 0
+            for order in orders:
+                order_symbol = order.get("symbol")
+                order_id = order.get("orderId")
+                
+                try:
+                    # Cancel the order
+                    cancel_resp = await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": order_symbol,
+                        "orderId": order_id
+                    })
+                    
+                    if cancel_resp.get("retCode") == 0:
+                        cancelled_count += 1
+                        log(f"✅ Cancelled orphaned stop order: {order_id} for {order_symbol}")
+                    else:
+                        log(f"⚠️ Failed to cancel order {order_id}: {cancel_resp.get('retMsg')}")
+                        
+                    # Brief delay to avoid rate limits
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    log(f"❌ Error cancelling order {order_id}: {e}")
+                    
+            log(f"🧹 Cleanup complete: Cancelled {cancelled_count} orphaned stop orders")
+            return cancelled_count
+            
+    except Exception as e:
+        log(f"❌ Error in stop order cleanup: {e}", level="ERROR")
+        return 0
+
 async def cleanup_old_orders():
     """Clean up old/orphaned orders across all symbols"""
     try:
@@ -217,93 +266,80 @@ async def cleanup_old_orders():
 # === STOP LOSS FUNCTIONS ===
 async def place_stop_loss(symbol, direction, qty, sl_price, market_type="linear"):
     """
-    Places a stop loss order for the given symbol
-    
-    Args:
-        symbol: Trading pair symbol
-        direction: 'long' or 'short'
-        qty: Position quantity
-        sl_price: Stop loss price
-        market_type: 'linear' for USDT Perpetual
-        
-    Returns:
-        API response from Bybit
+    Enhanced stop loss placement with automatic cleanup and corrected trigger direction
     """
+    # STEP 1: Clean up any existing stop orders for this symbol first
+    log(f"🧹 Cleaning up existing stop orders for {symbol} before placing new SL")
+    await cleanup_orphaned_stop_orders(symbol)
+    
+    # Brief pause after cleanup
+    await asyncio.sleep(1)
+    
     side = "Sell" if direction.lower() == "long" else "Buy"
     
-    # CRITICAL FIX: Corrected trigger direction logic
-    # For long positions: use 2 (Falling) - triggers when price falls below SL
-    # For short positions: use 1 (Rising) - triggers when price rises above SL
+    # STEP 2: CORRECTED trigger direction logic
+    # For long positions: SL triggers when price FALLS below SL (triggerDirection = 2)
+    # For short positions: SL triggers when price RISES above SL (triggerDirection = 1)
     trigger_direction = 2 if direction.lower() == "long" else 1
-
-    try:
-        cancel_result = await signed_request("POST", "/v5/order/cancel-all", {
-            "category": market_type,
-            "symbol": symbol,
-            "orderFilter": "Stop"  # Only cancel stop orders
-        })
-        log(f"🧹 Cleaned up existing stop orders for {symbol}: {cancel_result}")
-        await asyncio.sleep(0.5)  # Brief pause after cleanup
-    except Exception as e:
-        log(f"⚠️ Error cleaning up orders: {e}")
     
-    # Verify the SL price is valid
+    # STEP 3: Validate the SL price is on correct side of market
     try:
         ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
         mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
         
-        # Add safety check to make sure SL is on the correct side of mark price
+        # Add safety buffer for SL placement
+        buffer = 0.005  # 0.5% safety buffer
+        
         if direction.lower() == "long" and sl_price >= mark_price:
             old_sl = sl_price
-            sl_price = round(mark_price * 0.995, 6)  # 0.5% below mark price
+            sl_price = round(mark_price * (1 - buffer), 6)
             log(f"⚠️ Adjusted long SL from {old_sl} to {sl_price} (below mark price {mark_price})", level="WARN")
         elif direction.lower() == "short" and sl_price <= mark_price:
             old_sl = sl_price
-            sl_price = round(mark_price * 1.005, 6)  # 0.5% above mark price
+            sl_price = round(mark_price * (1 + buffer), 6)
             log(f"⚠️ Adjusted short SL from {old_sl} to {sl_price} (above mark price {mark_price})", level="WARN")
             
-        # Important debug message to understand the relationship between SL and current price
-        log(f"🧪 SL Debug | {symbol} | Dir: {direction} | Mark: {mark_price} | SL: {sl_price} | TriggerDir: {trigger_direction}")
     except Exception as e:
-        log(f"❌ Failed to fetch mark price for SL check: {e}", level="ERROR")
+        log(f"❌ Failed to validate SL price: {e}", level="ERROR")
     
+    # STEP 4: Construct the stop loss order payload
     sl_payload = {
         "category": market_type,
         "symbol": symbol,
         "side": side,
         "orderType": "Market",
         "triggerPrice": str(sl_price),
-        "triggerDirection": trigger_direction,  # FIXED: Now correctly set based on position direction
-        "triggerBy": "MarkPrice",  # Use MarkPrice for more reliable triggering
+        "triggerDirection": trigger_direction,  # FIXED: Correct trigger direction
+        "triggerBy": "MarkPrice",
         "qty": str(qty),
         "reduceOnly": True,
         "timeInForce": "GTC",
         "orderFilter": "Stop"
     }
     
-    log(f"🛡️ Placing SL order for {symbol}: {sl_payload}")
+    log(f"🛡️ Placing SL order for {symbol}: {direction} | TriggerDir: {trigger_direction} | Price: {sl_price}")
+    
+    # STEP 5: Place the stop loss order
     result = await signed_request("POST", "/v5/order/create", sl_payload)
     
     if result.get("retCode") != 0:
-        log(f"❌ Failed to place SL order: {result.get('retMsg')}", level="ERROR")
+        error_msg = result.get("retMsg", "Unknown error")
+        log(f"❌ Failed to place SL order: {error_msg}", level="ERROR")
         
-        # Retry with LastPrice if MarkPrice failed
-        sl_payload["triggerBy"] = "LastPrice"
-        log(f"🔄 Retrying SL with LastPrice: {sl_payload}")
-        result = await signed_request("POST", "/v5/order/create", sl_payload)
-        
-        # If still failing, try one more approach with increased buffer
-        if result.get("retCode") != 0:
-            log(f"❌ Second SL attempt failed: {result.get('retMsg')}", level="ERROR")
+        # If still failing due to too many orders, do a broader cleanup
+        if "10 working" in error_msg.lower():
+            log("🧹 Performing broader stop order cleanup due to limit hit")
+            await cleanup_orphaned_stop_orders()  # Clean all symbols
+            await asyncio.sleep(2)
             
-            # Add more buffer to make sure SL is at a valid price
-            if direction.lower() == "long":
-                sl_price = round(mark_price * 0.99, 6)  # 1% below mark price
-            else:
-                sl_price = round(mark_price * 1.01, 6)  # 1% above mark price
-                
-            sl_payload["triggerPrice"] = str(sl_price)
-            log(f"🔄 Final SL attempt with more buffer: {sl_price}")
+            # Retry after cleanup
+            log("🔄 Retrying SL placement after cleanup")
+            result = await signed_request("POST", "/v5/order/create", sl_payload)
+            
+        # If trigger direction error, try with LastPrice instead of MarkPrice
+        elif "triggerdirection" in error_msg.lower():
+            log("🔄 Retrying SL with LastPrice trigger")
+            sl_payload["triggerBy"] = "LastPrice"
             result = await signed_request("POST", "/v5/order/create", sl_payload)
     
     return result
