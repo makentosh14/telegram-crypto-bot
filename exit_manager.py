@@ -1,9 +1,17 @@
-from volume import get_average_volume
+# exit_manager.py - Enhanced with Advanced Indicator Integration
+
+from volume import get_average_volume, detect_volume_climax, get_volume_profile
 from symbol_info import get_precision, round_qty
 from activity_logger import write_log
 from logger import log
 from atr import calculate_atr
+from supertrend import get_supertrend_exit_signal, get_supertrend_state
+from ema import calculate_ema, get_ema_slope, detect_ema_squeeze
+from rsi import calculate_rsi_with_bands, get_rsi_signal
+from bollinger import detect_band_walk, get_bollinger_signal
+from macd import get_macd_momentum
 import asyncio
+import numpy as np
 
 def calculate_quantity(symbol, raw_qty, min_qty=0.001):
     """
@@ -124,8 +132,7 @@ def calculate_trailing_stop(symbol, entry_price, current_price, direction="long"
 
 def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_trail_pct):
     """
-    Adjust trailing percentage based on recent volatility and momentum.
-    UPDATED: More conservative trailing to let winners run longer
+    Enhanced adaptive trailing with advanced indicator integration
     """
     try:
         # Use 7-period ATR for current volatility
@@ -148,11 +155,62 @@ def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_
                 volatility_factor = 0.9  # Increased from 0.8 to let winners run
                 log(f"📊 Low volatility detected for {symbol}: {vol_ratio:.2f}x - using moderate trail")
         
-        # Check for momentum surge - uses MUCH wider trailing to catch bigger moves
+        # ===== NEW ADVANCED INDICATOR CHECKS =====
+        
+        # 1. Check Supertrend State
+        st_state = get_supertrend_state(candles)
+        if st_state['trend']:
+            # If we're far from Supertrend line, use wider trailing
+            if st_state['distance_from_line'] > 2.0:  # More than 2% from line
+                volatility_factor = max(volatility_factor, 1.8)
+                log(f"📊 Far from Supertrend line ({st_state['distance_from_line']}%) - wider trailing")
+        
+        # 2. Check EMA Slope
+        ema_values = calculate_ema(candles, 20)
+        if ema_values and len(ema_values) >= 5:
+            ema_slope = get_ema_slope(ema_values, periods=5)
+            
+            # Strong trend = wider trailing
+            if abs(ema_slope) > 1.0:  # 1% slope
+                volatility_factor = max(volatility_factor, 1.6)
+                log(f"📊 Strong EMA slope ({ema_slope:.2f}%) - wider trailing")
+        
+        # 3. Check Bollinger Band Walk
+        band_walk = detect_band_walk(candles, calculate_bollinger_bands(candles))
+        if band_walk and band_walk['strength'] > 0.7:
+            # Walking the bands = strong trend, use wider trailing
+            volatility_factor = max(volatility_factor, 2.0)
+            log(f"🚀 Band walk detected (strength: {band_walk['strength']}) - much wider trailing")
+        
+        # 4. Check RSI Momentum
+        rsi_data = calculate_rsi_with_bands(candles)
+        if rsi_data and rsi_data.get('momentum'):
+            # Strong RSI momentum = wider trailing
+            if abs(rsi_data['momentum']) > 5:  # RSI moved 5+ points recently
+                volatility_factor = max(volatility_factor, 1.5)
+                log(f"📊 Strong RSI momentum ({rsi_data['momentum']}) - wider trailing")
+        
+        # 5. Check Volume Climax
+        climax, climax_type = detect_volume_climax(candles)
+        if climax:
+            # Volume climax might signal exhaustion - tighten trailing
+            volatility_factor *= 0.7
+            log(f"⚠️ Volume climax detected ({climax_type}) - tighter trailing")
+        
+        # 6. Check MACD Momentum
+        macd_momentum = get_macd_momentum(candles)
+        if abs(macd_momentum) > 0.7:
+            # Strong MACD momentum = wider trailing
+            volatility_factor = max(volatility_factor, 1.4)
+            log(f"📊 Strong MACD momentum ({macd_momentum:.2f}) - wider trailing")
+        
+        # ===== END NEW ADVANCED INDICATORS =====
+        
+        # Check for momentum surge - uses MUCH wider trailing to let winners run
         if detect_momentum_surge(candles):
-            momentum_factor = 2.0  # Increased from 1.5 to let winners run much longer
-            log(f"🚀 Momentum surge detected for {symbol} - using MUCH wider trailing ({momentum_factor}x)")
+            momentum_factor = 2.5 + (momentum_strength * 1.0)  # 2.5-3.5x factor (was 1.0-1.5x)
             volatility_factor = max(volatility_factor, momentum_factor)
+            log(f"🚀 Momentum surge detected for {symbol} - using much wider trail for letting winners run: {momentum_factor:.2f}x")
         
         adjusted_pct = base_trail_pct * volatility_factor
         log(f"🔄 Adjusted trailing % for {symbol}: {base_trail_pct:.2f}% → {adjusted_pct:.2f}%")
@@ -164,8 +222,66 @@ def calculate_adaptive_trailing(symbol, candles, direction, current_price, base_
 
 def should_trail_stop(symbol, entry_price, current_price, direction="long", candles=None, trigger_pct=0.018, trail_pct=0.009, current_trailing_sl=None):
     """
-    Checks if trailing stop should activate - UPDATED for letting winners run
+    Enhanced trailing stop decision with advanced indicators
     """
+    # UPDATED: Check if we've reached the higher activation threshold
+    if direction.lower() == "long":
+        activation_threshold = entry_price * (1 + trigger_pct)
+        if current_price < activation_threshold:
+            return None  # Not enough move to activate trailing
+    else:  # short
+        activation_threshold = entry_price * (1 - trigger_pct)
+        if current_price > activation_threshold:
+            return None  # Not enough move to activate trailing
+    
+    # ===== NEW ADVANCED INDICATOR EXIT CHECKS =====
+    
+    if candles:
+        # 1. Check Supertrend for exit signal
+        st_exit, st_reason = get_supertrend_exit_signal(candles, direction.lower())
+        if st_exit:
+            log(f"⚠️ Supertrend exit signal for {symbol}: {st_reason}")
+            # Tighten trailing stop significantly when Supertrend flips
+            trail_pct *= 0.3  # Much tighter trailing
+        
+        # 2. Check EMA Squeeze
+        ribbon = calculate_ema_ribbon(candles)
+        ema_squeeze = detect_ema_squeeze(ribbon)
+        if ema_squeeze['squeezing']:
+            log(f"⚠️ EMA squeeze detected for {symbol} - potential breakout")
+            # During squeeze, use tighter trailing to protect profits
+            trail_pct *= 0.6
+        
+        # 3. Check RSI Signal
+        rsi_data = calculate_rsi_with_bands(candles)
+        if rsi_data:
+            rsi_signal, rsi_strength = get_rsi_signal(rsi_data)
+            
+            # If RSI gives opposite signal, tighten stop
+            if (direction.lower() == "long" and rsi_signal == "sell") or \
+               (direction.lower() == "short" and rsi_signal == "buy"):
+                trail_pct *= (1 - rsi_strength * 0.5)  # Tighter based on signal strength
+                log(f"⚠️ RSI opposite signal for {symbol} - tighter trailing")
+        
+        # 4. Check Bollinger Signal
+        bb_signal = get_bollinger_signal(candles)
+        if bb_signal['signal']:
+            # If at extremes, might reverse
+            if bb_signal['signal'] in ['overbought', 'oversold']:
+                trail_pct *= 0.7
+                log(f"⚠️ Bollinger extreme for {symbol} ({bb_signal['signal']}) - tighter trailing")
+        
+        # 5. Volume Profile Check
+        vol_profile = get_volume_profile(candles)
+        if vol_profile and vol_profile.get('poc'):
+            poc = vol_profile['poc']
+            # If approaching high volume node (POC), might see resistance/support
+            if abs(current_price - poc) / poc < 0.01:  # Within 1% of POC
+                trail_pct *= 0.8
+                log(f"⚠️ Approaching volume POC for {symbol} - tighter trailing")
+    
+    # ===== END NEW ADVANCED INDICATORS =====
+    
     # UPDATED: Require higher volume confirmation for trailing activation
     if candles:
         avg_volume = get_average_volume(candles)
@@ -206,13 +322,7 @@ def should_trail_stop(symbol, entry_price, current_price, direction="long", cand
 
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending"):
     """
-    Calculates optimal SL/TP levels based on multiple factors:
-    - Trade type (Scalp/Intraday/Swing)
-    - Market regime (trending/volatile/ranging)
-    - Confidence score
-    - ATR (Average True Range)
-    
-    Returns SL price, TP1 price, SL percentage, trailing percentage, and TP1 percentage
+    Enhanced SL/TP calculation with advanced indicator awareness
     """
     # Select appropriate timeframe for ATR calculation based on trade type
     atr_tf_map = {"Scalp": '3', "Intraday": '15', "Swing": '60'}
@@ -227,6 +337,34 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     # Base ATR multiplier - adjust based on confidence
     atr_factor = 1.5 if confidence >= 80 else (1.2 if confidence >= 65 else 1.8)
+    
+    # ===== NEW ADVANCED INDICATOR ADJUSTMENTS =====
+    
+    if candles:
+        # 1. Adjust based on Supertrend
+        st_state = get_supertrend_state(candles)
+        if st_state['trend']:
+            # If we have many consecutive bars in trend, widen SL
+            if st_state['consecutive_bars'] > 10:
+                atr_factor *= 1.2
+                log(f"📊 Strong Supertrend persistence - wider SL")
+        
+        # 2. Adjust based on EMA Ribbon
+        ribbon = calculate_ema_ribbon(candles)
+        ribbon_analysis = analyze_ema_ribbon(ribbon)
+        if ribbon_analysis['compression']:
+            # During compression, expect breakout - wider SL
+            atr_factor *= 1.3
+            log(f"📊 EMA compression detected - wider SL for potential breakout")
+        
+        # 3. Adjust based on Bollinger Bands
+        bb_signal = get_bollinger_signal(candles)
+        if bb_signal.get('squeeze'):
+            # Bollinger squeeze = potential big move
+            atr_factor *= 1.4
+            log(f"📊 Bollinger squeeze detected - wider SL")
+    
+    # ===== END NEW ADVANCED INDICATORS =====
     
     # If we have ATR, use it to calculate SL distance
     if atr:
@@ -282,11 +420,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
 def calculate_optimal_sl(symbol, direction, entry_price, current_price, trade_type="Intraday", candles=None):
     """
-    Calculate optimal SL based on multiple factors:
-    - Current price
-    - Trade type
-    - ATR
-    - Market volatility
+    Calculate optimal SL based on multiple factors including advanced indicators
     """
     # Base percentage for SL based on trade type
     base_pct = {
@@ -303,6 +437,21 @@ def calculate_optimal_sl(symbol, direction, entry_price, current_price, trade_ty
     # Calculate ATR-based SL if available
     if atr:
         atr_factor = 1.5
+        
+        # ===== ADVANCED INDICATOR ADJUSTMENTS =====
+        
+        # Check if we're in a band walk (strong trend)
+        band_walk = detect_band_walk(candles, calculate_bollinger_bands(candles))
+        if band_walk and band_walk['strength'] > 0.7:
+            atr_factor = 2.0  # Wider SL during strong trends
+            log(f"📊 Band walk detected - using wider ATR factor")
+        
+        # Check Supertrend distance
+        st_state = get_supertrend_state(candles)
+        if st_state['distance_from_line'] > 3.0:  # Far from Supertrend
+            atr_factor = 1.8  # Wider SL when extended
+            log(f"📊 Extended from Supertrend - wider SL")
+        
         atr_sl_pct = (atr / current_price) * 100 * atr_factor
         # Use ATR-based SL if greater than base
         base_pct = max(base_pct, atr_sl_pct)
@@ -316,6 +465,13 @@ def calculate_optimal_sl(symbol, direction, entry_price, current_price, trade_ty
         price_range = (recent_high - recent_low) / recent_low
         if price_range > 0.03:  # 3% range considered volatile
             volatility_factor = 1.3
+            
+        # Check for EMA squeeze (potential breakout)
+        ribbon = calculate_ema_ribbon(candles)
+        ema_squeeze = detect_ema_squeeze(ribbon)
+        if ema_squeeze['squeezing']:
+            volatility_factor = max(volatility_factor, 1.4)
+            log(f"📊 EMA squeeze detected - expecting volatility")
     
     final_sl_pct = base_pct * volatility_factor
     
@@ -363,8 +519,7 @@ def calculate_early_trailing_stop(symbol, direction, entry_price, current_price,
 
 def adjust_profit_protection(symbol, entry_price, current_price, direction, trade_type="Intraday"):
     """
-    Adjust stop loss based on profit milestones reached
-    Returns a new stop loss price if a milestone is hit, otherwise None
+    Enhanced profit protection with advanced indicator awareness
     """
     precision = get_precision(symbol)
     
@@ -482,8 +637,7 @@ def detect_price_momentum(candles, lookback=5):
 
 def should_exit_by_time(trade, current_time=None, candles=None, current_price=None):
     """
-    Check if trade should be exited based on time elapsed
-    FIXED: Proper datetime handling to avoid comparison errors
+    Enhanced time-based exit with advanced indicator checks
     """
     from datetime import datetime
     
@@ -527,6 +681,30 @@ def should_exit_by_time(trade, current_time=None, candles=None, current_price=No
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
         
+        # ===== NEW ADVANCED INDICATOR CHECKS =====
+        
+        # Don't exit if indicators show strong continuation
+        if candles:
+            # Check Supertrend
+            st_state = get_supertrend_state(candles)
+            if st_state['consecutive_bars'] > 15:  # Strong trend
+                log(f"📊 Strong Supertrend persistence - bypassing time exit")
+                return False
+            
+            # Check Band Walk
+            band_walk = detect_band_walk(candles, calculate_bollinger_bands(candles))
+            if band_walk and band_walk['strength'] > 0.8:
+                log(f"📊 Strong band walk - bypassing time exit")
+                return False
+            
+            # Check MACD Momentum
+            macd_momentum = get_macd_momentum(candles)
+            if abs(macd_momentum) > 0.8:
+                log(f"📊 Strong MACD momentum - bypassing time exit")
+                return False
+        
+        # ===== END NEW ADVANCED INDICATORS =====
+        
         # Don't exit if we're in profit and in momentum
         if candles:
             has_momentum, momentum_direction, _ = detect_price_momentum(candles)
@@ -569,103 +747,259 @@ def should_exit_by_time(trade, current_time=None, candles=None, current_price=No
         # If trade has hit TP1, give it more time
         if trade.get("tp1_hit"):
             max_age *= 1.5  # 50% more time after TP1 is hit
-        
+       
         # Exit any trade if max age exceeded
         if trade_age_hours > max_age:
             log(f"⏱ Time-based exit for {trade.get('symbol')}: Max age of {max_age} hours exceeded ({trade_age_hours:.1f} hours)")
             return True
-            
+           
     except Exception as e:
         log(f"❌ Error in time-based exit check: {e}", level="ERROR")
         log(f"Debug info - trade timestamp: {trade.get('timestamp')}, current_time type: {type(current_time)}")
         import traceback
         log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
-    
+   
     return False
 
 def evaluate_score_exit(symbol, trade, score_history, min_exit_cycles=3):
-    """
-    Evaluate whether to exit based on score deterioration pattern
-    Returns True if exit is recommended based on score trend
-    """
-    # Disabled to prevent premature exits - using SL for protection instead
-    return False
-    
-    trade_type = trade.get("trade_type", "Intraday")
-    recent_scores = score_history[-min_exit_cycles:]
-    
-    # Don't exit during momentum
-    candles = trade.get("candles_1m")
-    if candles and detect_momentum_surge(candles):
-        log(f"🚀 Momentum surge detected for {symbol} - bypassing score-based exit")
-        return False
-    
-    # Calculate peak score and current score
-    max_score = max(score_history)
-    current_score = score_history[-1]
-    absolute_drop = max_score - current_score
-    pct_drop = (absolute_drop / max_score * 100) if max_score > 0 else 0
-    
-    # Check if scores are consistently declining
-    is_deteriorating = all(recent_scores[i] >= recent_scores[i+1] for i in range(len(recent_scores)-1))
-    
-    # Different thresholds based on trade type
-    thresholds = {
-        "Scalp": 4.0,     # More tolerant for scalps
-        "Intraday": 3.5,  # More tolerant for intraday
-        "Swing": 3.0      # More tolerant for swings
-    }
-    
-    threshold = thresholds.get(trade_type, 4.0)
-    
-    # Exit criteria - must meet ALL conditions:
-    # 1. Consistent score drop over recent cycles
-    # 2. Current score below threshold
-    # 3. Significant absolute drop from peak (at least 2 points)
-    # 4. Significant percentage drop from peak (at least 30%)
-    should_exit = (
-        is_deteriorating and
-        current_score < threshold and
-        absolute_drop >= 2.0 and
-        pct_drop >= 30
-    )
-    
-    if should_exit:
-        log(f"📉 Score deterioration exit for {symbol}: Current: {current_score}, Peak: {max_score}, " 
-            f"Drop: {absolute_drop:.2f} ({pct_drop:.1f}%), Threshold: {threshold}")
-    
-    return should_exit
+   """
+   Enhanced score-based exit evaluation with advanced indicators
+   """
+   # Disabled to prevent premature exits - using SL for protection instead
+   return False
+   
+   trade_type = trade.get("trade_type", "Intraday")
+   recent_scores = score_history[-min_exit_cycles:]
+   
+   # Don't exit during momentum
+   candles = trade.get("candles_1m")
+   if candles and detect_momentum_surge(candles):
+       log(f"🚀 Momentum surge detected for {symbol} - bypassing score-based exit")
+       return False
+   
+   # ===== NEW ADVANCED INDICATOR CHECKS =====
+   
+   if candles:
+       # Don't exit if advanced indicators show strength
+       
+       # 1. Check Supertrend State
+       st_state = get_supertrend_state(candles)
+       if st_state['strength'] > 0.8:
+           log(f"📊 Strong Supertrend signal - bypassing score exit")
+           return False
+       
+       # 2. Check EMA Ribbon
+       ribbon = calculate_ema_ribbon(candles)
+       ribbon_analysis = analyze_ema_ribbon(ribbon)
+       if ribbon_analysis['strength'] > 0.7 and ribbon_analysis['trend'] != 'neutral':
+           log(f"📊 Strong EMA ribbon alignment - bypassing score exit")
+           return False
+       
+       # 3. Check RSI Momentum
+       rsi_data = calculate_rsi_with_bands(candles)
+       if rsi_data and abs(rsi_data.get('momentum', 0)) > 10:
+           log(f"📊 Strong RSI momentum - bypassing score exit")
+           return False
+       
+       # 4. Check for Band Walk
+       band_walk = detect_band_walk(candles, calculate_bollinger_bands(candles))
+       if band_walk and band_walk['strength'] > 0.6:
+           log(f"📊 Band walk in progress - bypassing score exit")
+           return False
+   
+   # ===== END NEW ADVANCED INDICATORS =====
+   
+   # Calculate peak score and current score
+   max_score = max(score_history)
+   current_score = score_history[-1]
+   absolute_drop = max_score - current_score
+   pct_drop = (absolute_drop / max_score * 100) if max_score > 0 else 0
+   
+   # Check if scores are consistently declining
+   is_deteriorating = all(recent_scores[i] >= recent_scores[i+1] for i in range(len(recent_scores)-1))
+   
+   # Different thresholds based on trade type
+   thresholds = {
+       "Scalp": 4.0,     # More tolerant for scalps
+       "Intraday": 3.5,  # More tolerant for intraday
+       "Swing": 3.0      # More tolerant for swings
+   }
+   
+   threshold = thresholds.get(trade_type, 4.0)
+   
+   # Exit criteria - must meet ALL conditions:
+   # 1. Consistent score drop over recent cycles
+   # 2. Current score below threshold
+   # 3. Significant absolute drop from peak (at least 2 points)
+   # 4. Significant percentage drop from peak (at least 30%)
+   should_exit = (
+       is_deteriorating and
+       current_score < threshold and
+       absolute_drop >= 2.0 and
+       pct_drop >= 30
+   )
+   
+   if should_exit:
+       log(f"📉 Score deterioration exit for {symbol}: Current: {current_score}, Peak: {max_score}, " 
+           f"Drop: {absolute_drop:.2f} ({pct_drop:.1f}%), Threshold: {threshold}")
+   
+   return should_exit
 
 async def validate_sl_price(symbol, direction, sl_price, market_type="linear"):
-    """
-    Validates that an SL price is on the correct side of the current market price.
-    Returns adjusted price if needed.
-    """
-    try:
-        from bybit_api import signed_request
-        
-        # Get current mark price
-        ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
-        mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
-        
-        if mark_price <= 0:
-            log(f"⚠️ Invalid mark price ({mark_price}) for {symbol}", level="WARN")
-            return sl_price
-        
-        # Ensure SL is on the correct side of mark price
-        if direction.lower() == "long" and sl_price >= mark_price:
-            # For long positions, SL must be below mark price
-            new_sl = round(mark_price * 0.995, 6)  # 0.5% below
-            log(f"⚠️ Adjusted long SL from {sl_price} to {new_sl} (below mark price {mark_price})", level="WARN")
-            return new_sl
-        elif direction.lower() == "short" and sl_price <= mark_price:
-            # For short positions, SL must be above mark price
-            new_sl = round(mark_price * 1.005, 6)  # 0.5% above
-            log(f"⚠️ Adjusted short SL from {sl_price} to {new_sl} (above mark price {mark_price})", level="WARN")
-            return new_sl
-        
-        # If SL is already on the correct side, return original
-        return sl_price
-    except Exception as e:
-        log(f"❌ Error validating SL price: {e}", level="ERROR")
-        return sl_price  # Return original price if validation fails
+   """
+   Validates that an SL price is on the correct side of the current market price.
+   Returns adjusted price if needed.
+   """
+   try:
+       from bybit_api import signed_request
+       
+       # Get current mark price
+       ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": market_type, "symbol": symbol})
+       mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
+       
+       if mark_price <= 0:
+           log(f"⚠️ Invalid mark price ({mark_price}) for {symbol}", level="WARN")
+           return sl_price
+       
+       # Ensure SL is on the correct side of mark price
+       if direction.lower() == "long" and sl_price >= mark_price:
+           # For long positions, SL must be below mark price
+           new_sl = round(mark_price * 0.995, 6)  # 0.5% below
+           log(f"⚠️ Adjusted long SL from {sl_price} to {new_sl} (below mark price {mark_price})", level="WARN")
+           return new_sl
+       elif direction.lower() == "short" and sl_price <= mark_price:
+           # For short positions, SL must be above mark price
+           new_sl = round(mark_price * 1.005, 6)  # 0.5% above
+           log(f"⚠️ Adjusted short SL from {sl_price} to {new_sl} (above mark price {mark_price})", level="WARN")
+           return new_sl
+       
+       # If SL is already on the correct side, return original
+       return sl_price
+   except Exception as e:
+       log(f"❌ Error validating SL price: {e}", level="ERROR")
+       return sl_price  # Return original price if validation fails
+
+def should_exit_on_indicator_flip(symbol, trade, candles):
+   """
+   NEW FUNCTION: Check if major indicators have flipped against the position
+   """
+   if not candles or len(candles) < 30:
+       return False, None
+   
+   direction = trade.get("direction", "").lower()
+   exit_signals = []
+   
+   try:
+       # 1. Supertrend Exit Signal
+       st_exit, st_reason = get_supertrend_exit_signal(candles, direction)
+       if st_exit:
+           exit_signals.append(f"Supertrend: {st_reason}")
+       
+       # 2. RSI Signal Flip
+       rsi_data = calculate_rsi_with_bands(candles)
+       if rsi_data:
+           rsi_signal, rsi_strength = get_rsi_signal(rsi_data)
+           if (direction == "long" and rsi_signal == "sell" and rsi_strength > 0.7) or \
+              (direction == "short" and rsi_signal == "buy" and rsi_strength > 0.7):
+               exit_signals.append(f"RSI flip: {rsi_signal} (strength: {rsi_strength:.2f})")
+       
+       # 3. MACD Momentum Reversal
+       macd_momentum = get_macd_momentum(candles)
+       if (direction == "long" and macd_momentum < -0.5) or \
+          (direction == "short" and macd_momentum > 0.5):
+           exit_signals.append(f"MACD momentum reversal: {macd_momentum:.2f}")
+       
+       # 4. Bollinger Signal
+       bb_signal = get_bollinger_signal(candles)
+       if bb_signal['signal']:
+           if (direction == "long" and bb_signal['signal'] in ['overbought', 'strong_bearish']) or \
+              (direction == "short" and bb_signal['signal'] in ['oversold', 'strong_bullish']):
+               exit_signals.append(f"Bollinger: {bb_signal['signal']} ({bb_signal['strength']:.2f})")
+       
+       # 5. Volume Climax (potential reversal)
+       climax, climax_type = detect_volume_climax(candles)
+       if climax:
+           if (direction == "long" and climax_type == "selling") or \
+              (direction == "short" and climax_type == "buying"):
+               exit_signals.append(f"Volume climax: {climax_type}")
+       
+       # Require at least 3 signals to exit
+       if len(exit_signals) >= 3:
+           log(f"⚠️ Multiple indicator flips for {symbol}: {', '.join(exit_signals)}")
+           return True, exit_signals
+       
+       return False, None
+       
+   except Exception as e:
+       log(f"❌ Error checking indicator flips: {e}", level="ERROR")
+       return False, None
+
+# Additional helper functions for advanced exit management
+
+def calculate_dynamic_trailing_by_profit(symbol, entry_price, current_price, direction, profit_pct):
+   """
+   NEW FUNCTION: Calculate trailing stop based on profit level
+   Higher profits = wider trailing to let winners run
+   """
+   base_trail = 0.5  # Base trailing percentage
+   
+   # Profit-based multipliers
+   if profit_pct < 2:
+       multiplier = 1.0
+   elif profit_pct < 5:
+       multiplier = 1.5
+   elif profit_pct < 10:
+       multiplier = 2.0
+   elif profit_pct < 20:
+       multiplier = 2.5
+   else:
+       multiplier = 3.0  # Very wide for huge winners
+   
+   trail_pct = base_trail * multiplier
+   
+   # Calculate new SL
+   precision = get_precision(symbol)
+   if direction.lower() == "long":
+       new_sl = current_price * (1 - trail_pct/100)
+   else:
+       new_sl = current_price * (1 + trail_pct/100)
+   
+   return round(new_sl, precision), trail_pct
+
+def should_take_partial_profit_on_indicators(symbol, trade, candles, profit_pct):
+   """
+   NEW FUNCTION: Determine if we should take partial profits based on indicators
+   """
+   if profit_pct < 2:  # Don't take partials under 2% profit
+       return False, None
+   
+   signals = []
+   
+   try:
+       # Check for overbought/oversold conditions
+       rsi_data = calculate_rsi_with_bands(candles)
+       if rsi_data:
+           if rsi_data['overbought'] and trade.get("direction") == "long":
+               signals.append("RSI overbought")
+           elif rsi_data['oversold'] and trade.get("direction") == "short":
+               signals.append("RSI oversold")
+       
+       # Check Bollinger Bands
+       bb_signal = get_bollinger_signal(candles)
+       if bb_signal['signal'] in ['overbought', 'oversold']:
+           signals.append(f"BB {bb_signal['signal']}")
+       
+       # Check for volume climax
+       climax, climax_type = detect_volume_climax(candles)
+       if climax:
+           signals.append(f"Volume {climax_type} climax")
+       
+       # If we have 2+ signals and good profit, take partial
+       if len(signals) >= 2 and profit_pct > 5:
+           return True, signals
+       
+       return False, None
+       
+   except Exception as e:
+       log(f"❌ Error checking partial profit indicators: {e}", level="ERROR")
+       return False, None
