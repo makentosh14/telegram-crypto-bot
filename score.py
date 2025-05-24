@@ -6,7 +6,11 @@ from macd import detect_macd_cross, get_macd_divergence, get_macd_momentum
 from supertrend import calculate_supertrend_signal, get_supertrend_state, detect_supertrend_squeeze, calculate_multi_timeframe_supertrend
 from ema import detect_ema_crossover, calculate_ema_ribbon, analyze_ema_ribbon, detect_ema_squeeze
 from bollinger import calculate_bollinger_bands, detect_band_walk, get_bollinger_signal, detect_bollinger_squeeze
-from pattern_detector import detect_pattern
+from pattern_detector import (
+    detect_pattern, analyze_pattern_strength, detect_pattern_cluster,
+    get_pattern_direction, pattern_success_probability, get_all_patterns,
+    PATTERN_WEIGHTS, REVERSAL_PATTERNS, CONTINUATION_PATTERNS
+)
 from volume import (is_volume_spike, get_average_volume, detect_volume_climax, 
                    get_volume_profile, get_volume_weighted_average_price, analyze_volume_trend)
 from stealth_detector import detect_volume_divergence, detect_slow_breakout
@@ -614,4 +618,57 @@ def has_pump_potential(candles_by_tf, direction):
     signal_count = sum(1 for s in signals if s)
     
     return signal_count >= 3
+
+# 2. Enhanced scoring function in score.py with pattern strength
+def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_indicators):
+    """
+    Enhanced pattern scoring with advanced pattern detection
+    To be integrated into score_symbol function
+    """
+    # Detect primary pattern
+    pattern = detect_pattern(candles)
+    
+    if pattern:
+        # Get pattern strength based on context
+        pattern_strength = analyze_pattern_strength(pattern, candles)
+        pattern_direction = get_pattern_direction(pattern)
+        
+        # Calculate pattern score with strength multiplier
+        base_pattern_score = WEIGHTS.get("pattern", 0.7)
+        adjusted_score = base_pattern_score * pattern_strength
+        
+        # Apply directional scoring
+        if pattern_direction == "bullish":
+            score += adjusted_score
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
+        elif pattern_direction == "bearish":
+            score -= adjusted_score
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
+        else:  # neutral
+            score += adjusted_score * 0.5
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.5
+        
+        used_indicators.add(f"pattern_{pattern}")
+        
+        # Check for pattern clusters (multiple patterns)
+        pattern_cluster = detect_pattern_cluster(candles, lookback=10)
+        if len(pattern_cluster) >= 2:
+            # Bonus for multiple confirming patterns
+            cluster_bonus = 0.3 * len(pattern_cluster)
+            score += cluster_bonus
+            indicator_scores[f"{tf_label}_pattern_cluster"] = cluster_bonus
+            used_indicators.add("pattern_cluster")
+    
+    # Scan for all patterns for comprehensive analysis
+    all_patterns = get_all_patterns(candles)
+    pattern_count = sum(1 for detected in all_patterns.values() if detected)
+    
+    if pattern_count >= 3:
+        # Multiple pattern confluence
+        confluence_bonus = 0.5
+        score += confluence_bonus
+        indicator_scores[f"{tf_label}_pattern_confluence"] = confluence_bonus
+        used_indicators.add("pattern_confluence")
+    
+    return score, indicator_scores, used_indicators
 
