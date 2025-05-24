@@ -616,5 +616,4 @@ async def periodic_cleanup():
         except Exception as e:
             log(f"❌ Error in periodic cleanup: {e}", level="ERROR")
 
-# Initialize cleanup task on module load
-asyncio.create_task(periodic_cleanup())
+
