@@ -24,7 +24,12 @@ from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from ai_memory import load_memory
 from mean_reversion import score_mean_reversion
-from breakout_sniper import score_breakout_sniper
+from breakout_sniper import (
+    score_breakout_sniper, 
+    get_breakout_stats, 
+    update_breakout_performance,
+    clear_cache as clear_breakout_cache
+)
 from strategy_performance import get_strategy_stats
 from risk_manager import load_risk_state, update_risk_metrics
 from sl_tp_utils import calculate_dynamic_sl_tp, calculate_exit_tranches, validate_sl_placement
@@ -192,6 +197,41 @@ async def cleanup_cooldowns():
             
         # Run every 30 minutes
         await asyncio.sleep(1800)
+
+async def breakout_cache_cleanup():
+    """Periodically clean up breakout cache"""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        clear_breakout_cache()
+        log("🧹 Cleared breakout cache")
+
+async def strategy_stats_report():
+    """Periodically report strategy statistics"""
+    while True:
+        await asyncio.sleep(3600)  # Every hour
+        
+        # Get breakout stats
+        breakout_stats = get_breakout_stats()
+        
+        # Get other strategy stats if available
+        strategy_performance = get_strategy_stats()
+        
+        msg = (
+            f"📊 <b>Hourly Strategy Report</b>\n\n"
+            f"<b>Breakout Sniper:</b>\n"
+            f"• Total Trades: {breakout_stats['total_trades']}\n"
+            f"• Success Rate: {breakout_stats['success_rate']:.1%}\n"
+            f"• Cache Size: {breakout_stats['cache_size']}\n"
+        )
+        
+        if strategy_performance:
+            for strategy, stats in strategy_performance.items():
+                if strategy != "breakout_sniper":  # Already reported above
+                    msg += f"\n<b>{strategy.replace('_', ' ').title()}:</b>\n"
+                    msg += f"• Win Rate: {stats.get('win_rate', 0):.1%}\n"
+                    msg += f"• Total Trades: {stats.get('total_trades', 0)}\n"
+        
+        await send_telegram_message(msg)
 
 async def comprehensive_startup_cleanup():
     """Enhanced cleanup on bot startup"""
@@ -801,6 +841,8 @@ async def run_bot():
     asyncio.create_task(sl_verification_loop())
     asyncio.create_task(periodic_cleanup())
     asyncio.create_task(cleanup_pattern_cache())  # Add pattern cache cleanup
+    asyncio.create_task(breakout_cache_cleanup())  # Add breakout cache cleanup
+    asyncio.create_task(strategy_stats_report())   # Add strategy stats reporting
 
     await startup_cleanup()
 
