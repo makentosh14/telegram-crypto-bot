@@ -132,11 +132,26 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     return valid
 
 def extract_last_pattern(candles_by_tf):
+    """Enhanced pattern extraction with strength analysis"""
+    best_pattern = None
+    best_strength = 0
+    best_tf = None
+    
     for tf in sorted(candles_by_tf, key=lambda x: int(x)):
-        pattern = detect_pattern(candles_by_tf[tf])
+        candles = candles_by_tf[tf]
+        pattern = detect_pattern(candles)
+        
         if pattern:
-            return pattern
-    return None
+            strength = analyze_pattern_strength(pattern, candles)
+            if strength > best_strength:
+                best_pattern = pattern
+                best_strength = strength
+                best_tf = tf
+    
+    if best_pattern:
+        log(f"🎯 Best pattern: {best_pattern} on {best_tf}m TF (strength: {best_strength:.2f})")
+    
+    return best_pattern, best_strength, best_tf
 
 # Add this function to main.py
 async def cleanup_cooldowns():
