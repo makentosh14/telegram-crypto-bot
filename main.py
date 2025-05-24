@@ -32,6 +32,7 @@ from trade_verification import verify_all_positions
 from active_trade_scanner import high_frequency_scanner
 from risk_manager import load_risk_state, update_risk_metrics
 from symbol_utils import get_symbol_category
+from ai_memory import periodic_cleanup
 
 load_memory()
 
@@ -691,6 +692,7 @@ async def run_bot():
     asyncio.create_task(verify_all_positions(frequency_minutes=15))
     asyncio.create_task(high_frequency_scanner(live_candles))
     asyncio.create_task(sl_verification_loop())
+    asyncio.create_task(periodic_cleanup())
 
     await startup_cleanup()
 
