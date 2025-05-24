@@ -41,6 +41,7 @@ from active_trade_scanner import high_frequency_scanner
 from risk_manager import load_risk_state, update_risk_metrics
 from symbol_utils import get_symbol_category
 from ai_memory import periodic_cleanup
+from volume import is_volume_spike, get_average_volume
 
 load_memory()
 
