@@ -697,14 +697,14 @@ async def monitor_trades(live_candles):
                         tp1_level = entry_price * (1 + tp1_pct/100) if direction.lower() == "long" else entry_price * (1 - tp1_pct/100)
                         log(f"⚠️ No stored TP1 target for {symbol}, calculated from TP1%: {tp1_pct}% = {tp1_level}")
     
-                 # Enhanced TP1 detection
-                        tp1_hit = False
+                # Enhanced TP1 detection
+                tp1_hit = False
     
                 # Check current price
-            if direction.lower() == "long" and current_price >= tp1_level:
-                tp1_hit = True
-            elif direction.lower() == "short" and current_price <= tp1_level:
-                tp1_hit = True
+                if direction.lower() == "long" and current_price >= tp1_level:
+                    tp1_hit = True
+                elif direction.lower() == "short" and current_price <= tp1_level:
+                    tp1_hit = True
     
                 # Also check recent candle wicks for more robust detection
                 if not tp1_hit and candles and len(candles) >= 2:
@@ -716,8 +716,8 @@ async def monitor_trades(live_candles):
                         tp1_hit = True
                     # For short positions, check if low price reached TP1
                     elif direction.lower() == "short" and float(last_candle["low"]) <= tp1_level:
-                       log(f"🔍 TP1 hit detected for {symbol} via low price: {last_candle['low']} <= {tp1_level}")
-                       tp1_hit = True
+                        log(f"🔍 TP1 hit detected for {symbol} via low price: {last_candle['low']} <= {tp1_level}")
+                        tp1_hit = True
     
                 if tp1_hit:
                     # Log TP1 detection with details
@@ -843,7 +843,7 @@ async def monitor_trades(live_candles):
                     # Execute second exit tranche if we're in a big move and have momentum
                     if has_momentum and pump_move >= 3.0 and not trade.get("tp2_exit_executed"):
                         # Take 33% more off during pump (leaving ~33% to ride momentum)
-                        if await execute_partial_exit_with_retry(symbol, trade, 25): # 50% of REMAINING position
+                        if await execute_partial_exit_with_retry(symbol, trade, 25):  # 50% of REMAINING position
                             trade["tp2_exit_executed"] = True
                             await send_telegram_message(f"💰 <b>Second Partial Exit (25%)</b> on <b>{symbol}</b> — Conservative exit during +{pump_move:.2f}% pump")
                             write_log(f"PUMP EXIT (25% - LET WINNERS RUN): {symbol} | Second tranche exited during +{pump_move:.2f}% pump")
@@ -906,7 +906,7 @@ async def monitor_trades(live_candles):
                     if tf_scores.get("mean_reversion"):
                         strategy = "mean_reversion"
                     elif tf_scores.get("breakout_sniper"):
-                         strategy = "breakout_sniper"
+                        strategy = "breakout_sniper"
                     log_strategy_result(strategy, "loss", -100)
                     save_active_trades()
                     continue
@@ -1250,4 +1250,35 @@ async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_at
     
     # If we get here, all attempts failed
     log(f"❌ All partial exit attempts failed for {symbol}", level="ERROR")
+    return False
+
+async def cleanup_orphaned_stop_orders(symbol):
+    """Clean up any orphaned stop orders for a symbol"""
+    try:
+        # Get all active stop orders for the symbol
+        orders_resp = await signed_request("GET", "/v5/order/realtime", {
+            "category": "linear",
+            "symbol": symbol,
+            "orderFilter": "StopOrder"
+        })
+        
+        if orders_resp.get("retCode") == 0:
+            orders = orders_resp.get("result", {}).get("list", [])
+            
+            for order in orders:
+                if order.get("orderStatus") in ["New", "PartiallyFilled", "Untriggered"]:
+                    # Cancel this orphaned order
+                    cancel_resp = await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": symbol,
+                        "orderId": order.get("orderId")
+                    })
+                    
+                    if cancel_resp.get("retCode") == 0:
+                        log(f"🧹 Cleaned up orphaned stop order for {symbol}: {order.get('orderId')}")
+                    
+                    await asyncio.sleep(0.1)  # Rate limit protection
+                    
+    except Exception as e:
+        log(f"❌ Error cleaning up orphaned orders: {e}", level="ERROR")
     return False
