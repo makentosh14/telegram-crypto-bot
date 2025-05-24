@@ -16,7 +16,10 @@ from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
 from activity_logger import write_log, log_trade_to_file
 from monitor import track_active_trade, monitor_trades, load_active_trades, check_and_restore_sl
-from pattern_detector import detect_pattern
+from pattern_detector import (
+    detect_pattern, analyze_pattern_strength, detect_pattern_cluster,
+    get_pattern_direction, pattern_success_probability, cleanup_pattern_cache
+)
 from volume import is_volume_spike
 from whale_detector import detect_whale_activity
 from ai_memory import load_memory
@@ -82,12 +85,26 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     has_strong_pattern = False
     has_supertrend = False
     has_ema = False
+    pattern_details = None
     
-    # Search for pattern indicators in higher timeframes
+    # Enhanced pattern check with strength analysis
     for key, score in indicator_scores.items():
         if "pattern" in key and abs(score) >= 0.5:
             if (direction == "Long" and score > 0) or (direction == "Short" and score < 0):
                 has_strong_pattern = True
+                # Extract pattern name from key (e.g., "60m_pattern_hammer" -> "hammer")
+                pattern_name = key.split('_')[-1] if '_' in key else None
+                if pattern_name:
+                    # Get pattern strength for higher timeframes
+                    for tf in higher_tf_keys:
+                        if tf in candles_by_tf:
+                            detected_pattern = detect_pattern(candles_by_tf[tf])
+                            if detected_pattern == pattern_name:
+                                pattern_strength = analyze_pattern_strength(detected_pattern, candles_by_tf[tf])
+                                if pattern_strength > 0.7:  # Strong pattern
+                                    pattern_details = f"{detected_pattern} (strength: {pattern_strength:.2f})"
+                                    break
+                                    
         if "supertrend" in key and abs(score) >= 0.8:
             if (direction == "Long" and score > 0) or (direction == "Short" and score < 0):
                 has_supertrend = True
@@ -123,7 +140,7 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     log(f"🔍 Swing validation for {direction} trade: " +
         f"Aligned TFs: {aligned_timeframes}, " +
         f"Trend aligned: {trend_aligned}, " +
-        f"Pattern: {has_strong_pattern}, " +
+        f"Pattern: {has_strong_pattern} {pattern_details if pattern_details else ''}, " +
         f"Supertrend: {has_supertrend}, " +
         f"EMA: {has_ema}, " +
         f"Volume: {has_volume_support}, " +
@@ -131,7 +148,7 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     
     return valid
 
-def extract_last_pattern(candles_by_tf):
+def extract_last_pattern_enhanced(candles_by_tf):
     """Enhanced pattern extraction with strength analysis"""
     best_pattern = None
     best_strength = 0
@@ -151,7 +168,7 @@ def extract_last_pattern(candles_by_tf):
     if best_pattern:
         log(f"🎯 Best pattern: {best_pattern} on {best_tf}m TF (strength: {best_strength:.2f})")
     
-    return best_pattern, best_strength, best_tf
+    return best_pattern
 
 # Add this function to main.py
 async def cleanup_cooldowns():
@@ -182,7 +199,32 @@ async def comprehensive_startup_cleanup():
     
     try:
         # Cancel ALL stop orders across all symbols
-        stop_cleanup_count = await cleanup_orphaned_stop_orders()
+        from bybit_api import signed_request
+        
+        stop_cleanup_count = 0
+        
+        # Get all stop orders
+        stop_orders_resp = await signed_request("GET", "/v5/order/realtime", {
+            "category": "linear",
+            "orderFilter": "StopOrder"
+        })
+        
+        if stop_orders_resp.get("retCode") == 0:
+            orders = stop_orders_resp.get("result", {}).get("list", [])
+            log(f"🧹 Found {len(orders)} stop orders to clean up")
+            
+            for order in orders:
+                try:
+                    cancel_resp = await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": order.get("symbol"),
+                        "orderId": order.get("orderId")
+                    })
+                    if cancel_resp.get("retCode") == 0:
+                        stop_cleanup_count += 1
+                    await asyncio.sleep(0.1)  # Rate limit protection
+                except Exception as e:
+                    log(f"⚠️ Error cancelling stop order: {e}")
         
         # Also cancel any limit orders that might be orphaned
         limit_orders_resp = await signed_request("GET", "/v5/order/realtime", {
@@ -249,6 +291,16 @@ async def scan_for_new_signals(symbols):
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
 
+        # Enhanced pattern detection
+        pattern = extract_last_pattern_enhanced(candles_by_tf)
+        pattern_strength = 0
+        if pattern:
+            # Get pattern strength from the best timeframe
+            for tf in candles_by_tf:
+                if detect_pattern(candles_by_tf[tf]) == pattern:
+                    pattern_strength = analyze_pattern_strength(pattern, candles_by_tf[tf])
+                    break
+
         # Check for pump potential - important for exit strategy
         pump_potential = has_pump_potential(candles_by_tf, direction)
         if pump_potential:
@@ -279,6 +331,11 @@ async def scan_for_new_signals(symbols):
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
+        
+        # Log pattern details if detected
+        if pattern:
+            pattern_direction = get_pattern_direction(pattern)
+            log(f"   🎯 Pattern: {pattern} ({pattern_direction}) | Strength: {pattern_strength:.2f}")
 
         # Calculate SL, TP levels
         result = calculate_dynamic_sl_tp(
@@ -373,6 +430,28 @@ async def scan_for_new_signals(symbols):
         log_signal(symbol)
         track_signal(symbol, score)
 
+        # Calculate pattern confidence adjustment
+        pattern_confidence_multiplier = 1.0
+        if pattern and pattern_strength > 0:
+            market_conditions = {
+                'volatility': regime,
+                'trend_strength': 0.5,  # Default moderate trend
+                'volume': 'normal'
+            }
+            
+            # Check volume condition
+            if is_volume_spike(candles_by_tf.get("1", []), 2.0):
+                market_conditions['volume'] = 'high'
+            elif get_average_volume(candles_by_tf.get("1", [])) < 500:
+                market_conditions['volume'] = 'low'
+            
+            pattern_prob = pattern_success_probability(pattern, market_conditions)
+            pattern_confidence_multiplier = (pattern_prob * 0.6 + pattern_strength * 0.4)
+            
+            # Apply pattern confidence to overall confidence
+            confidence = min(confidence * pattern_confidence_multiplier, 100)
+            log(f"   📊 Pattern confidence adjustment: {pattern_confidence_multiplier:.2f} (final conf: {confidence:.1f}%)")
+
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
         trade = await execute_trade_if_valid({
             "symbol": symbol,
@@ -385,7 +464,8 @@ async def scan_for_new_signals(symbols):
             "indicator_scores": indicator_scores,
             "used_indicators": used_indicators,
             "tf_scores": tf_scores,
-            "pattern": extract_last_pattern(candles_by_tf),
+            "pattern": pattern,
+            "pattern_strength": pattern_strength,
             "whale": detect_whale_activity(candles_by_tf.get("5", [])),
             "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
             "regime": regime,
@@ -413,6 +493,11 @@ async def scan_for_new_signals(symbols):
             tp1_pct=tp1_pct     # Add this line
        )
 
+        # Add pattern info to message if detected
+        if pattern:
+            pattern_dir = get_pattern_direction(pattern)
+            msg += f"\n🎯 <b>Pattern:</b> {pattern} ({pattern_dir}) - Strength: {pattern_strength:.2f}"
+
         # Add pump potential info to message if detected
         if pump_potential:
             msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
@@ -420,7 +505,8 @@ async def scan_for_new_signals(symbols):
         await send_telegram_message(msg)
         active_signals[symbol] = {
             'score': score,
-            'score_history': [score]
+            'score_history': [score],
+            'pattern': pattern
         }
 
         if trade:
@@ -491,7 +577,8 @@ async def scan_for_new_signals(symbols):
                     leverage=DEFAULT_LEVERAGE,
                     risk_pct=6.0,
                     confidence=rev_conf,
-                    sl_pct=sl_pct
+                    sl_pct=sl_pct,
+                    tp1_pct=tp1_pct
                 )
                 msg += f"\n🧠 Mean Reversion Signal\nTriggers: {', '.join(rev_reasons.keys())}"
                 await send_telegram_message(msg)
@@ -504,6 +591,8 @@ async def scan_for_new_signals(symbols):
                         entry_price=price,
                         direction=rev_dir,
                         trailing_pct=trailing_pct,
+                        tp1_target=mr_trade.get("tp1"),
+                        tp1_pct=tp1_pct,
                         tp2=mr_trade.get("tp2"),  # Now including TP2
                         sl=mr_trade.get("sl"),
                         qty=mr_trade.get("qty"),
@@ -557,7 +646,8 @@ async def scan_for_new_signals(symbols):
                     leverage=DEFAULT_LEVERAGE,
                     risk_pct=6.5,
                     confidence=bo_conf,
-                    sl_pct=sl_pct
+                    sl_pct=sl_pct,
+                    tp1_pct=tp1_pct
                 )
                 msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
                 
@@ -575,6 +665,8 @@ async def scan_for_new_signals(symbols):
                         entry_price=price,
                         direction=bo_dir,
                         trailing_pct=trailing_pct,
+                        tp1_target=bo_trade.get("tp1"),
+                        tp1_pct=tp1_pct,
                         tp2=bo_trade.get("tp2"),  # Now including TP2
                         sl=bo_trade.get("sl"),
                         qty=bo_trade.get("qty"),
@@ -616,11 +708,10 @@ async def monitor_loop():
 async def sl_verification_loop():
     """Periodically verify all stop-losses for active trades"""
     from telegram_bot import send_telegram_message
+    from monitor import active_trades
     
     while True:
         try:
-            from monitor import active_trades
-            
             # Only check after the bot has been running for at least 3 minutes
             if time.time() - startup_time < 180:
                 await asyncio.sleep(30)
@@ -680,6 +771,7 @@ async def startup_cleanup():
     """Clean up any orphaned orders on startup"""
     log("🧹 Performing startup cleanup...")
     try:
+        from bybit_api import signed_request
         result = await signed_request("POST", "/v5/order/cancel-all", {
             "category": "linear",
             "orderFilter": "Stop"
@@ -708,6 +800,7 @@ async def run_bot():
     asyncio.create_task(high_frequency_scanner(live_candles))
     asyncio.create_task(sl_verification_loop())
     asyncio.create_task(periodic_cleanup())
+    asyncio.create_task(cleanup_pattern_cache())  # Add pattern cache cleanup
 
     await startup_cleanup()
 
