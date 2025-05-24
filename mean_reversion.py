@@ -1,15 +1,17 @@
-# mean_reversion.py - Enhanced Mean Reversion Strategy
+# mean_reversion.py - Enhanced Mean Reversion Strategy with Advanced Indicators
 
 import numpy as np
 from collections import deque
 from typing import Dict, List, Tuple, Optional
-from bollinger import calculate_bollinger_bands_advanced
-from rsi import calculate_rsi_with_bands
-from whale_detector import detect_whale_activity
-from volume import get_average_volume, get_volume_momentum, analyze_volume_trend
+from bollinger import calculate_bollinger_bands_advanced, get_bollinger_signal
+from rsi import calculate_rsi_with_bands, calculate_stoch_rsi, get_rsi_signal
+from whale_detector import detect_whale_activity, detect_whale_activity_advanced
+from volume import get_average_volume, get_volume_momentum, analyze_volume_trend, get_volume_profile
 from pattern_detector import detect_pattern
 from atr import calculate_atr
 from logger import log, write_log
+from ema import calculate_dema, calculate_tema, calculate_ema_ribbon, analyze_ema_ribbon
+from macd import get_macd_divergence
 
 # Configuration constants
 MIN_MEAN_REVERSION_SCORE = 4.0
@@ -24,7 +26,7 @@ _cache_ttl = 60  # 60 seconds cache TTL
 
 class MeanReversionAnalyzer:
     """
-    Enhanced mean reversion analyzer with performance optimizations
+    Advanced mean reversion analyzer with performance optimizations
     """
     def __init__(self):
         self.score_history = deque(maxlen=100)
@@ -307,6 +309,109 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
                 if extreme_conditions["extreme_rsi"]:
                     score += 0.5
                     reasons[f"{tf}m_extreme_rsi"] = True
+            
+            # ===== NEW ADVANCED INDICATOR INTEGRATIONS =====
+            
+            # 1. Stochastic RSI
+            stoch_rsi = calculate_stoch_rsi(candles)
+            if stoch_rsi:
+                if stoch_rsi['oversold'] and direction == "Long":
+                    score += 0.6
+                    reasons[f"{tf}m_stoch_rsi_oversold"] = True
+                    confidence_factors.append(0.7)
+                elif stoch_rsi['overbought'] and direction == "Short":
+                    score += 0.6
+                    reasons[f"{tf}m_stoch_rsi_overbought"] = True
+                    confidence_factors.append(0.7)
+                
+                # Stoch RSI Cross
+                if stoch_rsi.get('cross') == 'bullish_cross' and direction == "Long":
+                    score += 0.5
+                    reasons[f"{tf}m_stoch_rsi_bullish_cross"] = True
+                elif stoch_rsi.get('cross') == 'bearish_cross' and direction == "Short":
+                    score += 0.5
+                    reasons[f"{tf}m_stoch_rsi_bearish_cross"] = True
+            
+            # 2. DEMA/TEMA for faster response
+            dema = calculate_dema(candles, period=20)
+            if dema and len(dema) >= 2:
+                if direction == "Long" and dema[-1] > dema[-2]:
+                    score += 0.5
+                    reasons[f"{tf}m_dema_support"] = True
+                    confidence_factors.append(0.6)
+                elif direction == "Short" and dema[-1] < dema[-2]:
+                    score += 0.5
+                    reasons[f"{tf}m_dema_resistance"] = True
+                    confidence_factors.append(0.6)
+            
+            # 3. EMA Ribbon Analysis
+            ribbon = calculate_ema_ribbon(candles)
+            ribbon_analysis = analyze_ema_ribbon(ribbon)
+            if ribbon_analysis['compression']:  # Compression often precedes expansion
+                score += 0.4
+                reasons[f"{tf}m_ema_compression"] = True
+                confidence_factors.append(0.5)
+            
+            # 4. Volume Profile Analysis
+            vol_profile = get_volume_profile(candles)
+            if vol_profile and vol_profile.get('poc'):
+                poc = vol_profile['poc']
+                if direction == "Long" and close < poc * 0.98:
+                    score += 0.5
+                    reasons[f"{tf}m_below_poc"] = True
+                    confidence_factors.append(0.6)
+                elif direction == "Short" and close > poc * 1.02:
+                    score += 0.5
+                    reasons[f"{tf}m_above_poc"] = True
+                    confidence_factors.append(0.6)
+            
+            # 5. Enhanced Bollinger Signal
+            bb_signal = get_bollinger_signal(candles)
+            if bb_signal['signal'] == 'oversold' and direction == "Long":
+                score += 0.5 * bb_signal['strength']
+                reasons[f"{tf}m_bb_oversold_signal"] = True
+                confidence_factors.append(bb_signal['strength'])
+            elif bb_signal['signal'] == 'overbought' and direction == "Short":
+                score += 0.5 * bb_signal['strength']
+                reasons[f"{tf}m_bb_overbought_signal"] = True
+                confidence_factors.append(bb_signal['strength'])
+            
+            # 6. MACD Divergence for mean reversion
+            macd_div = get_macd_divergence(candles)
+            if macd_div:
+                if macd_div['type'] == 'bullish_divergence' and direction == "Long":
+                    score += 0.8
+                    reasons[f"{tf}m_macd_bullish_div"] = True
+                    confidence_factors.append(0.8)
+                elif macd_div['type'] == 'bearish_divergence' and direction == "Short":
+                    score += 0.8
+                    reasons[f"{tf}m_macd_bearish_div"] = True
+                    confidence_factors.append(0.8)
+            
+            # 7. RSI Signal Analysis
+            rsi_signal, rsi_strength = get_rsi_signal(rsi_data, price_trend="ranging")
+            if rsi_signal == "buy" and direction == "Long":
+                score += 0.6 * rsi_strength
+                reasons[f"{tf}m_rsi_buy_signal"] = True
+                confidence_factors.append(rsi_strength)
+            elif rsi_signal == "sell" and direction == "Short":
+                score += 0.6 * rsi_strength
+                reasons[f"{tf}m_rsi_sell_signal"] = True
+                confidence_factors.append(rsi_strength)
+            
+            # 8. Advanced Whale Detection
+            whale_advanced = detect_whale_activity_advanced(candles, symbol)
+            if whale_advanced['detected']:
+                if whale_advanced['recommendation'] == 'potential_long' and direction == "Long":
+                    score += 0.7 * whale_advanced['strength']
+                    reasons[f"{tf}m_whale_accumulation"] = True
+                    confidence_factors.append(0.8)
+                elif whale_advanced['recommendation'] == 'potential_short' and direction == "Short":
+                    score += 0.7 * whale_advanced['strength']
+                    reasons[f"{tf}m_whale_distribution"] = True
+                    confidence_factors.append(0.8)
+            
+            # ===== END NEW ADVANCED INDICATORS =====
             
             # Bollinger squeeze bonus (coiled spring effect)
             if extreme_conditions["bb_squeeze"]:
