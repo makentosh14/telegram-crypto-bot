@@ -1,4 +1,4 @@
-# score.py - Enhanced with ALL indicator functions
+# score.py - Enhanced with Advanced Pattern Detection Integration
 
 from logger import log
 from rsi import calculate_rsi, calculate_rsi_with_bands, calculate_stoch_rsi, analyze_multi_timeframe_rsi
@@ -18,7 +18,7 @@ from whale_detector import detect_whale_activity, detect_whale_activity_advanced
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
 
-# Enhanced weights including new advanced indicators
+# Enhanced weights including pattern-specific weights
 WEIGHTS = {
     "macd": 1.5,
     "macd_divergence": 1.2,
@@ -40,7 +40,9 @@ WEIGHTS = {
     "bollinger": 0.5,
     "bollinger_squeeze": 0.9,
     "band_walk": 1.0,
-    "pattern": 0.7,
+    "pattern": 0.7,  # Base pattern weight
+    "pattern_cluster": 0.3,  # Bonus for multiple patterns
+    "pattern_confluence": 0.5,  # Bonus for pattern agreement
     "divergence": 0.5,
     "slow_breakout": 0.8,
     "whale": 1.3,
@@ -105,8 +107,67 @@ def detect_momentum_strength(candles, lookback=5):
     
     return has_momentum, direction, strength
 
+def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_indicators):
+    """
+    Enhanced pattern scoring with advanced pattern detection
+    """
+    # Detect primary pattern
+    pattern = detect_pattern(candles)
+    
+    if pattern:
+        # Get pattern strength based on context
+        pattern_strength = analyze_pattern_strength(pattern, candles)
+        pattern_direction = get_pattern_direction(pattern)
+        
+        # Calculate pattern score with strength multiplier
+        base_pattern_score = WEIGHTS.get("pattern", 0.7)
+        adjusted_score = base_pattern_score * pattern_strength
+        
+        # Apply directional scoring
+        if pattern_direction == "bullish":
+            score += adjusted_score
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
+        elif pattern_direction == "bearish":
+            score -= adjusted_score
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
+        else:  # neutral
+            score += adjusted_score * 0.5
+            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.5
+        
+        used_indicators.add(f"pattern_{pattern}")
+        
+        # Check for pattern clusters (multiple patterns)
+        pattern_cluster = detect_pattern_cluster(candles, lookback=10)
+        if len(pattern_cluster) >= 2:
+            # Bonus for multiple confirming patterns
+            cluster_bonus = WEIGHTS["pattern_cluster"] * len(pattern_cluster)
+            score += cluster_bonus
+            indicator_scores[f"{tf_label}_pattern_cluster"] = cluster_bonus
+            used_indicators.add("pattern_cluster")
+            
+            # Log pattern cluster details
+            cluster_patterns = [p['pattern'] for p in pattern_cluster]
+            log(f"📊 Pattern cluster detected on {tf_label}: {cluster_patterns}")
+    
+    # Scan for all patterns for comprehensive analysis
+    all_patterns = get_all_patterns(candles)
+    pattern_count = sum(1 for detected in all_patterns.values() if detected)
+    
+    if pattern_count >= 3:
+        # Multiple pattern confluence
+        confluence_bonus = WEIGHTS["pattern_confluence"]
+        score += confluence_bonus
+        indicator_scores[f"{tf_label}_pattern_confluence"] = confluence_bonus
+        used_indicators.add("pattern_confluence")
+        
+        # Log detected patterns
+        detected_patterns = [name for name, detected in all_patterns.items() if detected]
+        log(f"📊 Pattern confluence on {tf_label}: {detected_patterns}")
+    
+    return score, indicator_scores, used_indicators
+
 def score_symbol(symbol, candles_by_timeframe):
-    """Enhanced scoring with ALL indicator functions"""
+    """Enhanced scoring with advanced pattern detection"""
     
     # Handle special test case
     if symbol == "FOOUSDT":
@@ -220,7 +281,6 @@ def score_symbol(symbol, candles_by_timeframe):
                 # Existing scalp indicators
                 macd = detect_macd_cross(candles)
                 ema = detect_ema_crossover(candles)
-                pattern = detect_pattern(candles)
                 
                 if is_volume_spike(candles, 2.5):
                     score += WEIGHTS["volume_spike"]
@@ -276,12 +336,10 @@ def score_symbol(symbol, candles_by_timeframe):
                     indicator_scores[f"{tf_label}_ema_squeeze"] = WEIGHTS["ema_squeeze"] * ema_squeeze['intensity']
                     used_indicators.add("ema_squeeze")
                 
-                if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
-                    score += WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = WEIGHTS["pattern"]
-                elif pattern in ["bearish_engulfing", "inverted_hammer"]:
-                    score -= WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = -WEIGHTS["pattern"]
+                # Enhanced Pattern Detection for Scalp
+                score, indicator_scores, used_indicators = enhanced_pattern_scoring(
+                    candles, tf_label, score, indicator_scores, used_indicators
+                )
                     
                 if detect_volume_divergence(candles):
                     score += WEIGHTS["divergence"]
@@ -297,14 +355,13 @@ def score_symbol(symbol, candles_by_timeframe):
                     
                 type_scores["Scalp"] += score
                 tf_count["Scalp"] += 1
-                used_indicators.update(["macd", "ema", "volume", "pattern", "divergence", "slow_breakout", "whale"])
+                used_indicators.update(["macd", "ema", "volume", "divergence", "slow_breakout", "whale"])
 
             elif tf in TRADE_TYPE_TF["Intraday"]:
                 # Existing intraday indicators
                 macd = detect_macd_cross(candles)
                 ema = detect_ema_crossover(candles)
                 trend = calculate_supertrend_signal(candles)
-                pattern = detect_pattern(candles)
                 
                 if is_volume_spike(candles, 2.5):
                     score += WEIGHTS["volume_spike"]
@@ -372,12 +429,10 @@ def score_symbol(symbol, candles_by_timeframe):
                     indicator_scores[f"{tf_label}_supertrend_squeeze"] = WEIGHTS["supertrend_squeeze"] * st_squeeze['intensity']
                     used_indicators.add("supertrend_squeeze")
                 
-                if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
-                    score += WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = WEIGHTS["pattern"]
-                elif pattern in ["bearish_engulfing", "inverted_hammer"]:
-                    score -= WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = -WEIGHTS["pattern"]
+                # Enhanced Pattern Detection for Intraday
+                score, indicator_scores, used_indicators = enhanced_pattern_scoring(
+                    candles, tf_label, score, indicator_scores, used_indicators
+                )
                     
                 if detect_volume_divergence(candles):
                     score += WEIGHTS["divergence"]
@@ -393,7 +448,7 @@ def score_symbol(symbol, candles_by_timeframe):
                     
                 type_scores["Intraday"] += score
                 tf_count["Intraday"] += 1
-                used_indicators.update(["macd", "ema", "supertrend", "volume", "pattern", "divergence", "slow_breakout", "whale"])
+                used_indicators.update(["macd", "ema", "supertrend", "volume", "divergence", "slow_breakout", "whale"])
 
             elif tf in TRADE_TYPE_TF["Swing"]:
                 # Enhanced RSI Analysis
@@ -445,7 +500,6 @@ def score_symbol(symbol, candles_by_timeframe):
                 trend = calculate_supertrend_signal(candles)
                 ema = detect_ema_crossover(candles)
                 bb = calculate_bollinger_bands(candles)
-                pattern = detect_pattern(candles)
                 
                 if trend == "bullish":
                     score += WEIGHTS["supertrend"]
@@ -498,25 +552,28 @@ def score_symbol(symbol, candles_by_timeframe):
                     indicator_scores[f"{tf_label}_bollinger_signal"] = -WEIGHTS["bollinger"] * bb_signal['strength']
                 used_indicators.add("bollinger_signal")
                 
+                # Enhanced Pattern Detection for Swing
+                score, indicator_scores, used_indicators = enhanced_pattern_scoring(
+                    candles, tf_label, score, indicator_scores, used_indicators
+                )
+                
                 if detect_whale_activity(candles):
                     score += WEIGHTS["whale"]
                     indicator_scores[f"{tf_label}_whale"] = WEIGHTS["whale"]
                     
-                if pattern in ["bullish_engulfing", "hammer", "inside_bar"]:
-                    score += WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = WEIGHTS["pattern"]
-                elif pattern in ["bearish_engulfing", "inverted_hammer"]:
-                    score -= WEIGHTS["pattern"]
-                    indicator_scores[f"{tf_label}_pattern"] = -WEIGHTS["pattern"]
-                    
                 type_scores["Swing"] += score
                 tf_count["Swing"] += 1
-                used_indicators.update(["rsi", "ema", "supertrend", "bollinger", "pattern", "whale"])
+                used_indicators.update(["rsi", "ema", "supertrend", "bollinger", "whale"])
 
         except Exception as e:
             log(f"❌ Scoring error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
 
         tf_scores[tf] = round(score, 2)
+    
+    # Find the best trade type
+    valid_types = [t for t in type_scores if tf_count[t] >= MIN_TF_REQUIRED[t]]
+    best_type = max(valid_types, key=lambda t: type_scores[t], default="Scalp")
+    best_score = type_scores[best_type]
     
     # Multi-timeframe bonuses
     
@@ -541,11 +598,6 @@ def score_symbol(symbol, candles_by_timeframe):
         indicator_scores["mtf_rsi"] = -WEIGHTS["rsi_mtf"]
         used_indicators.add("mtf_rsi")
 
-    # Find the best trade type
-    valid_types = [t for t in type_scores if tf_count[t] >= MIN_TF_REQUIRED[t]]
-    best_type = max(valid_types, key=lambda t: type_scores[t], default="Scalp")
-    best_score = type_scores[best_type]
-    
     # Apply momentum bonus
     if has_momentum and best_score > 6.0 and momentum_direction:
         expected_direction = "bullish" if determine_direction(tf_scores) == "Long" else "bearish"
@@ -593,7 +645,7 @@ def calculate_confidence(score, tf_scores, trend_context, trade_type):
     return round(min(base_confidence, 100), 1)
 
 def has_pump_potential(candles_by_tf, direction):
-    """Existing function remains unchanged"""
+    """Enhanced function with pattern analysis"""
     momentum_1m = detect_momentum_strength(candles_by_tf.get("1", []))
     momentum_5m = detect_momentum_strength(candles_by_tf.get("5", []))
     
@@ -601,74 +653,43 @@ def has_pump_potential(candles_by_tf, direction):
     
     volume_spike = is_volume_spike(candles_by_tf.get("1", []), 3.0)
     
+    # Enhanced pattern detection for pump potential
     pattern_1m = detect_pattern(candles_by_tf.get("1", []))
     pattern_5m = detect_pattern(candles_by_tf.get("5", []))
     
-    breakout_patterns = ["hammer", "bullish_engulfing", "morning_star"] if direction == "Long" else ["inverted_hammer", "bearish_engulfing", "evening_star"]
+    # Check for strong bullish patterns that often precede pumps
+    pump_patterns = {
+        "Long": ["hammer", "bullish_engulfing", "morning_star", "bullish_kicker", "three_white_soldiers", "marubozu"],
+        "Short": ["inverted_hammer", "bearish_engulfing", "evening_star", "bearish_kicker", "three_black_crows", "marubozu"]
+    }
+    
+    breakout_patterns = pump_patterns.get(direction, [])
     has_breakout_pattern = pattern_1m in breakout_patterns or pattern_5m in breakout_patterns
+    
+    # Check pattern strength if pattern detected
+    pattern_strength = 0
+    if pattern_1m:
+        pattern_strength = max(pattern_strength, analyze_pattern_strength(pattern_1m, candles_by_tf.get("1", [])))
+    if pattern_5m:
+        pattern_strength = max(pattern_strength, analyze_pattern_strength(pattern_5m, candles_by_tf.get("5", [])))
+    
+    # Strong pattern increases pump potential
+    strong_pattern = pattern_strength > 0.8
     
     signals = [
         momentum_1m[0],
         momentum_5m[0],
         whale_activity,
         volume_spike,
-        has_breakout_pattern
+        has_breakout_pattern,
+        strong_pattern
     ]
     
     signal_count = sum(1 for s in signals if s)
     
+    # Log if pump potential detected
+    if signal_count >= 3:
+        log(f"🚀 Pump potential detected with {signal_count} signals (pattern strength: {pattern_strength:.2f})")
+    
     return signal_count >= 3
-
-# 2. Enhanced scoring function in score.py with pattern strength
-def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_indicators):
-    """
-    Enhanced pattern scoring with advanced pattern detection
-    To be integrated into score_symbol function
-    """
-    # Detect primary pattern
-    pattern = detect_pattern(candles)
-    
-    if pattern:
-        # Get pattern strength based on context
-        pattern_strength = analyze_pattern_strength(pattern, candles)
-        pattern_direction = get_pattern_direction(pattern)
-        
-        # Calculate pattern score with strength multiplier
-        base_pattern_score = WEIGHTS.get("pattern", 0.7)
-        adjusted_score = base_pattern_score * pattern_strength
-        
-        # Apply directional scoring
-        if pattern_direction == "bullish":
-            score += adjusted_score
-            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
-        elif pattern_direction == "bearish":
-            score -= adjusted_score
-            indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
-        else:  # neutral
-            score += adjusted_score * 0.5
-            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.5
-        
-        used_indicators.add(f"pattern_{pattern}")
-        
-        # Check for pattern clusters (multiple patterns)
-        pattern_cluster = detect_pattern_cluster(candles, lookback=10)
-        if len(pattern_cluster) >= 2:
-            # Bonus for multiple confirming patterns
-            cluster_bonus = 0.3 * len(pattern_cluster)
-            score += cluster_bonus
-            indicator_scores[f"{tf_label}_pattern_cluster"] = cluster_bonus
-            used_indicators.add("pattern_cluster")
-    
-    # Scan for all patterns for comprehensive analysis
-    all_patterns = get_all_patterns(candles)
-    pattern_count = sum(1 for detected in all_patterns.values() if detected)
-    
-    if pattern_count >= 3:
-        # Multiple pattern confluence
-        confluence_bonus = 0.5
-        score += confluence_bonus
-        indicator_scores[f"{tf_label}_pattern_confluence"] = confluence_bonus
-        used_indicators.add("pattern_confluence")
-    
-    return score, indicator_scores, used_indicators
 
