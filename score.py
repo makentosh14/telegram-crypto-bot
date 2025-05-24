@@ -283,8 +283,12 @@ def score_symbol(symbol, candles_by_timeframe):
                 ema = detect_ema_crossover(candles)
                 
                 if is_volume_spike(candles, 2.5):
-                    score += WEIGHTS["volume_spike"]
-                    indicator_scores[f"{tf_label}_volume"] = WEIGHTS["volume_spike"]
+                    # Only add score if volume supports the direction
+                    last_candle = candles[-1]
+                    is_bullish_candle = float(last_candle['close']) > float(last_candle['open'])
+    
+                    if (is_bullish_candle and direction == "Long") or (not is_bullish_candle and direction == "Short"):
+                        score += WEIGHTS["volume_spike"]
                     
                 if macd == "bullish":
                     score += WEIGHTS["macd"]
