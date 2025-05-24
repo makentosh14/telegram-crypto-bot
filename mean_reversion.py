@@ -1,4 +1,4 @@
-# mean_reversion.py - Enhanced Mean Reversion Strategy with Advanced Indicators
+# mean_reversion.py - Enhanced Mean Reversion Strategy with Advanced Pattern Detection
 
 import numpy as np
 from collections import deque
@@ -7,11 +7,15 @@ from bollinger import calculate_bollinger_bands_advanced, get_bollinger_signal
 from rsi import calculate_rsi_with_bands, calculate_stoch_rsi, get_rsi_signal
 from whale_detector import detect_whale_activity, detect_whale_activity_advanced
 from volume import get_average_volume, get_volume_momentum, analyze_volume_trend, get_volume_profile
-from pattern_detector import detect_pattern
+from pattern_detector import (
+    detect_pattern, analyze_pattern_strength, detect_pattern_cluster,
+    get_pattern_direction, get_all_patterns, REVERSAL_PATTERNS, PATTERN_WEIGHTS
+)
 from atr import calculate_atr
 from logger import log, write_log
 from ema import calculate_dema, calculate_tema, calculate_ema_ribbon, analyze_ema_ribbon
 from macd import get_macd_divergence
+import time
 
 # Configuration constants
 MIN_MEAN_REVERSION_SCORE = 4.0
@@ -202,9 +206,67 @@ def calculate_support_resistance_levels(candles: List[Dict], lookback: int = 50)
         log(f"❌ Error calculating support/resistance: {e}", level="ERROR")
         return {}
 
+def enhanced_pattern_check_for_mean_reversion(candles, tf, direction, score, reasons, confidence_factors):
+    """Enhanced pattern confirmation for mean reversion with new pattern detector"""
+    # Get all patterns
+    all_patterns = get_all_patterns(candles)
+    
+    # Check for reversal patterns that align with mean reversion
+    if direction == "Long":
+        bullish_reversals = [p for p in REVERSAL_PATTERNS["bullish"] if all_patterns.get(p, False)]
+        if bullish_reversals:
+            # Find the strongest pattern
+            strongest_pattern = max(bullish_reversals, key=lambda p: PATTERN_WEIGHTS.get(p, 0.5))
+            pattern_strength = analyze_pattern_strength(strongest_pattern, candles)
+            
+            # Adjust score based on pattern strength
+            pattern_score = 0.5 * pattern_strength
+            score += pattern_score
+            reasons[f"{tf}m_pattern_{strongest_pattern}"] = pattern_strength
+            confidence_factors.append(0.6 * pattern_strength)
+            
+            log(f"   🎯 Bullish reversal pattern: {strongest_pattern} (strength: {pattern_strength:.2f})")
+    
+    elif direction == "Short":
+        bearish_reversals = [p for p in REVERSAL_PATTERNS["bearish"] if all_patterns.get(p, False)]
+        if bearish_reversals:
+            # Find the strongest pattern
+            strongest_pattern = max(bearish_reversals, key=lambda p: PATTERN_WEIGHTS.get(p, 0.5))
+            pattern_strength = analyze_pattern_strength(strongest_pattern, candles)
+            
+            # Adjust score based on pattern strength
+            pattern_score = 0.5 * pattern_strength
+            score += pattern_score
+            reasons[f"{tf}m_pattern_{strongest_pattern}"] = pattern_strength
+            confidence_factors.append(0.6 * pattern_strength)
+            
+            log(f"   🎯 Bearish reversal pattern: {strongest_pattern} (strength: {pattern_strength:.2f})")
+    
+    # Check for pattern clusters (multiple patterns confirming)
+    pattern_cluster = detect_pattern_cluster(candles)
+    if len(pattern_cluster) >= 2:
+        # Multiple patterns increase confidence
+        cluster_patterns = [p['pattern'] for p in pattern_cluster]
+        aligned_patterns = 0
+        
+        for p in pattern_cluster:
+            p_direction = get_pattern_direction(p['pattern'])
+            if (direction == "Long" and p_direction == "bullish") or \
+               (direction == "Short" and p_direction == "bearish"):
+                aligned_patterns += 1
+        
+        if aligned_patterns >= 2:
+            score += 0.7
+            reasons[f"{tf}m_pattern_cluster"] = aligned_patterns
+            confidence_factors.append(0.8)
+            
+            log(f"   📊 Pattern cluster detected: {aligned_patterns} aligned patterns")
+    
+    return score, reasons, confidence_factors
+
 def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regime: str) -> Tuple[float, str, float, Dict]:
     """
-    Enhanced mean reversion scoring with better performance and accuracy
+    Enhanced mean reversion scoring with advanced pattern detection
     
     Args:
         symbol: Trading pair symbol
@@ -259,7 +321,7 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
             bandwidth = bb[-1]["bandwidth"]
             percent_b = bb[-1]["percent_b"]
             
-            # Pattern detection
+            # Pattern detection with enhanced pattern detector
             pattern = detect_pattern(candles)
             
             # Volume analysis
@@ -310,7 +372,12 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
                     score += 0.5
                     reasons[f"{tf}m_extreme_rsi"] = True
             
-            # ===== NEW ADVANCED INDICATOR INTEGRATIONS =====
+            # ===== ENHANCED PATTERN DETECTION =====
+            score, reasons, confidence_factors = enhanced_pattern_check_for_mean_reversion(
+                candles, tf, direction, score, reasons, confidence_factors
+            )
+            
+            # ===== EXISTING ADVANCED INDICATOR INTEGRATIONS =====
             
             # 1. Stochastic RSI
             stoch_rsi = calculate_stoch_rsi(candles)
@@ -411,7 +478,7 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
                     reasons[f"{tf}m_whale_distribution"] = True
                     confidence_factors.append(0.8)
             
-            # ===== END NEW ADVANCED INDICATORS =====
+            # ===== END EXISTING ADVANCED INDICATORS =====
             
             # Bollinger squeeze bonus (coiled spring effect)
             if extreme_conditions["bb_squeeze"]:
@@ -436,16 +503,6 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
                 score += 0.8
                 reasons[f"{tf}m_divergence"] = True
                 confidence_factors.append(0.8)
-            
-            # Pattern confirmation
-            if pattern in ["hammer", "inside_bar"] and direction == "Long":
-                score += 0.5
-                reasons[f"{tf}m_pattern_support"] = pattern
-                confidence_factors.append(0.6)
-            elif pattern in ["inverted_hammer", "bearish_engulfing"] and direction == "Short":
-                score += 0.5
-                reasons[f"{tf}m_pattern_resist"] = pattern
-                confidence_factors.append(0.6)
                 
             # Support/Resistance proximity bonus
             if sr_levels:
