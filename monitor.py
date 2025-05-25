@@ -78,6 +78,8 @@ def log_trailing_event(symbol, event_type, data):
 def save_active_trades():
     """Save active trades data with backup and atomic write protections"""
     try:
+        log(f"💾 Saving {len(active_trades)} active trades to file...")
+        
         # Create a copy of the trades dictionary to avoid modifying the original
         trades_to_save = {}
         
@@ -91,6 +93,8 @@ def save_active_trades():
                     trade_copy[key] = value.strftime("%Y-%m-%d %H:%M:%S")
                     
             trades_to_save[symbol] = trade_copy
+
+        log(f"📋 Trades to save: {list(trades_to_save.keys())}")
         
         # Use a temporary file for atomic writes
         temp_path = f"{PERSIST_PATH}.temp"
@@ -105,6 +109,8 @@ def save_active_trades():
             os.replace(temp_path, PERSIST_PATH)
         else:
             os.rename(temp_path, PERSIST_PATH)
+
+        log(f"✅ Successfully saved {len(trades_to_save)} trades")
             
     except Exception as e:
         log(f"❌ Failed to save trades: {e}", level="ERROR")
@@ -222,6 +228,8 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     """
     Track a new active trade with enhanced exit strategy parameters
     """
+    log(f"🔍 TRACKING NEW TRADE: {symbol} | Type: {trade_type} | Entry: {entry_price}")
+                          
     if not exit_tranches and qty:
         exit_tranches = calculate_exit_tranches(symbol, qty)
 
@@ -279,7 +287,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     if exit_tranches:
         log(f"📊 Exit tranches for {symbol}: {exit_tranches}")
         
+    log(f"📝 Active trades count before save: {len(active_trades)}")
     save_active_trades()
+    log(f"✅ Trade tracked and saved for {symbol}")
 
 def remove_trade(symbol):
     if symbol in active_trades:
