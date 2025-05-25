@@ -111,6 +111,10 @@ def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_in
     """
     Enhanced pattern scoring with advanced pattern detection
     """
+
+    MAX_PATTERN_CONTRIBUTION = 2.0
+    pattern_score_total = 0
+    
     # Detect primary pattern
     pattern = detect_pattern(candles)
     
@@ -125,13 +129,13 @@ def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_in
         
         # Apply directional scoring
         if pattern_direction == "bullish":
-            score += adjusted_score
+            pattern_score_total += adjusted_score
             indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
         elif pattern_direction == "bearish":
-            score -= adjusted_score
+            pattern_score_total -= adjusted_score
             indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
         else:  # neutral
-            score += adjusted_score * 0.5
+            pattern_score_total += adjusted_score * 0.5
             indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.5
         
         used_indicators.add(f"pattern_{pattern}")
@@ -163,6 +167,14 @@ def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_in
         # Log detected patterns
         detected_patterns = [name for name, detected in all_patterns.items() if detected]
         log(f"📊 Pattern confluence on {tf_label}: {detected_patterns}")
+
+    # Apply cap to total pattern contribution
+    capped_pattern_score = min(pattern_score_total, MAX_PATTERN_CONTRIBUTION)
+    score += capped_pattern_score
+
+    # Log if we hit the cap
+    if pattern_score_total > MAX_PATTERN_CONTRIBUTION:
+        log(f"📊 Pattern score capped: {pattern_score_total:.2f} -> {MAX_PATTERN_CONTRIBUTION}")
     
     return score, indicator_scores, used_indicators
 
@@ -283,12 +295,17 @@ def score_symbol(symbol, candles_by_timeframe):
                 ema = detect_ema_crossover(candles)
                 
                 if is_volume_spike(candles, 2.5):
-                    # Only add score if volume supports the direction
+                    # Check if volume spike aligns with potential direction
                     last_candle = candles[-1]
                     is_bullish_candle = float(last_candle['close']) > float(last_candle['open'])
     
-                    if (is_bullish_candle and direction == "Long") or (not is_bullish_candle and direction == "Short"):
+                    # Only add score if candle direction suggests momentum
+                    if is_bullish_candle:
                         score += WEIGHTS["volume_spike"]
+                        indicator_scores[f"{tf_label}_volume"] = WEIGHTS["volume_spike"]
+                    else:
+                        score -= WEIGHTS["volume_spike"]
+                        indicator_scores[f"{tf_label}_volume"] = -WEIGHTS["volume_spike"]
                     
                 if macd == "bullish":
                     score += WEIGHTS["macd"]
