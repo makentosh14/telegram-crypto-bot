@@ -228,18 +228,27 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     """
     Track a new active trade with enhanced exit strategy parameters
     """
-    log(f"🔍 TRACKING NEW TRADE: {symbol} | Type: {trade_type} | Entry: {entry_price}")
+    global active_trades  # Ensure we're using the global variable
+    
+    log(f"🔍 TRACK_ACTIVE_TRADE called for {symbol}")
+    log(f"   Entry: {entry_price}, Direction: {direction}, Qty: {qty}")
+    log(f"   SL Order ID: {sl_order_id}")
+    
+    # Validate required parameters
+    if not entry_price or not direction or not qty:
+        log(f"❌ TRACK_ACTIVE_TRADE: Missing required data for {symbol}", level="ERROR")
+        log(f"   entry_price={entry_price}, direction={direction}, qty={qty}", level="ERROR")
+        return
                           
     if not exit_tranches and qty:
         exit_tranches = calculate_exit_tranches(symbol, qty)
 
     # Get fixed percentages for this trade type
     fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
-    
-    # Override with fixed values
     if trade_type in ["Scalp", "Intraday"]:
         trailing_pct = fixed_params["trailing_pct"]
-        tp1_pct = fixed_params["tp1_pct"] if tp1_pct is None else tp1_pct
+        if tp1_pct is None:
+            tp1_pct = fixed_params["tp1_pct"]
                                                 
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -275,6 +284,10 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "entry_time": datetime.utcnow(),
         "last_score_update": datetime.utcnow()
     }
+
+    log(f"✅ Trade added to active_trades for {symbol}")
+    log(f"📊 Active trades count: {len(active_trades)}")
+    log(f"📋 All active symbols: {list(active_trades.keys())}")
 
     if tp1_target:
         log(f"🎯 TP1 target stored for {symbol}: {tp1_target} ({tp1_pct:.2f}%)")
