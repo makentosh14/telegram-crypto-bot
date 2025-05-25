@@ -102,13 +102,22 @@ async def get_market_sentiment():
             })
             
             if ticker_resp.get("retCode") == 0:
-                ticker = ticker_resp.get("result", {}).get("list", [{}])[0]
+                ticker_list = ticker_resp.get("result", {}).get("list", [])
+                if not ticker_list:
+                    continue  # Skip this symbol if no data returned
+
+                ticker = ticker_list[0]
                 price_24h_pct = float(ticker.get("price24hPcnt", 0)) * 100
                 
                 if price_24h_pct > 2:
                     bullish_count += 1
                 elif price_24h_pct < -2:
                     bearish_count += 1
+
+            else:
+                # Optional: log API error and skip
+                log(f"⚠️ Failed ticker call for {symbol}", level="WARNING")
+                continue
         
         # Determine sentiment
         if bullish_count >= 6:
