@@ -390,20 +390,20 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         tp1_pct = 1.2  # Fixed 1.2% TP for scalps
     else:
     # Using higher TP targets to catch larger pumps
-    base_tp_ratios = {
-        "Intraday": 1.8,   # 2.5:1 for intraday (increased from 1.8)
-        "Swing": 3.0       # 3.0:1 for swing trades (increased from 2.2)
-    }
+        base_tp_ratios = {
+            "Intraday": 1.8,   # 2.5:1 for intraday (increased from 1.8)
+            "Swing": 3.0       # 3.0:1 for swing trades (increased from 2.2)
+        }
     
-    tp1_ratio = base_tp_ratios.get(trade_type, 2.5)
+        tp1_ratio = base_tp_ratios.get(trade_type, 2.5)
     
-    # Adjust TP ratio based on market regime
-    if regime == "volatile":
-        tp1_ratio *= 1.4   # Higher targets in volatile markets to catch pumps
-    elif regime == "ranging":
-        tp1_ratio *= 0.85  # Tighter targets in ranging markets
+        # Adjust TP ratio based on market regime
+        if regime == "volatile":
+            tp1_ratio *= 1.4   # Higher targets in volatile markets to catch pumps
+        elif regime == "ranging":
+            tp1_ratio *= 0.85  # Tighter targets in ranging markets
     
-    tp1_pct = sl_pct * tp1_ratio
+        tp1_pct = sl_pct * tp1_ratio
     
     # Calculate trailing percentage (typically 1/3 to 1/2 of SL percentage)
     # Using wider trailing % to avoid getting stopped out of big pumps
