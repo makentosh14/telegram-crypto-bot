@@ -308,7 +308,14 @@ async def process_active_trade(symbol, trade, live_candles):
             log(f"🚀 HF SCANNER: Momentum detected for {symbol}")
     
     # Get FIXED percentages based on trade type
-    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
+    trade_type = trade.get("trade_type", "Intraday")
+
+    # FORCE SCALP TYPE IF NOT SET CORRECTLY
+    if trade_type not in ["Scalp", "Intraday", "Swing"]:
+        trade_type = "Scalp"  # Default to Scalp for safety
+
+    # Get FIXED percentages based on trade type
+    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Scalp"])  # Changed default to Scalp
     tp1_pct = fixed_params["tp1_pct"]
     trailing_pct = fixed_params["trailing_pct"]
     
