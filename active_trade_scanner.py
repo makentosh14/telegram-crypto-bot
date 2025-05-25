@@ -465,6 +465,8 @@ async def process_active_trade(symbol, trade, live_candles):
                 trade["exit_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 trade["exit_reason"] = "trailing_sl_let_winners_run"
                 trade["let_winners_run_completed"] = True
+
+                save_active_trades_directly({symbol: trade})
                 
                 # Calculate final profit
                 profit_pct = ((current_price - entry_price) / entry_price * 100) if direction == "long" else \
