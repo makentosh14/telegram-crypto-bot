@@ -519,6 +519,14 @@ async def update_stop_loss_order(symbol, trade, new_sl_price):
     if not direction or not qty:
         log(f"❌ Cannot update SL for {symbol}: Missing trade data", level="ERROR")
         return False
+
+    # ADD THIS: Check if SL update is meaningful (at least 0.1% difference)
+    current_sl = trade.get("trailing_sl") or trade.get("original_sl")
+    if current_sl:
+        sl_diff_pct = abs((new_sl_price - current_sl) / current_sl) * 100
+        if sl_diff_pct < 0.1:
+            log(f"🔍 Skipping minor SL update for {symbol}: {sl_diff_pct:.3f}% difference")
+            return False
     
     # Step 1: Clean up existing orders for this symbol
     try:
@@ -559,6 +567,12 @@ async def check_and_restore_sl(symbol, trade):
     # Don't try to restore SL if we don't have the necessary information
     if not trade or trade.get("exited") or not trade.get("qty"):
         return
+
+    last_sl_check = trade.get("last_sl_check_time")
+    if last_sl_check:
+        time_since_check = (datetime.utcnow() - datetime.strptime(last_sl_check, "%Y-%m-%d %H:%M:%S")).total_seconds()
+        if time_since_check < 300:  # 5 minutes
+            return
         
     sl_order_id = trade.get("sl_order_id")
     
@@ -571,6 +585,9 @@ async def check_and_restore_sl(symbol, trade):
             log(f"🔍 SL order check for {symbol}: {'Exists' if sl_exists else 'Missing'}")
         except Exception as e:
             log(f"❌ Error checking SL order: {e}", level="ERROR")
+
+    # UPDATE: Record check time
+    trade["last_sl_check_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     
     # If SL doesn't exist or we don't have an SL order ID, recreate it
     if not sl_exists:
@@ -830,7 +847,8 @@ async def monitor_trades(live_candles):
             trailing_pct = trade.get("trailing_pct")
             
             # 1. Always check and restore SL first
-            await check_and_restore_sl(symbol, trade)
+            if trade.get("cycles", 0) % 10 == 0:  # Only check every 10 cycles
+                await check_and_restore_sl(symbol, trade)
             
             # 2. Calculate score for exit decisions
             try:
@@ -969,22 +987,34 @@ async def monitor_trades(live_candles):
             # 6. ENHANCED TRAILING STOP LOGIC after TP1
             if trade.get("tp1_hit") and trailing_pct:
                 try:
+                    # First, handle breakeven move (only once when TP1 is first hit)
+                    if not trade.get("breakeven_set"):
+                        # Move SL to breakeven
+                        new_sl = entry_price
+                        sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
+                        if sl_updated:
+                            trade["breakeven_set"] = True
+                            trade["trailing_sl"] = new_sl
+                            write_log(f"TP1 SL UPDATE: {symbol} | New SL: {new_sl} (breakeven)")
+                            save_active_trades()  # Save the state
+        
+                    # Then handle ongoing trailing stop updates
                     # Get 1m candles for trailing calculation
                     candles = candles_by_tf.get('1', [])
-        
+
                     # IMMEDIATE TRAILING - No activation threshold
                     # Calculate new trailing stop position using fixed percentage
                     current_trailing_sl = trade.get("trailing_sl")
-        
+
                     # Calculate new SL price with fixed trailing percentage
                     if direction.lower() == "long":
                         new_sl = current_price * (1 - trailing_pct/100)
                     else:
                         new_sl = current_price * (1 + trailing_pct/100)
-        
+
                     # Round to appropriate precision
                     new_sl = round(new_sl, 6)
-        
+
                     # Only update if new SL is better than current
                     should_update = False
                     if current_trailing_sl is None:
@@ -992,17 +1022,23 @@ async def monitor_trades(live_candles):
                         log(f"🔐 Initial trailing stop for {symbol} at {new_sl} ({trailing_pct}% from {current_price})")
                     elif direction.lower() == "long" and new_sl > current_trailing_sl:
                         improvement = ((new_sl - current_trailing_sl) / current_trailing_sl) * 100
-                        should_update = True
-                        log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
+                        # Only update if improvement is meaningful (at least 0.1%)
+                        if improvement >= 0.1:
+                            should_update = True
+                            log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
                     elif direction.lower() == "short" and new_sl < current_trailing_sl:
                         improvement = ((current_trailing_sl - new_sl) / current_trailing_sl) * 100
-                        should_update = True
-                        log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
-        
+                        # Only update if improvement is meaningful (at least 0.1%)
+                        if improvement >= 0.1:
+                            should_update = True
+                            log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
+
                     if should_update:
                         # Update the stop loss order
-                        await update_stop_loss_order(symbol, trade, new_sl)
-            
+                        sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
+                        if sl_updated:
+                            save_active_trades()  # Save after successful update
+
                 except Exception as e:
                     log(f"❌ Error updating trailing SL for {symbol}: {e}", level="ERROR")
                     log(traceback.format_exc(), level="ERROR")
