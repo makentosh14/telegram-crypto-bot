@@ -21,6 +21,26 @@ from exit_manager import should_trail_stop, adjust_profit_protection, should_exi
 from sl_tp_utils import evaluate_score_exit
 
 
+# FIXED PERCENTAGES for SL/TP - Add this after the imports
+FIXED_PERCENTAGES = {
+    "Scalp": {
+        "tp1_pct": 1.2,      # +1.2% take profit
+        "sl_pct": 0.8,       # -0.8% stop loss
+        "trailing_pct": 0.4  # 0.4% trailing stop
+    },
+    "Intraday": {
+        "tp1_pct": 2.0,      # +2.0% take profit
+        "sl_pct": 1.0,       # -1.0% stop loss
+        "trailing_pct": 1.0  # 1.0% trailing stop
+    },
+    "Swing": {
+        "tp1_pct": 5.0,      # Keep existing for swing
+        "sl_pct": 2.0,       # Keep existing for swing
+        "trailing_pct": 1.5  # Keep existing for swing
+    }
+}
+
+
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
     detect_tp1_hit,
@@ -204,6 +224,14 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     """
     if not exit_tranches and qty:
         exit_tranches = calculate_exit_tranches(symbol, qty)
+
+    # Get fixed percentages for this trade type
+    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
+    
+    # Override with fixed values
+    if trade_type in ["Scalp", "Intraday"]:
+        trailing_pct = fixed_params["trailing_pct"]
+        tp1_pct = fixed_params["tp1_pct"] if tp1_pct is None else tp1_pct
                                                 
     active_trades[symbol] = {
         "score_history": [initial_score],
@@ -684,18 +712,15 @@ async def monitor_trades(live_candles):
                 # Get candles for TP1 detection
                 candles = candles_by_tf.get('1', [])
     
-                # Use the ACTUAL TP1 price from trade execution, not hardcoded 1.8%
-                tp1_level = trade.get("tp1_target")  # This should be set during trade execution
+                # Get fixed percentages for this trade type
+                fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
+                tp1_pct = fixed_params["tp1_pct"]
     
+                # Calculate TP1 level using FIXED percentage
+                tp1_level = trade.get("tp1_target")
                 if not tp1_level:
-                    # Fallback: Try to get from the original trade data
-                    if trade.get("tp1_price_target"):
-                        tp1_level = trade.get("tp1_price_target")
-                    else:
-                        # Last resort: Calculate from the actual TP percentage used
-                        tp1_pct = trade.get("tp1_pct", 1.8)  # Get the actual TP1 percentage used
-                        tp1_level = entry_price * (1 + tp1_pct/100) if direction.lower() == "long" else entry_price * (1 - tp1_pct/100)
-                        log(f"⚠️ No stored TP1 target for {symbol}, calculated from TP1%: {tp1_pct}% = {tp1_level}")
+                    tp1_level = entry_price * (1 + tp1_pct/100) if direction.lower() == "long" else entry_price * (1 - tp1_pct/100)
+                    log(f"📊 Calculated TP1 for {symbol} using fixed {tp1_pct}% = {tp1_level}")
     
                 # Enhanced TP1 detection
                 tp1_hit = False
@@ -734,13 +759,9 @@ async def monitor_trades(live_candles):
                     trade["break_even_triggered"] = True
                     trade["tp1_price"] = tp1_level  # Store the actual TP1 level that was hit
 
-                    trade_type = trade.get("trade_type", "Intraday")
-                    if trade_type == "Scalp":
-                        trade["trailing_pct"] = 0.4  # Fixed 0.4% for Scalp
-                    elif trade_type == "Intraday":
-                        trade["trailing_pct"] = 1.0  # Fixed 1.0% for Intraday
-                    else:
-                        trade["trailing_pct"] = 1.5  # Keep existing for Swing
+                    # IMPORTANT: Update trailing percentage to fixed value for immediate activation
+                    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
+                    trade["trailing_pct"] = fixed_params["trailing_pct"]
     
                     log(f"🎯 TP1 Hit - Trailing will activate immediately with {trade['trailing_pct']}%")
                     
@@ -788,50 +809,50 @@ async def monitor_trades(live_candles):
                     
                     # Save updated trade state
                     save_active_trades()
+
+                    msg = f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price}\n"
+                    msg += f"Entry: {entry_price} | Target: {tp1_level} ({tp1_pct}%)\n"
+                    msg += f"💰 20% Partial Exit Executed (80% riding)\n"
+                    msg += f"🛡️ SL Moved to Breakeven: {entry_price}\n"
+                    msg += f"📍 Trailing {trade['trailing_pct']}% activates immediately"
+
+                    await send_telegram_message(msg)
             
-            # 5. Check for profit protection milestones (before TP1)
-            if not trade.get("tp1_hit"):  # Before TP1
-                # If we're in profit but haven't hit TP1 yet, consider profit protection
-                profit_sl = adjust_profit_protection(
-                    symbol, 
-                    entry_price, 
-                    current_price, 
-                    direction.lower(), 
-                    trade_type
-                )
-                
-                if profit_sl and (trade.get("trailing_sl") is None or 
-                                (direction.lower() == "long" and profit_sl > trade.get("trailing_sl", 0)) or 
-                                (direction.lower() == "short" and profit_sl < trade.get("trailing_sl", 0))):
-                    # Update SL to profit-locking level
-                    await update_stop_loss_order(symbol, trade, profit_sl)
-            
+            # 5. Check for profit protection milestones (before TP1)(DISABLED)
             # 6. ENHANCED TRAILING STOP LOGIC after TP1
             if trade.get("tp1_hit") and trailing_pct:
                 try:
-                    # Get 1m candles for enhanced trailing calculation
+                    # Get 1m candles for trailing calculation
                     candles = candles_by_tf.get('1', [])
         
-                    # Use improved trailing stop logic
-                    from exit_manager import should_trail_stop
+                    # IMMEDIATE TRAILING - No activation threshold
+                    # Calculate new trailing stop position using fixed percentage
+                    current_trailing_sl = trade.get("trailing_sl")
         
-                    new_sl = should_trail_stop(
-                        symbol=symbol,
-                        entry_price=entry_price,
-                        current_price=current_price,
-                        direction=direction,
-                        candles=candles,
-                        trailing_pct=trailing_pct
-                    )
+                    # Calculate new SL price with fixed trailing percentage
+                    if direction.lower() == "long":
+                        new_sl = current_price * (1 - trailing_pct/100)
+                    else:
+                        new_sl = current_price * (1 + trailing_pct/100)
         
-                    # Update trailing stop if valid
-                    if new_sl and (trade.get("trailing_sl") is None or
-                                  (direction.lower() == "long" and new_sl > trade.get("trailing_sl", 0)) or
-                                  (direction.lower() == "short" and new_sl < trade.get("trailing_sl", 0))):
-            
-                        # Log the trailing update with details
-                        log(f"🔐 Trailing stop updated for {symbol}: {trade.get('trailing_sl')} → {new_sl}")
-            
+                    # Round to appropriate precision
+                    new_sl = round(new_sl, 6)
+        
+                    # Only update if new SL is better than current
+                    should_update = False
+                    if current_trailing_sl is None:
+                        should_update = True
+                        log(f"🔐 Initial trailing stop for {symbol} at {new_sl} ({trailing_pct}% from {current_price})")
+                    elif direction.lower() == "long" and new_sl > current_trailing_sl:
+                        improvement = ((new_sl - current_trailing_sl) / current_trailing_sl) * 100
+                        should_update = True
+                        log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
+                    elif direction.lower() == "short" and new_sl < current_trailing_sl:
+                        improvement = ((current_trailing_sl - new_sl) / current_trailing_sl) * 100
+                        should_update = True
+                        log(f"🔐 Trailing stop improved for {symbol}: {current_trailing_sl} → {new_sl} (+{improvement:.2f}%)")
+        
+                    if should_update:
                         # Update the stop loss order
                         await update_stop_loss_order(symbol, trade, new_sl)
             
