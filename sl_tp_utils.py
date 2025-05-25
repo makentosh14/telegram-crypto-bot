@@ -13,11 +13,11 @@ MAX_SL_ATR_FACTOR = 3.2       # Maximum ATR factor (3.2x - was 3.0x)
 
 # Target risk-reward ratios by trade type - UPDATED
 TARGET_RR_RATIOS = {
-    "Scalp": 2.0,             # Was 1.5
-    "Intraday": 2.5,          # Was 2.0
-    "Swing": 3.0,             # Was 2.5
-    "mean_reversion": 2.2,    # Was 1.8
-    "breakout_sniper": 2.8,   # Was 2.2
+    "Scalp": 1.2,             # Was 1.5
+    "Intraday": 1.5,          # Was 2.0
+    "Swing": 1.8,             # Was 2.5
+    "mean_reversion": 1.4,    # Was 1.8
+    "breakout_sniper": 1.6,   # Was 2.2
 }
 
 # Trailing stop activation thresholds - UPDATED  
