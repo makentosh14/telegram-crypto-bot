@@ -774,6 +774,16 @@ async def check_for_momentum_surge(symbol, candles_by_tf):
 async def monitor_trades(live_candles):
     update_exit_cooldowns()
 
+    # Add position sync check every 30 cycles (2.5 minutes)
+    if hasattr(monitor_trades, 'sync_counter'):
+        monitor_trades.sync_counter += 1
+    else:
+        monitor_trades.sync_counter = 0
+    
+    if monitor_trades.sync_counter >= 30:
+        monitor_trades.sync_counter = 0
+        await verify_and_sync_positions()
+
     # Clean up any exited trades that might have been missed
     cleanup_exited_trades()
 
@@ -1534,3 +1544,85 @@ async def verify_trade_cleanup():
         await send_telegram_message(f"🧹 Cleaned up {len(issues_found)} exited trades that were still in active_trades")
     else:
         log("✅ All exited trades properly removed from active_trades")
+
+async def verify_and_sync_positions():
+    """Verify that active_trades matches actual Bybit positions"""
+    try:
+        from bybit_api import signed_request
+        
+        # Get all positions from Bybit
+        positions_resp = await signed_request("GET", "/v5/position/list", {
+            "category": "linear",
+            "settleCoin": "USDT"
+        })
+        
+        if positions_resp.get("retCode") != 0:
+            log(f"❌ Failed to fetch positions: {positions_resp.get('retMsg')}", level="ERROR")
+            return
+        
+        bybit_positions = {}
+        positions = positions_resp.get("result", {}).get("list", [])
+        
+        # Build dict of actual positions
+        for pos in positions:
+            symbol = pos.get("symbol")
+            size = float(pos.get("size", 0))
+            if size > 0:
+                bybit_positions[symbol] = pos
+        
+        # Check for mismatches
+        issues_found = []
+        
+        # 1. Trades marked as exited but still have positions
+        for symbol, trade in list(active_trades.items()):
+            if trade.get("exited") and symbol in bybit_positions:
+                issues_found.append(f"{symbol}: Marked as exited but position still open on Bybit")
+                # Fix: Unmark as exited
+                trade["exited"] = False
+                log(f"🔧 Fixed: {symbol} unmarked as exited (position still open)")
+        
+        # 2. Positions on Bybit but not in active_trades
+        for symbol, pos in bybit_positions.items():
+            if symbol not in active_trades:
+                issues_found.append(f"{symbol}: Position on Bybit but not in active_trades")
+                # Add it back
+                direction = "long" if pos.get("side") == "Buy" else "short"
+                active_trades[symbol] = {
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_price": float(pos.get("avgPrice", 0)),
+                    "qty": float(pos.get("size", 0)),
+                    "exited": False,
+                    "trade_type": "Intraday",
+                    "score_history": [7.0],
+                    "cycles": 0,
+                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "recovered": True
+                }
+                log(f"🔧 Recovered missing trade: {symbol}")
+        
+        # 3. Trades in active_trades but no position on Bybit
+        for symbol in list(active_trades.keys()):
+            if symbol not in bybit_positions and not active_trades[symbol].get("exited"):
+                issues_found.append(f"{symbol}: In active_trades but no position on Bybit")
+                # Mark as exited
+                active_trades[symbol]["exited"] = True
+                log(f"🔧 Fixed: {symbol} marked as exited (no position on Bybit)")
+        
+        if issues_found:
+            log(f"⚠️ Found {len(issues_found)} sync issues:", level="WARN")
+            for issue in issues_found:
+                log(f"  - {issue}")
+            save_active_trades()
+            
+            # Send summary to Telegram
+            await send_telegram_message(
+                f"🔧 <b>Position Sync Issues Fixed</b>\n"
+                f"Found and fixed {len(issues_found)} mismatches between bot and exchange"
+            )
+        else:
+            log("✅ All positions properly synced")
+            
+    except Exception as e:
+        log(f"❌ Error in position sync: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
