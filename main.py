@@ -891,6 +891,21 @@ async def periodic_cleanup():
         await asyncio.sleep(300)  # Every 5 minutes
         await verify_trade_cleanup()
 
+async def verify_all_sl_on_startup():
+    """One-time SL verification on startup"""
+    log("🔍 Performing startup SL verification...")
+    
+    for symbol, trade in active_trades.items():
+        if trade.get("exited"):
+            continue
+        
+        # Only check if SL is missing
+        if not trade.get("sl_order_id"):
+            await check_and_restore_sl(symbol, trade)
+            await asyncio.sleep(0.5)
+    
+    log("✅ Startup SL verification complete")
+
 async def run_bot():
     log("🚀 Bot starting...")
     await fetch_symbol_info()
@@ -901,8 +916,6 @@ async def run_bot():
     asyncio.create_task(update_risk_metrics())
 
     load_active_trades()
-
-    await verify_all_sl_on_startup()
     
     if len(active_trades) == 0:
         await recover_active_trades_from_exchange()
@@ -915,7 +928,6 @@ async def run_bot():
     asyncio.create_task(cleanup_cooldowns())
     asyncio.create_task(verify_all_positions(frequency_minutes=15))
     asyncio.create_task(high_frequency_scanner(live_candles))
-    asyncio.create_task(sl_verification_loop())
     asyncio.create_task(periodic_cleanup())
     asyncio.create_task(cleanup_pattern_cache())  # Add pattern cache cleanup
     asyncio.create_task(breakout_cache_cleanup())  # Add breakout cache cleanup
