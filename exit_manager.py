@@ -8,7 +8,7 @@ from atr import calculate_atr
 from supertrend import get_supertrend_exit_signal, get_supertrend_state
 from ema import calculate_ema, get_ema_slope, detect_ema_squeeze
 from rsi import calculate_rsi_with_bands, get_rsi_signal
-from bollinger import detect_band_walk, get_bollinger_signal
+from bollinger import detect_band_walk, get_bollinger_signal, calculate_bollinger_bands
 from macd import get_macd_momentum
 import asyncio
 import numpy as np
