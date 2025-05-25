@@ -221,8 +221,9 @@ def determine_direction_with_pattern_priority(tf_scores, indicator_scores):
     
     return "Short" if negative_count >= len(values) // 2 and total < 0 else "Long"
 
-def score_symbol(symbol, candles_by_timeframe):
-    """Enhanced scoring with advanced pattern detection"""
+def score_symbol(symbol, candles_by_timeframe, market_context=None):
+    if market_context is None:
+        market_context = {}
     
     # Handle special test case
     if symbol == "FOOUSDT":
@@ -337,18 +338,13 @@ def score_symbol(symbol, candles_by_timeframe):
                 macd = detect_macd_cross(candles)
                 ema = detect_ema_crossover(candles)
                 
-                if is_volume_spike(candles, 2.5):
-                    # Check if volume spike aligns with potential direction
-                    last_candle = candles[-1]
-                    is_bullish_candle = float(last_candle['close']) > float(last_candle['open'])
-    
-                    # Only add score if candle direction suggests momentum
-                    if is_bullish_candle:
-                        score += WEIGHTS["volume_spike"]
-                        indicator_scores[f"{tf_label}_volume"] = WEIGHTS["volume_spike"]
-                    else:
-                        score -= WEIGHTS["volume_spike"]
-                        indicator_scores[f"{tf_label}_volume"] = -WEIGHTS["volume_spike"]
+                vol_dir, vol_strength = analyze_volume_direction(candles)
+                if vol_dir == "bullish":
+                    score += WEIGHTS["volume_spike"] * vol_strength
+                    indicator_scores[f"{tf_label}_volume"] = WEIGHTS["volume_spike"] * vol_strength
+                elif vol_dir == "bearish":
+                    score -= WEIGHTS["volume_spike"] * vol_strength
+                    indicator_scores[f"{tf_label}_volume"] = -WEIGHTS["volume_spike"] * vol_strength
                     
                 if macd == "bullish":
                     score += WEIGHTS["macd"]
@@ -518,13 +514,14 @@ def score_symbol(symbol, candles_by_timeframe):
                 # Enhanced RSI Analysis
                 rsi_data = calculate_rsi_with_bands(candles)
                 if rsi_data:
-                    rsi = rsi_data['rsi']
-                    if rsi < 30:
-                        score += WEIGHTS["rsi"]
-                        indicator_scores[f"{tf_label}_rsi"] = WEIGHTS["rsi"]
-                    elif rsi > 70:
-                        score -= WEIGHTS["rsi"]
-                        indicator_scores[f"{tf_label}_rsi"] = -WEIGHTS["rsi"]
+                    rsi_signal, rsi_strength = get_balanced_rsi_signal(rsi_data, market_trend=market_context.get("btc_trend", "neutral"))
+
+                    if rsi_signal == "buy":
+                        score += WEIGHTS["rsi"] * rsi_strength
+                        indicator_scores[f"{tf_label}_rsi"] = WEIGHTS["rsi"] * rsi_strength
+                    elif rsi_signal == "sell":
+                        score -= WEIGHTS["rsi"] * rsi_strength
+                        indicator_scores[f"{tf_label}_rsi"] = -WEIGHTS["rsi"] * rsi_strength
                     
                     # RSI Divergence
                     if rsi_data.get('divergence'):
