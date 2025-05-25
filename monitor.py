@@ -62,6 +62,24 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
+# Add this function to monitor.py
+async def verify_all_sl_on_startup():
+    """One-time SL verification on startup"""
+    log("🔍 Performing startup SL verification...")
+    
+    for symbol, trade in active_trades.items():
+        if trade.get("exited"):
+            continue
+            
+        # Force check without time restriction
+        trade.pop("last_sl_check_time", None)
+        await check_and_restore_sl(symbol, trade)
+        
+        # Add small delay to avoid rate limits
+        await asyncio.sleep(0.5)
+    
+    log("✅ Startup SL verification complete")
+
 async def periodic_trade_sync():
     """Periodically reload trades from file to ensure sync"""
     while True:
@@ -567,94 +585,104 @@ async def check_and_restore_sl(symbol, trade):
     # Don't try to restore SL if we don't have the necessary information
     if not trade or trade.get("exited") or not trade.get("qty"):
         return
-
+    
+    # Skip if this is a trailing stop that's being actively managed
+    if trade.get("tp1_hit") and trade.get("trailing_sl"):
+        # Don't restore if we have an active trailing stop
+        return
+    
+    # Skip if we checked recently (within 5 minutes)
     last_sl_check = trade.get("last_sl_check_time")
     if last_sl_check:
-        time_since_check = (datetime.utcnow() - datetime.strptime(last_sl_check, "%Y-%m-%d %H:%M:%S")).total_seconds()
-        if time_since_check < 300:  # 5 minutes
-            return
-        
+        try:
+            last_check_dt = datetime.strptime(last_sl_check, "%Y-%m-%d %H:%M:%S")
+            time_since_check = (datetime.utcnow() - last_check_dt).total_seconds()
+            if time_since_check < 300:  # 5 minutes
+                return
+        except:
+            pass
+    
     sl_order_id = trade.get("sl_order_id")
     
-    # Check if SL exists - First verify we have an ID to check
-    sl_exists = False
-    if sl_order_id:
+    # Only proceed if we don't have an SL order ID
+    if not sl_order_id:
+        log(f"⚠️ No SL order ID found for {symbol}, attempting to create one", level="WARN")
+    else:
+        # Check if the order still exists
         try:
-            # Use the check_order_exists function to verify SL is still active
             sl_exists = await check_order_exists(sl_order_id, symbol)
-            log(f"🔍 SL order check for {symbol}: {'Exists' if sl_exists else 'Missing'}")
+            if sl_exists:
+                # Update check time and return
+                trade["last_sl_check_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                return  # SL exists, nothing to do
         except Exception as e:
-            log(f"❌ Error checking SL order: {e}", level="ERROR")
-
-    # UPDATE: Record check time
-    trade["last_sl_check_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            log(f"⚠️ Error checking SL order existence: {e}", level="WARN")
     
-    # If SL doesn't exist or we don't have an SL order ID, recreate it
-    if not sl_exists:
-        try:
-            direction = trade.get("direction", "").lower()
-            qty = trade.get("qty")
-            
-            # Try to use the trailing SL if available, otherwise use original SL or fallback to entry price with buffer
-            entry_price = trade.get("entry_price")
-            if not entry_price:
-                log(f"❌ Cannot restore SL for {symbol}: No entry price available", level="ERROR")
-                return
-                
-            # Get current price to ensure SL is placed on the correct side
-            try:
-                ticker_resp = await signed_request("GET", "/v5/market/tickers", {"category": "linear", "symbol": symbol})
-                mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
-                
-                # Determine SL price with safety check
-                sl_price = None
-                if trade.get("trailing_sl"):
-                    sl_price = trade.get("trailing_sl")
-                    log(f"🔄 Using trailing SL price: {sl_price}")
-                elif trade.get("original_sl"):
-                    sl_price = trade.get("original_sl") 
-                    log(f"🔄 Using original SL price: {sl_price}")
-                else:
-                    # Fallback: Calculate a safety SL from entry price
-                    if direction == "long":
-                        sl_price = round(mark_price * (1 - MIN_SL_BUFFER * 2), 6)
-                    else:
-                        sl_price = round(mark_price * (1 + MIN_SL_BUFFER * 2), 6)
-                    log(f"⚠️ No SL price found, using fallback from mark price: {sl_price}")
-                
-                # Validate the SL price is on the correct side of market price
-                if direction == "long" and sl_price >= mark_price:
-                    old_sl = sl_price
-                    sl_price = round(mark_price * 0.995, 6)  # 0.5% below mark price
-                    log(f"⚠️ Adjusted long SL from {old_sl} to {sl_price} (below mark price {mark_price})", level="WARN")
-                elif direction == "short" and sl_price <= mark_price:
-                    old_sl = sl_price
-                    sl_price = round(mark_price * 1.005, 6)  # 0.5% above mark price
-                    log(f"⚠️ Adjusted short SL from {old_sl} to {sl_price} (above mark price {mark_price})", level="WARN")
-            except Exception as e:
-                log(f"❌ Failed to get mark price for SL validation: {e}", level="ERROR")
-                # Use a conservative fallback if mark price check fails
-                if direction == "long":
-                    sl_price = entry_price * 0.95  # 5% below entry as last resort
-                else:
-                    sl_price = entry_price * 1.05  # 5% above entry as last resort
-            
-            # Place the new SL order with retry mechanism
-            sl_resp = await place_stop_loss_with_retry(symbol, direction, qty, sl_price)
-            
-            if sl_resp.get("retCode") == 0:
-                new_sl_order_id = sl_resp.get("result", {}).get("orderId")
-                trade["sl_order_id"] = new_sl_order_id
-                await send_telegram_message(f"🛡️ <b>SL Restored</b> for {symbol} at {sl_price}")
-                write_log(f"SL RESTORED: {symbol} | Price: {sl_price} | Order ID: {new_sl_order_id}")
-                log(f"✅ SL restored for {symbol} at {sl_price}")
-                save_active_trades()
+    # If we get here, we need to create/restore the SL
+    try:
+        direction = trade.get("direction", "").lower()
+        qty = trade.get("qty")
+        
+        # Try to use the trailing SL if available, otherwise use original SL
+        entry_price = trade.get("entry_price")
+        if not entry_price:
+            log(f"❌ Cannot restore SL for {symbol}: No entry price available", level="ERROR")
+            return
+        
+        # Determine SL price
+        sl_price = None
+        if trade.get("trailing_sl"):
+            sl_price = trade.get("trailing_sl")
+            log(f"🔄 Using trailing SL price: {sl_price}")
+        elif trade.get("original_sl"):
+            sl_price = trade.get("original_sl") 
+            log(f"🔄 Using original SL price: {sl_price}")
+        else:
+            # Calculate a safety SL from entry price
+            if direction == "long":
+                sl_price = round(entry_price * 0.98, 6)  # 2% below entry
             else:
-                log(f"❌ Failed to restore SL for {symbol}: {sl_resp.get('retMsg')}", level="ERROR")
-                await send_telegram_message(f"⚠️ <b>SL Restoration Failed</b> for {symbol}: {sl_resp.get('retMsg')}")
-        except Exception as e:
-            log(f"❌ Error restoring SL for {symbol}: {e}", level="ERROR")
-            write_log(f"ERROR RESTORING SL: {symbol} | {str(e)}")
+                sl_price = round(entry_price * 1.02, 6)  # 2% above entry
+            log(f"⚠️ No SL price found, using safety SL: {sl_price}")
+        
+        # Get current price to validate SL placement
+        ticker_resp = await signed_request("GET", "/v5/market/tickers", 
+                                         {"category": "linear", "symbol": symbol})
+        mark_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("markPrice", 0))
+        
+        if mark_price <= 0:
+            log(f"❌ Cannot get current price for {symbol}", level="ERROR")
+            return
+        
+        # Validate SL is on correct side
+        if direction == "long" and sl_price >= mark_price:
+            sl_price = round(mark_price * 0.995, 6)
+            log(f"⚠️ Adjusted long SL to {sl_price} (below mark {mark_price})")
+        elif direction == "short" and sl_price <= mark_price:
+            sl_price = round(mark_price * 1.005, 6)
+            log(f"⚠️ Adjusted short SL to {sl_price} (above mark {mark_price})")
+        
+        # Place the new SL order
+        sl_resp = await place_stop_loss_with_retry(symbol, direction, qty, sl_price)
+        
+        if sl_resp.get("retCode") == 0:
+            new_sl_order_id = sl_resp.get("result", {}).get("orderId")
+            trade["sl_order_id"] = new_sl_order_id
+            trade["last_sl_check_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Only send telegram message for initial SL restoration, not routine checks
+            if not sl_order_id:  # This was a missing SL, not a replacement
+                await send_telegram_message(f"🛡️ <b>SL Created</b> for {symbol} at {sl_price}")
+            
+            write_log(f"SL RESTORED: {symbol} | Price: {sl_price} | Order ID: {new_sl_order_id}")
+            log(f"✅ SL restored for {symbol} at {sl_price}")
+            save_active_trades()
+        else:
+            log(f"❌ Failed to restore SL for {symbol}: {sl_resp.get('retMsg')}", level="ERROR")
+            
+    except Exception as e:
+        log(f"❌ Error restoring SL for {symbol}: {e}", level="ERROR")
+        write_log(f"ERROR RESTORING SL: {symbol} | {str(e)}")
 
 async def verify_trade_integrity():
     """Verify all trades against exchange data"""
@@ -847,7 +875,7 @@ async def monitor_trades(live_candles):
             trailing_pct = trade.get("trailing_pct")
             
             # 1. Always check and restore SL first
-            if trade.get("cycles", 0) % 10 == 0:  # Only check every 10 cycles
+            if trade.get("cycles", 0) % 20 == 0:  # Only check every 10 cycles
                 await check_and_restore_sl(symbol, trade)
             
             # 2. Calculate score for exit decisions
