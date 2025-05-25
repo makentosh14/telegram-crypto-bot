@@ -737,9 +737,14 @@ async def check_existing_sl_orders(symbol):
             active_sl_orders = [
                 o for o in orders 
                 if o.get("orderStatus") in ["New", "Untriggered"] 
-                and o.get("stopOrderType") == "StopLoss"
+                and o.get("stopOrderType") in ["StopLoss", "Stop"]  # Added "Stop"
+                and o.get("reduceOnly") == True  # Must be reduce-only
             ]
-            return len(active_sl_orders) > 0
+            
+            if active_sl_orders:
+                log(f"✅ Found {len(active_sl_orders)} active SL orders for {symbol}")
+                return True
+                
     except Exception as e:
         log(f"Error checking existing SL orders: {e}")
     return False
