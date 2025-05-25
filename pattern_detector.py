@@ -756,6 +756,118 @@ def analyze_pattern_strength(pattern: str, candles: List[Dict]) -> float:
     
     return min(strength, 1.0)  # Cap at 1.0
 
+def analyze_pattern_quality(pattern: str, candles: List[Dict], trade_type: str) -> float:
+    """
+    Analyze pattern quality based on context and trade type
+    Returns quality score 0-1
+    """
+    if not pattern or not candles or len(candles) < 3:
+        return 0.0
+    
+    quality_score = 0.5  # Base score
+    
+    # Get pattern metrics
+    current_candle = candles[-1]
+    prev_candle = candles[-2] if len(candles) >= 2 else None
+    
+    # 1. Volume confirmation (20% weight)
+    if prev_candle and 'volume' in current_candle and 'volume' in prev_candle:
+        current_vol = float(current_candle.get('volume', 0))
+        prev_vol = float(prev_candle.get('volume', 0))
+        avg_vol = np.mean([float(c.get('volume', 0)) for c in candles[-10:]])
+        
+        if current_vol > prev_vol * 1.2 and current_vol > avg_vol:
+            quality_score += 0.2
+        elif current_vol > prev_vol and current_vol > avg_vol * 0.8:
+            quality_score += 0.1
+    
+    # 2. Trend context (20% weight)
+    trend = _determine_trend_context(candles, lookback=20)
+    
+    # Check if pattern appears at appropriate location
+    if pattern in REVERSAL_PATTERNS["bullish"] and trend == "downtrend":
+        quality_score += 0.2  # Bullish reversal at bottom
+    elif pattern in REVERSAL_PATTERNS["bearish"] and trend == "uptrend":
+        quality_score += 0.2  # Bearish reversal at top
+    elif pattern in CONTINUATION_PATTERNS["bullish"] and trend == "uptrend":
+        quality_score += 0.15  # Bullish continuation in uptrend
+    elif pattern in CONTINUATION_PATTERNS["bearish"] and trend == "downtrend":
+        quality_score += 0.15  # Bearish continuation in downtrend
+    else:
+        quality_score -= 0.1  # Pattern against trend
+    
+    # 3. Pattern clarity (10% weight)
+    # Check how clearly the pattern is formed
+    pattern_clarity = _assess_pattern_clarity(pattern, candles)
+    quality_score += pattern_clarity * 0.1
+    
+    # 4. Trade type specific adjustments
+    if trade_type == "Scalp":
+        # For scalps, prefer clear directional patterns
+        if pattern in ["hammer", "marubozu", "bullish_engulfing", "bearish_engulfing", 
+                      "bullish_kicker", "bearish_kicker"]:
+            quality_score += 0.1
+        elif pattern in ["doji", "spinning_top", "harami"]:
+            quality_score -= 0.2  # Indecision bad for scalps
+            
+    elif trade_type == "Intraday":
+        # For intraday, prefer reliable reversal patterns
+        if pattern in ["morning_star", "evening_star", "piercing_line", "dark_cloud_cover"]:
+            quality_score += 0.1
+            
+    elif trade_type == "Swing":
+        # For swings, prefer major patterns
+        if pattern in ["morning_star", "evening_star", "three_white_soldiers", 
+                      "three_black_crows", "bullish_abandoned_baby", "bearish_abandoned_baby"]:
+            quality_score += 0.15
+        elif pattern in ["doji", "spinning_top"]:
+            quality_score -= 0.1
+    
+    return min(max(quality_score, 0.0), 1.0)
+
+def _assess_pattern_clarity(pattern: str, candles: List[Dict]) -> float:
+    """
+    Assess how clearly a pattern is formed
+    Returns clarity score 0-1
+    """
+    if not candles or len(candles) < 3:
+        return 0.5
+    
+    clarity = 0.5  # Base clarity
+    
+    # Pattern-specific clarity checks
+    if pattern == "hammer":
+        c = candles[-1]
+        m = _calculate_candle_metrics(c)
+        # Check hammer proportions
+        if m["lower_shadow"] > m["body"] * 2.5:  # Strong hammer
+            clarity = 0.9
+        elif m["lower_shadow"] > m["body"] * 2:  # Standard hammer
+            clarity = 0.7
+    
+    elif pattern == "bullish_engulfing":
+        if len(candles) >= 2:
+            curr = _calculate_candle_metrics(candles[-1])
+            prev = _calculate_candle_metrics(candles[-2])
+            # Check engulfing quality
+            if curr["body"] > prev["body"] * 1.5:  # Strong engulfing
+                clarity = 0.9
+            elif curr["body"] > prev["body"] * 1.2:  # Good engulfing
+                clarity = 0.7
+    
+    elif pattern in ["morning_star", "evening_star"]:
+        if len(candles) >= 3:
+            # Check star pattern quality
+            middle = _calculate_candle_metrics(candles[-2])
+            if middle["body_pct"] < 0.1:  # Very small star body
+                clarity = 0.9
+            elif middle["body_pct"] < 0.2:  # Small star body
+                clarity = 0.7
+    
+    # Add more pattern-specific clarity checks as needed
+    
+    return clarity
+
 def detect_pattern_cluster(candles: List[Dict], lookback: int = 10) -> List[Dict]:
     """
     Detect multiple patterns in recent candles
