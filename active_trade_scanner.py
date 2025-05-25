@@ -14,6 +14,13 @@ from ai_memory import log_trade_result
 from strategy_performance import log_strategy_result
 from exit_manager import detect_momentum_surge
 
+try:
+    from monitor import active_trades as monitor_active_trades
+    log("✅ HF SCANNER: Successfully imported active_trades from monitor")
+except ImportError:
+    monitor_active_trades = {}
+    log("⚠️ HF SCANNER: Could not import active_trades from monitor")
+
 # Configuration for active trade scanner
 ACTIVE_SCAN_INTERVAL = 3  # Check active trades every 3 seconds
 MAX_CONCURRENT_CHECKS = 5  # Limit concurrent API calls
@@ -522,8 +529,13 @@ async def high_frequency_scanner(live_candles):
         start_time = time.time()
         
         try:
-            # Load active trades directly from file to avoid import issues
-            active_trades = load_active_trades_directly()
+            # First try to get trades from monitor module
+            if monitor_active_trades:
+                log(f"📊 HF SCANNER: Using monitor's active_trades: {len(monitor_active_trades)} trades")
+                active_trades = dict(monitor_active_trades)  # Make a copy
+            else:
+                # Fall back to loading from file
+                active_trades = load_active_trades_directly()
             
             # Filter to only non-exited trades
             active_symbols = [symbol for symbol, trade in active_trades.items() 
