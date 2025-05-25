@@ -103,7 +103,7 @@ def save_active_trades_directly(trades):
         existing_trades.update(trades)
         
         with open(PERSIST_PATH, 'w') as f:
-            json.dump(existing_trades, f, indent=2)
+            json.dump(existing_trades, f, indent=2, default=str)
             
         # Clear cache to force reload
         global _active_trades_cache, _cache_timestamp
