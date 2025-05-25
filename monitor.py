@@ -85,24 +85,6 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
-# Add this function to monitor.py
-async def verify_all_sl_on_startup():
-    """One-time SL verification on startup"""
-    log("🔍 Performing startup SL verification...")
-    
-    for symbol, trade in active_trades.items():
-        if trade.get("exited"):
-            continue
-            
-        # Force check without time restriction
-        trade.pop("last_sl_check_time", None)
-        await check_and_restore_sl(symbol, trade)
-        
-        # Add small delay to avoid rate limits
-        await asyncio.sleep(0.5)
-    
-    log("✅ Startup SL verification complete")
-
 async def periodic_trade_sync():
     """Periodically reload trades from file to ensure sync"""
     while True:
