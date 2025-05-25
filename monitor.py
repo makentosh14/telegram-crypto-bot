@@ -1403,3 +1403,25 @@ async def cleanup_orphaned_stop_orders(symbol):
     except Exception as e:
         log(f"❌ Error cleaning up orphaned orders: {e}", level="ERROR")
     return False
+
+async def verify_trade_cleanup():
+    """Verify that exited trades are properly removed"""
+    global active_trades
+    
+    issues_found = []
+    
+    # Check for trades that should be removed
+    for symbol, trade in list(active_trades.items()):
+        if trade.get("exited", False):
+            issues_found.append(f"{symbol} is marked as exited but still in active_trades")
+            # Remove it
+            del active_trades[symbol]
+    
+    if issues_found:
+        log(f"⚠️ Found {len(issues_found)} trades that needed cleanup:", level="WARN")
+        for issue in issues_found:
+            log(f"  - {issue}")
+        save_active_trades()
+        await send_telegram_message(f"🧹 Cleaned up {len(issues_found)} exited trades that were still in active_trades")
+    else:
+        log("✅ All exited trades properly removed from active_trades")
