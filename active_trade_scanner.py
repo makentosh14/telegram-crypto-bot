@@ -72,6 +72,15 @@ def load_active_trades_directly():
             _active_trades_cache = active_trades
             _cache_timestamp = current_time
             
+            # IMPORTANT: Also update monitor's active_trades if available
+            try:
+                from monitor import active_trades as monitor_trades
+                monitor_trades.clear()
+                monitor_trades.update(active_trades)
+                log(f"🔄 HF SCANNER: Synced {len(active_trades)} trades with monitor")
+            except Exception as e:
+                log(f"⚠️ HF SCANNER: Could not sync with monitor: {e}")
+            
             log(f"🔍 HF SCANNER: Loaded {len(active_trades)} active trades from file")
             return active_trades
         else:
