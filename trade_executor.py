@@ -128,8 +128,8 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
 
     # FIXED: More reasonable base SL percentages for crypto
     base_sl_percentages = {
-        "Scalp": 1.8,      # 1.8% for scalps (was too low)
-        "Intraday": 2.2,   # 2.2% for intraday (was too low) 
+        "Scalp": 0.8,      # 1.8% for scalps (was too low)
+        "Intraday": 1.2,   # 2.2% for intraday (was too low) 
         "Swing": 2.8       # 2.8% for swing trades (was too low)
     }
     
