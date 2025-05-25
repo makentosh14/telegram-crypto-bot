@@ -782,22 +782,11 @@ async def scan_for_new_signals(symbols):
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
-    from monitor import check_and_restore_sl
-    
-    if not trade or not trade.get("sl_order_id"):
-        log(f"⚠️ No SL order ID found for {symbol}, attempting to restore", level="WARN")
-        # Create a temporary trade object with the minimum needed info for check_and_restore_sl
-        temp_trade = {
-            "direction": direction,
-            "qty": trade.get("qty"),
-            "original_sl": trade.get("sl"),
-            "entry_price": trade.get("entry"),
-            "exited": False
-        }
-        await check_and_restore_sl(symbol, temp_trade)
-        await send_telegram_message(f"🔄 <b>SL Verification</b>: Attempted to restore missing SL for {symbol}")
-    else:
+    if trade and trade.get("sl_order_id"):
         log(f"✅ SL order confirmed for {symbol}: {trade.get('sl_order_id')}")
+    else:
+        # Just log - don't try to restore immediately after placing a trade
+        log(f"⚠️ SL order ID not immediately available for {symbol} - will be verified in monitor loop")
 
 
 async def monitor_loop():
