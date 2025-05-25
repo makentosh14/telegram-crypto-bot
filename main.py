@@ -901,6 +901,8 @@ async def run_bot():
     asyncio.create_task(update_risk_metrics())
 
     load_active_trades()
+
+    await verify_all_sl_on_startup()
     
     if len(active_trades) == 0:
         await recover_active_trades_from_exchange()
