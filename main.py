@@ -885,6 +885,12 @@ async def startup_cleanup():
     except Exception as e:
         log(f"❌ Startup cleanup failed: {e}")
 
+async def periodic_cleanup():
+    """Periodically verify trade cleanup"""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        await verify_trade_cleanup()
+
 async def run_bot():
     log("🚀 Bot starting...")
     await fetch_symbol_info()
