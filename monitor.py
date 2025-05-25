@@ -864,6 +864,11 @@ async def monitor_trades(live_candles):
             if symbol not in live_candles:
                 continue
 
+            # Only check SL if there's a specific reason:
+            if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
+                # Initial SL might be missing
+                await check_and_restore_sl(symbol, trade)
+
             # Get candles for all timeframes
             try:
                 candles_by_tf = {
@@ -889,10 +894,6 @@ async def monitor_trades(live_candles):
             direction = trade.get("direction")
             entry_price = trade.get("entry_price")
             trailing_pct = trade.get("trailing_pct")
-            
-            # 1. Always check and restore SL first
-            if trade.get("cycles", 0) % 20 == 0:  # Only check every 10 cycles
-                await check_and_restore_sl(symbol, trade)
             
             # 2. Calculate score for exit decisions
             try:
@@ -1263,7 +1264,7 @@ async def monitor_trades(live_candles):
                         log(f"❌ Error executing time-based exit: {e}", level="ERROR")
             
             # 12. Periodically verify position and orders (every 10 cycles, to avoid API rate limits)
-            if trade.get("cycles") % 10 == 0:
+            if trade.get("cycles") % 100 == 0:
                 await verify_position_and_orders(symbol, trade, auto_repair=True)
                     
         except Exception as e:
@@ -1309,41 +1310,31 @@ async def log_trade_result(symbol, result: str, profit: float):
     daily_stats["profit"] += profit
 
 # Periodic SL verification task
-async def verify_all_stop_losses(frequency_minutes=15):
-    """Periodically verify all stop losses are still active"""
+async def verify_all_stop_losses(frequency_minutes=60):  # Changed from 15 to 60 minutes
+    """Emergency verification only - not routine"""
     while True:
         try:
-            log("🔍 Starting periodic SL verification cycle")
-            trades_verified = 0
+            # Only run after bot has been running for 30 minutes
+            if time.time() - startup_time < 1800:  # 30 minutes
+                await asyncio.sleep(300)
+                continue
+            
+            log("🔍 Running emergency SL verification")
             
             for symbol, trade in active_trades.items():
                 if trade.get("exited"):
                     continue
                 
-                # Check if SL order still exists
-                if trade.get("sl_order_id"):
-                    sl_exists = await check_order_exists(trade["sl_order_id"], symbol)
-                    if not sl_exists:
-                        log(f"⚠️ SL order missing for {symbol} - restoring", level="WARN")
-                        await check_and_restore_sl(symbol, trade)
-                else:
-                    log(f"⚠️ No SL order ID for {symbol} - setting new SL", level="WARN")
+                # Only check if we suspect an issue
+                if not trade.get("sl_order_id"):
+                    log(f"⚠️ Missing SL order ID for {symbol}")
                     await check_and_restore_sl(symbol, trade)
                 
-                trades_verified += 1
-                
-                # Sleep briefly between symbols to avoid rate limits
-                await asyncio.sleep(1)
-                
-            log(f"✅ Completed SL verification cycle: verified {trades_verified} trades")
-            
-            # Also verify trade integrity while we're at it
-            await verify_trade_integrity()
-            
+                await asyncio.sleep(2)  # Longer delay between checks
+        
         except Exception as e:
-            log(f"❌ Error in periodic SL verification: {e}", level="ERROR")
-            
-        # Wait for next cycle
+            log(f"❌ Error in SL verification: {e}", level="ERROR")
+        
         await asyncio.sleep(frequency_minutes * 60)
 
 # Emergency exit monitoring for extreme market conditions
