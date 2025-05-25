@@ -253,16 +253,21 @@ async def recover_active_trades_from_exchange():
         
         for pos in positions:
             symbol = pos.get("symbol")
-            size = float(pos.get("size", 0))
+            size_str = pos.get("size", "0")
+            size = float(size_str) if size_str else 0
             side = pos.get("side")  # "Buy" or "Sell"
             
             if size > 0 and symbol not in active_trades:
                 # Reconstruct basic trade info
                 direction = "long" if side == "Buy" else "short"
-                entry_price = float(pos.get("avgPrice", 0))
                 
-                # Get stop loss if exists
-                sl_price = float(pos.get("stopLoss", 0))
+                # Safely get entry price
+                avg_price_str = pos.get("avgPrice", "0")
+                entry_price = float(avg_price_str) if avg_price_str else 0
+                
+                # Safely get stop loss if exists
+                sl_price_str = pos.get("stopLoss", "0")
+                sl_price = float(sl_price_str) if sl_price_str and sl_price_str != "" else 0
                 
                 # Create basic trade entry
                 active_trades[symbol] = {
