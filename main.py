@@ -53,9 +53,9 @@ recent_swing_trades = {}  # Track recent swing trades by symbol with timestamp
 SWING_COOLDOWN = 3600  # 1 hour cooldown in seconds
 
 # Slightly reduced thresholds in volatile regime to capture more potential pumps
-MIN_SCALP_SCORE = 6.5
-MIN_INTRADAY_SCORE = 7
-MIN_SWING_SCORE = 8.5
+MIN_SCALP_SCORE = 7.5
+MIN_INTRADAY_SCORE = 8.5
+MIN_SWING_SCORE = 10
 
 def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
     """
@@ -153,6 +153,59 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
         f"Result: {'✅ PASS' if valid else '❌ FAIL'}")
     
     return valid
+
+def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type):
+    """
+    Quality filter to ensure only high-probability trades are taken
+    
+    Returns:
+        bool: True if trade meets quality standards
+    """
+    # 1. Require minimum confidence based on trade type
+    min_confidence = {
+        "Scalp": 65,
+        "Intraday": 70,
+        "Swing": 75
+    }
+    
+    if confidence < min_confidence.get(trade_type, 65):
+        log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
+        return False
+    
+    # 2. Check for conflicting signals
+    bullish_count = sum(1 for k, v in indicator_scores.items() if v > 0)
+    bearish_count = sum(1 for k, v in indicator_scores.items() if v < 0)
+    
+    # If we have too many conflicting signals, skip
+    if min(bullish_count, bearish_count) > 2:
+        log(f"⚠️ {symbol}: Too many conflicting signals (Bull: {bullish_count}, Bear: {bearish_count})")
+        return False
+    
+    # 3. Require at least one strong indicator (score > 1.0)
+    strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 1.0]
+    if len(strong_indicators) < 1:
+        log(f"⚠️ {symbol}: No strong indicators found (need at least one with score > 1.0)")
+        return False
+    
+    # 4. Require minimum number of confirming indicators
+    min_indicators_required = {
+        "Scalp": 4,
+        "Intraday": 5,
+        "Swing": 6
+    }
+    
+    if len(used_indicators) < min_indicators_required.get(trade_type, 4):
+        log(f"⚠️ {symbol}: Insufficient indicators: {len(used_indicators)} < {min_indicators_required[trade_type]}")
+        return False
+    
+    # 5. For Swing trades, require even stronger confirmation
+    if trade_type == "Swing":
+        # Need at least 2 strong indicators for swing trades
+        if len(strong_indicators) < 2:
+            log(f"⚠️ {symbol}: Swing trade needs at least 2 strong indicators, found {len(strong_indicators)}")
+            return False
+    
+    return True
 
 def extract_last_pattern_enhanced(candles_by_tf):
     """Enhanced pattern extraction with strength analysis"""
@@ -300,9 +353,9 @@ async def scan_for_new_signals(symbols):
     # Adjust score thresholds based on regime
     # In volatile regimes, lower thresholds to catch more pumps
     score_adjustments = {
-        "volatile": {"scalp": -0.5, "intraday": -0.5, "swing": -0.5},  # Lower thresholds in volatile markets
-        "ranging": {"scalp": 0.5, "intraday": 0.5, "swing": 0.5},      # Higher thresholds in ranging markets
-        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},     # Normal thresholds in trending markets
+        "volatile": {"scalp": -0.2, "intraday": -0.2, "swing": -0.3},  # Less reduction in volatile markets
+        "ranging": {"scalp": 0.8, "intraday": 0.8, "swing": 1.0},      # Higher penalty for ranging markets
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},     # No adjustment for trending
     }
     adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
     adj_scalp = MIN_SCALP_SCORE + adjust["scalp"]
@@ -394,7 +447,7 @@ async def scan_for_new_signals(symbols):
                 f"<b>Triggers:</b> {pump_reasons} ({pump_data['trigger_count']}/4)"
             )
             # Boost score for early pump signals
-            score += 1.0
+            score += 0.3
             # Add pump detection to indicators
             indicator_scores["early_pump"] = 1.5
             used_indicators.append("early_pump")
@@ -439,6 +492,10 @@ async def scan_for_new_signals(symbols):
         # Skip if minimum score not met
         if not min_score_met:
             log(f"⚠️ Skipping {symbol}: Score {score:.2f} below minimum threshold for {trade_type} ({adj_scalp if trade_type == 'Scalp' else adj_intraday if trade_type == 'Intraday' else adj_swing})")
+            continue
+
+        if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type):
+            log(f"⚠️ Skipping {symbol}: Failed quality standards check")
             continue
 
         # Check active signals
