@@ -62,6 +62,25 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
+async def periodic_trade_sync():
+    """Periodically reload trades from file to ensure sync"""
+    while True:
+        try:
+            # Wait 30 seconds before first sync to let bot initialize
+            if time.time() - startup_time < 30:
+                await asyncio.sleep(10)
+                continue
+                
+            # Reload trades from file
+            load_active_trades()
+            log(f"🔄 Periodic sync: {len(active_trades)} active trades")
+            
+        except Exception as e:
+            log(f"❌ Error in periodic trade sync: {e}", level="ERROR")
+        
+        # Sync every 60 seconds
+        await asyncio.sleep(60)
+
 # NEW LOGGING FUNCTIONS for enhanced tracking
 def log_tp1_event(symbol, event_type, data):
     """Enhanced TP1 logging function"""
