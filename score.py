@@ -17,6 +17,7 @@ from stealth_detector import detect_volume_divergence, detect_slow_breakout
 from whale_detector import detect_whale_activity, detect_whale_activity_advanced, analyze_whale_impact
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
+from indicator_fixes import rebalance_indicator_scores, get_balanced_rsi_signal, analyze_volume_direction
 
 # Enhanced weights including pattern-specific weights
 WEIGHTS = {
@@ -630,6 +631,9 @@ def score_symbol(symbol, candles_by_timeframe):
 
         except Exception as e:
             log(f"❌ Scoring error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
+
+        # Apply indicator rebalancing
+        indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
 
         tf_scores[tf] = round(score, 2)
     
