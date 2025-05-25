@@ -630,7 +630,7 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
             log(f"❌ Scoring error for {symbol} [{tf}m]: {str(e)}", level="ERROR")
 
         # Apply indicator rebalancing
-        indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
+        indicator_scores = rebalance_indicator_scores(indicator_scores, market_context)
 
         tf_scores[tf] = round(score, 2)
     
