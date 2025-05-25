@@ -914,6 +914,7 @@ async def run_bot():
     asyncio.create_task(cleanup_pattern_cache())  # Add pattern cache cleanup
     asyncio.create_task(breakout_cache_cleanup())  # Add breakout cache cleanup
     asyncio.create_task(strategy_stats_report())   # Add strategy stats reporting
+    asyncio.create_task(periodic_trade_sync())
 
     await startup_cleanup()
 
