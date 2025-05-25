@@ -15,7 +15,7 @@ from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
 from symbol_info import fetch_symbol_info
 from activity_logger import write_log, log_trade_to_file
-from monitor import track_active_trade, monitor_trades, load_active_trades, check_and_restore_sl, active_trades, recover_active_trades_from_exchange
+from monitor import track_active_trade, monitor_trades, load_active_trades, check_and_restore_sl, active_trades, recover_active_trades_from_exchange, periodic_trade_sync
 log(f"🔍 main.py - imported active_trades id: {id(active_trades)}")
 from pattern_detector import (
     detect_pattern, analyze_pattern_strength, detect_pattern_cluster,
