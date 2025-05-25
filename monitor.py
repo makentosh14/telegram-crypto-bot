@@ -665,6 +665,9 @@ async def check_for_momentum_surge(symbol, candles_by_tf):
 async def monitor_trades(live_candles):
     update_exit_cooldowns()
 
+    # Clean up any exited trades that might have been missed
+    cleanup_exited_trades()
+
     if time.time() - startup_time < 120:
         log("⏳ Grace period active, skipping trade exit checks...")
         return
@@ -912,11 +915,11 @@ async def monitor_trades(live_candles):
                 if (direction.lower() == "long" and current_price <= trailing_sl) or (direction.lower() == "short" and current_price >= trailing_sl):
                     # If we have remaining exit tranches, execute the rest of position
                     remaining_qty = trade.get("qty", 0)
-                    
+        
                     if remaining_qty > 0:
                         # Exit the remainder of the position
                         side = "Sell" if direction.lower() == "long" else "Buy"
-                        
+            
                         try:
                             exit_result = await place_market_order(
                                 symbol=symbol,
@@ -925,27 +928,58 @@ async def monitor_trades(live_candles):
                                 market_type="linear",
                                 reduce_only=True
                             )
-                            
+                
                             if exit_result.get("retCode") == 0:
                                 log(f"✅ Final position exit executed for {symbol} - {remaining_qty} units")
                             else:
                                 log(f"❌ Final exit failed: {exit_result.get('retMsg')}", level="ERROR")
                         except Exception as e:
                             log(f"❌ Error in final exit: {e}", level="ERROR")
-                    
+        
+                    # Mark trade as exited
                     trade["exited"] = True
-                    await send_telegram_message(f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}")
-                    write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f}")
-                    log_trade_result(symbol, tf_scores, "breakeven")
-                    log_trade_to_file(symbol, direction, entry_price, trade.get("original_sl"), None, current_price, "breakeven", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+                    trade["exit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    trade["exit_reason"] = "trailing_sl_hit_after_tp1"
+                    trade["exit_price"] = current_price
+        
+                    # Calculate final profit
+                    profit_pct = ((current_price - entry_price) / entry_price) * 100 if direction.lower() == "long" else ((entry_price - current_price) / entry_price) * 100
+        
+                    # Send notification
+                    await send_telegram_message(
+                        f"⛔ <b>Trailing SL Hit</b> on {symbol} at {current_price:.4f}\n"
+                        f"Final Profit: {profit_pct:.2f}%\n"
+                        f"Strategy: 20% exit at TP1, 80% exited at trailing SL"
+                    )
+        
+                    write_log(f"TRAILING SL HIT: {symbol} | Hit at: {current_price:.4f} | Profit: {profit_pct:.2f}%")
+        
+                    # Log trade result
+                    log_trade_result(symbol, tf_scores, "win" if profit_pct > 0 else "breakeven")
+                    log_trade_to_file(
+                        symbol, direction, entry_price, trade.get("original_sl"), 
+                        trade.get("tp1_price"), current_price, 
+                        "win" if profit_pct > 0 else "breakeven", 
+                        score, trade_type, 0, 
+                        indicator_scores=tf_scores, 
+                        used_indicators=used_list
+                    )
+        
+                    # Log strategy performance
                     strategy = "core_strategy"
                     if tf_scores.get("mean_reversion"):
                         strategy = "mean_reversion"
                     elif tf_scores.get("breakout_sniper"):
                         strategy = "breakout_sniper"
-
-                    profit_pct = ((current_price - entry_price) / entry_price) * 100 if direction.lower() == "long" else ((entry_price - current_price) / entry_price) * 100
-                    log_strategy_result(strategy, "win", round(profit_pct, 2))
+        
+                    log_strategy_result(strategy, "win" if profit_pct > 0 else "loss", round(profit_pct, 2))
+        
+                    # IMPORTANT: Remove from active_trades dictionary
+                    log(f"🗑️ Removing {symbol} from active trades due to trailing SL hit after TP1")
+                    del active_trades[symbol]
+                    recent_exits[symbol] = EXIT_COOLDOWN
+        
+                    # Save the updated trades
                     save_active_trades()
                     continue
 
@@ -953,18 +987,31 @@ async def monitor_trades(live_candles):
             if not trade.get("tp1_hit") and trade.get("original_sl"):
                 sl_price = trade["original_sl"]
                 if (direction.lower() == "long" and current_price <= sl_price) or (direction.lower() == "short" and current_price >= sl_price):
+                    # Mark as exited
                     trade["exited"] = True
+                    trade["exit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    trade["exit_reason"] = "sl_hit"
+                    trade["exit_price"] = current_price
+        
+                    # Send notifications and log
                     await send_telegram_message(f"❌ <b>SL Hit</b> on <b>{symbol}</b>")
                     write_log(f"SL HIT: {symbol} | SL: {sl_price} | Price: {current_price}")
                     log_exit(symbol, score)
                     log_trade_result(symbol, tf_scores, "loss")
                     log_trade_to_file(symbol, direction, entry_price, sl_price, None, current_price, "loss", score, trade_type, 0, indicator_scores=tf_scores, used_indicators=used_list)
+        
                     strategy = "core_strategy"
                     if tf_scores.get("mean_reversion"):
                         strategy = "mean_reversion"
                     elif tf_scores.get("breakout_sniper"):
                         strategy = "breakout_sniper"
                     log_strategy_result(strategy, "loss", -100)
+        
+                    # IMPORTANT: Remove from active_trades
+                    log(f"🗑️ Removing {symbol} from active trades due to SL hit")
+                    del active_trades[symbol]
+                    recent_exits[symbol] = EXIT_COOLDOWN
+        
                     save_active_trades()
                     continue
 
@@ -1025,6 +1072,23 @@ async def monitor_trades(live_candles):
             write_log(f"MONITOR ERROR: {symbol} | {str(e)}", level="ERROR")
 
     save_active_trades()
+
+def cleanup_exited_trades():
+    """Remove any trades marked as exited from active_trades"""
+    global active_trades
+    
+    exited_symbols = []
+    for symbol, trade in list(active_trades.items()):
+        if trade.get("exited", False):
+            exited_symbols.append(symbol)
+    
+    for symbol in exited_symbols:
+        log(f"🧹 Cleaning up exited trade: {symbol}")
+        del active_trades[symbol]
+    
+    if exited_symbols:
+        log(f"🧹 Cleaned up {len(exited_symbols)} exited trades")
+        save_active_trades()
 
 async def log_trade_result(symbol, result: str, profit: float):
     """Called when a trade closes (for win/loss tracking)"""
