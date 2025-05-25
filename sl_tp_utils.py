@@ -21,7 +21,12 @@ TARGET_RR_RATIOS = {
 }
 
 # Trailing stop activation thresholds - UPDATED  
-TRAILING_ACTIVATION_THRESHOLD = 2.5  # Increased from 1.5% to 2.5% - require bigger move
+TRAILING_ACTIVATION_THRESHOLDS = {
+    "Scalp": 1.5,      # Start trailing at 1.5% for scalps
+    "Intraday": 2.0,   # Start trailing at 2.0% for intraday
+    "Swing": 2.5       # Keep 2.5% for swings
+}
+
 TRAILING_PERCENTAGE_MAP = {
     "Scalp": 1.0,              # Increased from 0.7% to 1.0% - wider trailing
     "Intraday": 1.2,           # Increased from 0.8% to 1.2% - wider trailing
