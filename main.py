@@ -616,7 +616,7 @@ async def scan_for_new_signals(symbols):
                 symbol=symbol,
                 trade_type=trade_type,
                 initial_score=score,
-                entry_price=price,
+                entry_price=trade['entry'],
                 direction=direction,
                 trailing_pct=trade.get("trailing_pct"),
                 tp1_target=trade.get("tp1"),  # Store the actual TP1 price
