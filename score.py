@@ -178,6 +178,48 @@ def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_in
     
     return score, indicator_scores, used_indicators
 
+def determine_direction_with_pattern_priority(tf_scores, indicator_scores):
+    """Enhanced direction determination that considers patterns"""
+    
+    # First check if we have strong pattern signals
+    pattern_direction = None
+    pattern_strength = 0
+    
+    for key, score in indicator_scores.items():
+        if "pattern_" in key and abs(score) > 0.5:  # Strong pattern signal
+            if score > 0:
+                pattern_direction = "Long"
+                pattern_strength = max(pattern_strength, score)
+            else:
+                pattern_direction = "Short"
+                pattern_strength = max(pattern_strength, abs(score))
+    
+    # If we have a strong pattern, give it priority
+    if pattern_direction and pattern_strength > 0.7:
+        # Check if other indicators strongly disagree
+        values = list(tf_scores.values())
+        total = sum(values)
+        
+        # If pattern says Long but total score is very negative, might still go Short
+        if pattern_direction == "Long" and total < -3:
+            return "Short"
+        # If pattern says Short but total score is very positive, might still go Long
+        elif pattern_direction == "Short" and total > 3:
+            return "Long"
+        else:
+            # Pattern wins
+            return pattern_direction
+    
+    # Otherwise use original logic
+    values = list(tf_scores.values())
+    if not values:
+        return "Long"
+    
+    negative_count = sum(1 for v in values if v < 0)
+    total = sum(values)
+    
+    return "Short" if negative_count >= len(values) // 2 and total < 0 else "Long"
+
 def score_symbol(symbol, candles_by_timeframe):
     """Enhanced scoring with advanced pattern detection"""
     
