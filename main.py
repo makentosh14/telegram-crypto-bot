@@ -155,25 +155,28 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     
     return valid
 
-def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type):
-    """
-    Quality filter to ensure only high-probability trades are taken
+def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction=None):
+    """Enhanced quality filter with direction-specific requirements"""
     
-    Returns:
-        bool: True if trade meets quality standards
-    """
-    # 1. Require minimum confidence based on trade type
-    min_confidence = {
-        "Scalp": 65,
-        "Intraday": 70,
-        "Swing": 75
-    }
+    # Higher requirements for shorts
+    if direction == "Short":
+        min_confidence = {
+            "Scalp": 70,      # was 65
+            "Intraday": 75,   # was 70
+            "Swing": 80       # was 75
+        }
+    else:
+        min_confidence = {
+            "Scalp": 65,
+            "Intraday": 70,
+            "Swing": 75
+        }
     
-    if confidence < min_confidence.get(trade_type, 65):
+    if confidence < min_confidence.get(trade_type, 70):
         log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
         return False
     
-    # 2. Check for conflicting signals
+    # Check for conflicting signals
     bullish_count = sum(1 for k, v in indicator_scores.items() if v > 0)
     bearish_count = sum(1 for k, v in indicator_scores.items() if v < 0)
     
@@ -182,28 +185,28 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
         log(f"⚠️ {symbol}: Too many conflicting signals (Bull: {bullish_count}, Bear: {bearish_count})")
         return False
     
-    # 3. Require at least one strong indicator (score > 1.0)
+    # Require at least one strong indicator (score > 1.0)
     strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 1.0]
     if len(strong_indicators) < 1:
         log(f"⚠️ {symbol}: No strong indicators found (need at least one with score > 1.0)")
         return False
     
-    # 4. Require minimum number of confirming indicators
+    # For shorts, require more confirming indicators
     min_indicators_required = {
-        "Scalp": 4,
-        "Intraday": 5,
-        "Swing": 6
+        "Scalp": 5 if direction == "Short" else 4,
+        "Intraday": 6 if direction == "Short" else 5,
+        "Swing": 7 if direction == "Short" else 6
     }
     
-    if len(used_indicators) < min_indicators_required.get(trade_type, 4):
+    if len(used_indicators) < min_indicators_required.get(trade_type, 5):
         log(f"⚠️ {symbol}: Insufficient indicators: {len(used_indicators)} < {min_indicators_required[trade_type]}")
         return False
     
-    # 5. For Swing trades, require even stronger confirmation
-    if trade_type == "Swing":
-        # Need at least 2 strong indicators for swing trades
-        if len(strong_indicators) < 2:
-            log(f"⚠️ {symbol}: Swing trade needs at least 2 strong indicators, found {len(strong_indicators)}")
+    # For shorts, require at least 2 strong indicators
+    if direction == "Short":
+        strong_bearish_indicators = [k for k, v in indicator_scores.items() if v < -1.0]
+        if len(strong_bearish_indicators) < 2:
+            log(f"⚠️ {symbol}: Short trade needs at least 2 strong bearish indicators, found {len(strong_bearish_indicators)}")
             return False
     
     return True
@@ -346,6 +349,27 @@ async def comprehensive_startup_cleanup():
         
     except Exception as e:
         log(f"❌ Error in startup cleanup: {e}", level="ERROR")
+
+def is_short_favorable(candles_by_tf, trend_context):
+    """Check if market conditions favor short trades"""
+    
+    # Check overall market trend
+    if trend_context.get("btc_trend") == "uptrend":
+        return False
+    
+    # Check recent price action (using 15m candles)
+    candles_15m = candles_by_tf.get('15', [])
+    if len(candles_15m) >= 10:
+        # Calculate recent trend
+        recent_high = max(float(c['high']) for c in candles_15m[-10:])
+        recent_low = min(float(c['low']) for c in candles_15m[-10:])
+        current = float(candles_15m[-1]['close'])
+        
+        # If price is near recent lows, shorts are risky
+        if (current - recent_low) / (recent_high - recent_low) < 0.3:
+            return False
+    
+    return True
 
 async def scan_for_new_signals(symbols):
     trend_context = await get_trend_context()
@@ -495,8 +519,27 @@ async def scan_for_new_signals(symbols):
             log(f"⚠️ Skipping {symbol}: Score {score:.2f} below minimum threshold for {trade_type} ({adj_scalp if trade_type == 'Scalp' else adj_intraday if trade_type == 'Intraday' else adj_swing})")
             continue
 
-        if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type):
+        if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction):
             log(f"⚠️ Skipping {symbol}: Failed quality standards check")
+            continue
+
+        # Skip shorts in strong uptrends
+        btc_trend = trend_context.get("btc_trend", "ranging")
+        market_sentiment = trend_context.get("sentiment", "neutral")
+        
+        if direction == "Short" and btc_trend == "uptrend" and trade_type in ["Scalp", "Intraday"]:
+            log(f"⚠️ Skipping {symbol}: Short signal in strong uptrend")
+            continue
+        
+        # Require higher confidence for shorts in neutral/bullish markets
+        if direction == "Short" and market_sentiment != "bearish":
+            if confidence < 75:
+                log(f"⚠️ Skipping {symbol}: Short confidence {confidence}% below 75% threshold")
+                continue
+        
+        # Check if market conditions favor shorts
+        if direction == "Short" and not is_short_favorable(candles_by_tf, trend_context):
+            log(f"⚠️ Skipping {symbol}: Market conditions unfavorable for shorts")
             continue
 
         # Check active signals
