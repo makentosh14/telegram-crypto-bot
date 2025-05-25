@@ -101,7 +101,29 @@ def save_active_trades():
     try:
         log(f"💾 Saving {len(active_trades)} active trades to file...")
         
-        # Create a copy of the trades dictionary to avoid modifying the original
+        # CRITICAL: Don't save if we have 0 trades but file has trades
+        if len(active_trades) == 0 and os.path.exists(PERSIST_PATH):
+            try:
+                with open(PERSIST_PATH, 'r') as f:
+                    existing_data = json.load(f)
+                    existing_active = sum(1 for t in existing_data.values() if not t.get("exited", False))
+                    
+                    if existing_active > 0:
+                        log(f"⚠️ SAFETY: Refusing to overwrite {existing_active} active trades with empty data!", level="WARN")
+                        # Reload the trades instead
+                        load_active_trades()
+                        return
+            except:
+                pass
+        
+        # Create a backup before saving
+        if os.path.exists(PERSIST_PATH) and len(active_trades) == 0:
+            backup_path = f"{PERSIST_PATH}.backup_{int(time.time())}"
+            import shutil
+            shutil.copy2(PERSIST_PATH, backup_path)
+            log(f"📁 Created safety backup: {backup_path}")
+        
+        # Rest of the save logic...
         trades_to_save = {}
         
         for symbol, trade in active_trades.items():
@@ -208,6 +230,70 @@ def load_active_trades():
             log(f"✅ Created backup of active trades file")
         except Exception as e:
             log(f"⚠️ Failed to create backup: {e}", level="WARN")
+
+async def recover_active_trades_from_exchange():
+    """Recover active trades from exchange positions"""
+    try:
+        from bybit_api import signed_request
+        
+        log("🔄 Attempting to recover trades from exchange positions...")
+        
+        # Get all positions
+        positions_resp = await signed_request("GET", "/v5/position/list", {
+            "category": "linear",
+            "settleCoin": "USDT"
+        })
+        
+        if positions_resp.get("retCode") != 0:
+            log(f"❌ Failed to fetch positions: {positions_resp.get('retMsg')}", level="ERROR")
+            return
+        
+        positions = positions_resp.get("result", {}).get("list", [])
+        recovered_count = 0
+        
+        for pos in positions:
+            symbol = pos.get("symbol")
+            size = float(pos.get("size", 0))
+            side = pos.get("side")  # "Buy" or "Sell"
+            
+            if size > 0 and symbol not in active_trades:
+                # Reconstruct basic trade info
+                direction = "long" if side == "Buy" else "short"
+                entry_price = float(pos.get("avgPrice", 0))
+                
+                # Get stop loss if exists
+                sl_price = float(pos.get("stopLoss", 0))
+                
+                # Create basic trade entry
+                active_trades[symbol] = {
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_price": entry_price,
+                    "qty": size,
+                    "original_sl": sl_price if sl_price > 0 else None,
+                    "exited": False,
+                    "trade_type": "Intraday",  # Default
+                    "score_history": [7.0],     # Default
+                    "cycles": 0,
+                    "tp1_hit": False,
+                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "recovered": True  # Mark as recovered
+                }
+                
+                recovered_count += 1
+                log(f"✅ Recovered {symbol} position: {direction} {size} @ {entry_price}")
+        
+        if recovered_count > 0:
+            save_active_trades()
+            await send_telegram_message(f"🔄 Recovered {recovered_count} active positions from exchange")
+            log(f"✅ Recovery complete: {recovered_count} trades recovered")
+        else:
+            log("ℹ️ No positions to recover")
+            
+    except Exception as e:
+        log(f"❌ Error recovering trades: {e}", level="ERROR")
+        import traceback
+        log(traceback.format_exc(), level="ERROR")
 
 def backup_trades_file():
     """Create a timestamped backup of the trades file"""
