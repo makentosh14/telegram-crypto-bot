@@ -20,6 +20,8 @@ from strategy_performance import log_strategy_result
 from exit_manager import should_trail_stop, adjust_profit_protection, should_exit_by_time, detect_momentum_surge, calculate_exit_tranches
 from sl_tp_utils import evaluate_score_exit
 
+log(f"🔍 monitor.py loaded - active_trades id: {id(active_trades)}")
+
 
 # FIXED PERCENTAGES for SL/TP - Add this after the imports
 FIXED_PERCENTAGES = {
