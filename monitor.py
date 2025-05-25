@@ -578,6 +578,10 @@ async def update_stop_loss_order(symbol, trade, new_sl_price):
             trade["sl_order_id"] = sl_resp.get("result", {}).get("orderId")
             trade["trailing_sl"] = new_sl_price
             
+            # IMPORTANT: Mark that we've set trailing SL after TP1
+            if trade.get("tp1_hit") and not trade.get("breakeven_set"):
+                trade["breakeven_set"] = True
+            
             await send_telegram_message(f"🔐 <b>SL Updated</b> for {symbol} | New SL: {new_sl_price}")
             log(f"🔐 SL updated for {symbol} to {new_sl_price}")
             write_log(f"SL UPDATED: {symbol} | New SL: {new_sl_price}")
@@ -597,9 +601,10 @@ async def check_and_restore_sl(symbol, trade):
     if not trade or trade.get("exited") or not trade.get("qty"):
         return
     
-    # Skip if this is a trailing stop that's being actively managed
-    if trade.get("tp1_hit") and trade.get("trailing_sl"):
-        # Don't restore if we have an active trailing stop
+    # FIXED: Skip if TP1 has been hit - we're now managing SL differently
+    if trade.get("tp1_hit"):
+        # After TP1, we manage SL as trailing stop or breakeven
+        # Don't try to restore the original SL
         return
     
     # Skip if we checked recently (within 5 minutes)
