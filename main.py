@@ -5,7 +5,7 @@ from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence, has_pump_potential
 from telegram_bot import send_telegram_message, format_trade_signal, send_error_to_telegram
-from trend_filters import get_trend_context
+from trend_filters import get_trend_context_cached
 from signal_memory import log_signal, is_duplicate_signal
 from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING
 from performance_tracker import track_signal
@@ -373,7 +373,7 @@ def is_short_favorable(candles_by_tf, trend_context):
     return True
 
 async def scan_for_new_signals(symbols):
-    trend_context = await get_trend_context()
+    trend_context = await get_trend_context_cached()
     regime = trend_context.get("regime", "trending")
 
     # Adjust score thresholds based on regime
@@ -406,7 +406,7 @@ async def scan_for_new_signals(symbols):
             continue
 
         # ---- Primary strategy scoring ----
-        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf)
+        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf, trend_context)
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
