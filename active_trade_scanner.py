@@ -50,6 +50,9 @@ FIXED_PERCENTAGES = {
     }
 }
 
+_last_save_time = 0
+_save_cooldown = 5  # 5 seconds between saves
+
 def load_active_trades_directly():
     """Load active trades directly from file, bypassing potential import issues"""
     global _active_trades_cache, _cache_timestamp
@@ -91,7 +94,15 @@ def load_active_trades_directly():
         return {}
 
 def save_active_trades_directly(trades):
-    """Save active trades directly to file"""
+    """Save active trades directly to file with debouncing"""
+    global _last_save_time
+    
+    # Check if we saved recently
+    current_time = time.time()
+    if current_time - _last_save_time < _save_cooldown:
+        log(f"🔄 HF SCANNER: Skipping save (cooldown active)")
+        return
+    
     try:
         # Load existing trades first to avoid overwriting
         existing_trades = {}
@@ -103,8 +114,11 @@ def save_active_trades_directly(trades):
         existing_trades.update(trades)
         
         with open(PERSIST_PATH, 'w') as f:
-            json.dump(existing_trades, f, indent=2, default=str)
-            
+            json.dump(existing_trades, f, indent=2)
+        
+        # Update last save time
+        _last_save_time = current_time
+        
         # Clear cache to force reload
         global _active_trades_cache, _cache_timestamp
         _active_trades_cache = {}
@@ -341,6 +355,7 @@ async def process_active_trade(symbol, trade, live_candles):
             trade["break_even_triggered"] = True
             trade["tp1_hit_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             trade["let_winners_run_active"] = True
+            trade["modified"] = True  # Mark as modified
             
             # IMPORTANT: Set the fixed trailing percentage for immediate activation
             trade["trailing_pct"] = trailing_pct  # Use the fixed value
@@ -427,7 +442,7 @@ async def process_active_trade(symbol, trade, live_candles):
             if should_update:
                 sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
                 if sl_updated:
-                    save_active_trades_directly({symbol: trade})
+                    trade["modified"] = True
                     
         except Exception as e:
             log(f"❌ HF SCANNER: Error updating trailing SL for {symbol}: {e}", level="ERROR")
@@ -534,83 +549,57 @@ async def high_frequency_scanner(live_candles):
     await asyncio.sleep(10)
     
     consecutive_empty_checks = 0
-    max_empty_checks = 10  # Log warning after 10 consecutive empty checks
+    max_empty_checks = 10
     
     while True:
         start_time = time.time()
+        trades_to_save = {}  # Collect all trades that need saving
         
         try:
-            # First try to get trades from monitor module
-            if monitor_active_trades:
-                log(f"📊 HF SCANNER: Using monitor's active_trades: {len(monitor_active_trades)} trades")
-                active_trades = dict(monitor_active_trades)  # Make a copy
-            else:
-                # Fall back to loading from file
-                active_trades = load_active_trades_directly()
+            # Load active trades
+            active_trades = load_active_trades_directly()
             
             # Filter to only non-exited trades
             active_symbols = [symbol for symbol, trade in active_trades.items() 
                             if not trade.get("exited", False)]
             
             if active_symbols:
-                consecutive_empty_checks = 0  # Reset counter
+                consecutive_empty_checks = 0
                 
-                # Process trades in small batches to avoid rate limits
+                # Process trades in small batches
                 for i in range(0, len(active_symbols), MAX_CONCURRENT_CHECKS):
                     batch = active_symbols[i:i+MAX_CONCURRENT_CHECKS]
-                    tasks = []
                     
                     for symbol in batch:
                         if symbol in active_trades:
-                            tasks.append(process_active_trade(symbol, active_trades[symbol], live_candles))
+                            # Process the trade
+                            await process_active_trade(symbol, active_trades[symbol], live_candles)
+                            
+                            # If trade was modified, add to save batch
+                            if active_trades[symbol].get("modified"):
+                                trades_to_save[symbol] = active_trades[symbol]
+                                active_trades[symbol].pop("modified", None)
                     
-                    if tasks:
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Small delay between batches to avoid rate limits
+                    # Small delay between batches
                     if i + MAX_CONCURRENT_CHECKS < len(active_symbols):
                         await asyncio.sleep(0.5)
-                        
+                
+                # Save all modified trades at once
+                if trades_to_save:
+                    save_active_trades_directly(trades_to_save)
+                    
                 log(f"⚡ HF SCANNER: Processed {len(active_symbols)} active trades")
                 
-                # Save any updated trades back to file
-                updated_trades = {symbol: active_trades[symbol] for symbol in active_symbols 
-                                if symbol in active_trades}
-                if updated_trades:
-                    save_active_trades_directly(updated_trades)
-                    
             else:
                 consecutive_empty_checks += 1
-                
                 if consecutive_empty_checks == 1:
                     log("⚡ HF SCANNER: No active trades to monitor")
-                elif consecutive_empty_checks >= max_empty_checks:
-                    log(f"⚠️ HF SCANNER: No active trades found for {consecutive_empty_checks} consecutive checks. "
-                        f"File exists: {os.path.exists(PERSIST_PATH)}", level="WARN")
                     
-                    # Try to debug the file contents
-                    if os.path.exists(PERSIST_PATH):
-                        try:
-                            with open(PERSIST_PATH, 'r') as f:
-                                content = f.read()
-                                if content.strip():
-                                    trades_data = json.loads(content)
-                                    total_trades = len(trades_data)
-                                    exited_trades = sum(1 for t in trades_data.values() if t.get("exited", False))
-                                    log(f"📊 HF SCANNER: File contains {total_trades} total trades, {exited_trades} exited, {total_trades - exited_trades} should be active")
-                                else:
-                                    log("📊 HF SCANNER: Trade file is empty")
-                        except Exception as e:
-                            log(f"📊 HF SCANNER: Error reading trade file: {e}")
-                    
-                    # Reset counter to avoid spam
-                    consecutive_empty_checks = 0
-        
         except Exception as e:
             log(f"❌ HF SCANNER: Error in high-frequency scanner: {e}", level="ERROR")
             log(traceback.format_exc(), level="ERROR")
         
-        # Calculate elapsed time and adjust sleep to maintain consistent interval
+        # Calculate elapsed time and adjust sleep
         elapsed = time.time() - start_time
         sleep_time = max(0.1, ACTIVE_SCAN_INTERVAL - elapsed)
         
