@@ -939,17 +939,6 @@ async def verify_all_sl_on_startup():
     
     log("✅ Startup SL verification complete")
 
-async def test_btc_trend():
-    """Test BTC trend detection"""
-    from trend_filters import get_trend_context
-    context = await get_trend_context()
-    print(f"BTC Trend Test Results: {context}")
-    
-# Run it once on startup
-if __name__ == "__main__":
-    # Add this before your main loop
-    asyncio.run(test_btc_trend())
-
 async def run_bot():
     log("🚀 Bot starting...")
     await fetch_symbol_info()
