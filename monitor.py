@@ -733,6 +733,16 @@ async def monitor_trades(live_candles):
                     trade["tp1_hit_cycle"] = trade.get("cycles", 0)
                     trade["break_even_triggered"] = True
                     trade["tp1_price"] = tp1_level  # Store the actual TP1 level that was hit
+
+                    trade_type = trade.get("trade_type", "Intraday")
+                    if trade_type == "Scalp":
+                        trade["trailing_pct"] = 0.4  # Fixed 0.4% for Scalp
+                    elif trade_type == "Intraday":
+                        trade["trailing_pct"] = 1.0  # Fixed 1.0% for Intraday
+                    else:
+                        trade["trailing_pct"] = 1.5  # Keep existing for Swing
+    
+                    log(f"🎯 TP1 Hit - Trailing will activate immediately with {trade['trailing_pct']}%")
                     
                     # Execute partial exit with improved retry logic
                     if not trade.get("tp1_partial_exit"):
@@ -810,7 +820,8 @@ async def monitor_trades(live_candles):
                         entry_price=entry_price,
                         current_price=current_price,
                         direction=direction,
-                        candles=candles
+                        candles=candles,
+                        trailing_pct=trailing_pct
                     )
         
                     # Update trailing stop if valid
