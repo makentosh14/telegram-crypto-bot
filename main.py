@@ -43,6 +43,7 @@ from risk_manager import load_risk_state, update_risk_metrics
 from symbol_utils import get_symbol_category
 from ai_memory import periodic_cleanup
 from volume import is_volume_spike, get_average_volume
+from indicator_fixes import rebalance_indicator_scores, analyze_volume_direction
 
 load_memory()
 
@@ -409,6 +410,7 @@ async def scan_for_new_signals(symbols):
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
+        indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
 
         # Enhanced pattern detection
         pattern = extract_last_pattern_enhanced(candles_by_tf)
