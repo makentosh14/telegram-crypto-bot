@@ -394,8 +394,7 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         if tp1_pct is None:
             tp1_pct = fixed_params["tp1_pct"]
 
-    log(f"📊 HF SCANNER: {symbol} using {trade_type} percentages - TP1: {tp1_pct}%, Trailing: {trailing_pct}%")
-    log(f"   Original trade_type from data: '{trade.get('trade_type')}'")                     
+    log(f"📊 HF SCANNER: {symbol} using {trade_type} percentages - TP1: {tp1_pct}%, Trailing: {trailing_pct}%")                    
                                                 
     active_trades[symbol] = {
         "score_history": [initial_score],
