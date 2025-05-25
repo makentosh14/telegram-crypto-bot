@@ -189,6 +189,13 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
     Calculate FIXED SL/TP percentages as requested
     Returns exactly what you specified for Scalp and Intraday trades
     """
+
+    # Normalize trade type
+    trade_type = str(trade_type).strip().title()
+    if trade_type not in ["Scalp", "Intraday", "Swing"]:
+        log(f"⚠️ Invalid trade type '{trade_type}', defaulting to Intraday", level="WARN")
+        trade_type = "Intraday"
+        
     # Get the fixed percentages for this trade type
     fixed_params = FIXED_SL_TP.get(trade_type, FIXED_SL_TP["Intraday"])
     
