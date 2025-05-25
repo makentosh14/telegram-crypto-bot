@@ -386,10 +386,12 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         sl_pct *= 1.3  # Slightly wider stops in ranging markets
 
     # Calculate TP based on risk-reward ratio that varies with trade type AND regime
+    if trade_type == "Scalp":
+        tp1_pct = 1.2  # Fixed 1.2% TP for scalps
+    else:
     # Using higher TP targets to catch larger pumps
     base_tp_ratios = {
-        "Scalp": 2.0,      # 2.0:1 reward-to-risk for scalps (increased from 1.5)
-        "Intraday": 2.5,   # 2.5:1 for intraday (increased from 1.8)
+        "Intraday": 1.8,   # 2.5:1 for intraday (increased from 1.8)
         "Swing": 3.0       # 3.0:1 for swing trades (increased from 2.2)
     }
     
