@@ -147,7 +147,6 @@ def save_active_trades():
             json.dump(trades_to_save, f, indent=2)
             
         # Then rename the temp file to the actual file (atomic operation)
-        import os
         if os.path.exists(PERSIST_PATH):
             os.replace(temp_path, PERSIST_PATH)
         else:
