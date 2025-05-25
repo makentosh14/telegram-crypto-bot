@@ -13,7 +13,7 @@ MAX_SL_ATR_FACTOR = 3.2       # Maximum ATR factor (3.2x - was 3.0x)
 
 # Target risk-reward ratios by trade type - UPDATED
 TARGET_RR_RATIOS = {
-    "Scalp": 1.2,             # Was 1.5
+    "Scalp": 1.5,             # Was 1.5
     "Intraday": 1.5,          # Was 2.0
     "Swing": 1.8,             # Was 2.5
     "mean_reversion": 1.4,    # Was 1.8
@@ -22,7 +22,7 @@ TARGET_RR_RATIOS = {
 
 # Trailing stop activation thresholds - UPDATED  
 TRAILING_ACTIVATION_THRESHOLDS = {
-    "Scalp": 1.5,      # Start trailing at 1.5% for scalps
+    "Scalp": 0.3,      # Start trailing at 1.5% for scalps
     "Intraday": 2.0,   # Start trailing at 2.0% for intraday
     "Swing": 2.5       # Keep 2.5% for swings
 }
@@ -210,8 +210,8 @@ def calculate_dynamic_sl_tp(candles_by_tf, entry_price, trade_type, direction, s
         if not candles or len(candles) < 30:
             # FIXED: More reasonable default percentages for crypto
             sl_pct = {
-                "Scalp": 2.0,
-                "Intraday": 2.5, 
+                "Scalp": 0.8,
+                "Intraday": 1.5, 
                 "Swing": 3.0
             }.get(trade_type, 2.5)
             
