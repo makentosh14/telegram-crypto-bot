@@ -47,16 +47,12 @@ _monitor_save_cooldown = 5  # 5 seconds
 _sl_check_timestamps = {}  # Track when we last checked SL for each symbol
 _sl_creation_locks = {}    # Prevent concurrent SL operations
 _active_sl_operations = set()  # Track ongoing SL operations
+SL_CREATION_TRACKER = {}  # Track when SL was last created for each symbol
 
 # Add these constants
 SL_CHECK_COOLDOWN = 300  # 5 minutes between SL checks per symbol
 SL_CREATION_COOLDOWN = 60  # 1 minute cooldown after creating SL
 MONITOR_INTERVAL = 5  # Main monitor loop interval
-
-# Add these new globals after the existing ones (around line 20-30)
-_sl_check_timestamps = {}  # Track when we last checked SL for each symbol
-_sl_creation_locks = {}    # Prevent concurrent SL operations
-_active_sl_operations = set()  # Track ongoing SL operations
 
 # Add these constants
 SL_CHECK_COOLDOWN = 300  # 5 minutes between SL checks per symbol
@@ -611,6 +607,13 @@ async def check_and_restore_sl(symbol, trade):
     # Skip if trade is exited or missing critical data
     if not trade or trade.get("exited") or not trade.get("qty"):
         return False
+
+    # CRITICAL: Skip if we already have a valid SL
+    if trade.get("sl_verified_at"):
+        # Check if verification is recent (within 30 minutes)
+        verified_time = datetime.strptime(trade["sl_verified_at"], "%Y-%m-%d %H:%M:%S")
+        if (datetime.utcnow() - verified_time).total_seconds() < 1800:  # 30 minutes
+            return True  # SL is recently verified, skip
     
     # Skip if we're already processing SL for this symbol
     if symbol in _active_sl_operations:
@@ -621,8 +624,14 @@ async def check_and_restore_sl(symbol, trade):
     current_time = time.time()
     last_check = _sl_check_timestamps.get(symbol, 0)
     
-    if current_time - last_check < SL_CHECK_COOLDOWN:
+    if current_time - last_check < 1800:
         return False  # Too soon to check again
+
+    # Check if we created SL recently
+    last_creation = SL_CREATION_TRACKER.get(symbol, 0)
+    if current_time - last_creation < 3600:  # 1 hour cooldown after creation
+        log(f"⏳ {symbol}: SL created recently, skipping check")
+        return False
     
     # Update check timestamp
     _sl_check_timestamps[symbol] = current_time
@@ -636,18 +645,6 @@ async def check_and_restore_sl(symbol, trade):
             log(f"📌 {symbol}: TP1 hit, using trailing stop management")
             return False
         
-        # Skip if trade is very new (give it 30 seconds to settle)
-        trade_timestamp = trade.get("timestamp")
-        if trade_timestamp:
-            try:
-                trade_dt = datetime.strptime(trade_timestamp, "%Y-%m-%d %H:%M:%S")
-                trade_age = (datetime.utcnow() - trade_dt).total_seconds()
-                if trade_age < 30:
-                    log(f"⏳ {symbol}: Trade too new ({trade_age:.0f}s), skipping SL check")
-                    return False
-            except:
-                pass
-        
         sl_order_id = trade.get("sl_order_id")
         
         # First, check if we already have active SL orders on exchange
@@ -655,6 +652,7 @@ async def check_and_restore_sl(symbol, trade):
         if existing_sl:
             log(f"✅ {symbol}: Active SL order found on exchange")
             # Update our records if we don't have the order ID
+            trade["sl_verified_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             if not sl_order_id:
                 trade["sl_order_id"] = "external_sl"  # Mark that SL exists
                 save_active_trades()
@@ -666,12 +664,14 @@ async def check_and_restore_sl(symbol, trade):
                 sl_exists = await check_order_exists(sl_order_id, symbol)
                 if sl_exists:
                     log(f"✅ {symbol}: SL order {sl_order_id} verified")
+                    trade["sl_verified_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    save_active_trades()
                     return True
             except Exception as e:
                 log(f"⚠️ Error checking SL order existence: {e}", level="WARN")
         
         # If we get here, we need to create/restore the SL
-        log(f"🛡️ {symbol}: Creating stop loss order")
+        log(f"🛡️ {symbol}: Creating stop loss order (first time or recovery)")
         
         direction = trade.get("direction", "").lower()
         qty = trade.get("qty")
@@ -715,6 +715,10 @@ async def check_and_restore_sl(symbol, trade):
     except Exception as e:
         log(f"❌ Error in SL check for {symbol}: {e}", level="ERROR")
         return False
+
+        # After successful creation, update tracker
+        SL_CREATION_TRACKER[symbol] = current_time
+
     finally:
         # Remove from active operations
         _active_sl_operations.discard(symbol)
@@ -956,7 +960,7 @@ async def monitor_trades(live_candles):
             # 1. SL Check (only if needed and not too frequent)
             if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
                 # Only check SL periodically, not every cycle
-                if trade["cycles"] % 12 == 0:  # Every 60 seconds (5s * 12)
+                if trade["cycles"] % 360 == 0:  # Every 60 seconds (5s * 12)
                     await check_and_restore_sl(symbol, trade)
             
             # 2. Calculate score for monitoring
