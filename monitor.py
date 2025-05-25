@@ -40,6 +40,9 @@ FIXED_PERCENTAGES = {
     }
 }
 
+_last_monitor_save = 0
+_monitor_save_cooldown = 5  # 5 seconds
+
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
@@ -116,6 +119,14 @@ def log_trailing_event(symbol, event_type, data):
 
 def save_active_trades():
     """Save active trades data with backup and atomic write protections"""
+    global _last_monitor_save
+    
+    # Debounce saves
+    current_time = time.time()
+    if current_time - _last_monitor_save < _monitor_save_cooldown:
+        log(f"🔄 Skipping save (cooldown active)")
+        return
+        
     try:
         log(f"💾 Saving {len(active_trades)} active trades to file...")
         
