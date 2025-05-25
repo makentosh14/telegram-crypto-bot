@@ -236,6 +236,27 @@ async def process_active_trade(symbol, trade, live_candles):
     direction = trade.get("direction", "").lower()
     entry_price = trade.get("entry_price")
     trade_type = trade.get("trade_type", "Intraday")
+    trade_type_normalized = trade_type.strip().title()
+    trade_type_normalized = trade_type.strip().title()  # Convert to Title Case
+
+    # Map common variations
+    trade_type_map = {
+        "Scalp": "Scalp",
+        "Scalping": "Scalp",
+        "Intraday": "Intraday",
+        "Intra": "Intraday",
+        "Day": "Intraday",
+        "Swing": "Swing",
+        "Position": "Swing"
+    }
+
+    # Get the correct trade type
+    trade_type = trade_type_map.get(trade_type_normalized, trade_type_normalized)
+
+    # Validate trade type
+    if trade_type not in ["Scalp", "Intraday", "Swing"]:
+        log(f"⚠️ HF SCANNER: Invalid trade type '{trade.get('trade_type')}' for {symbol}, defaulting to Intraday")
+        trade_type = "Intraday"  # Default to Intraday instead of Scalp
     
     if not direction or not entry_price:
         return
