@@ -372,8 +372,7 @@ def is_short_favorable(candles_by_tf, trend_context):
     
     return True
 
-async def scan_for_new_signals(symbols):
-    trend_context = await get_trend_context_cached()
+async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
 
     # Adjust score thresholds based on regime
@@ -985,7 +984,8 @@ async def run_bot():
 
     while True:
         try:
-            await scan_for_new_signals(symbols)
+            trend_context = await get_trend_context_cached()  # ✅ Define it here
+            await scan_for_new_signals(symbols, trend_context)
             await send_daily_report()
         except Exception as e:
             log(f"❌ Error in main loop: {e}", level="ERROR")
