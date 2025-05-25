@@ -618,6 +618,17 @@ async def check_and_restore_sl(symbol, trade):
         except:
             pass
     
+    # NEW: Skip if trade was just created (within 30 seconds)
+    trade_timestamp = trade.get("timestamp")
+    if trade_timestamp:
+        try:
+            trade_dt = datetime.strptime(trade_timestamp, "%Y-%m-%d %H:%M:%S")
+            trade_age = (datetime.utcnow() - trade_dt).total_seconds()
+            if trade_age < 30:  # Give 30 seconds for SL to be placed
+                return
+        except:
+            pass
+    
     sl_order_id = trade.get("sl_order_id")
     
     # Only proceed if we don't have an SL order ID
