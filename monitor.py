@@ -371,6 +371,12 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     Track a new active trade with enhanced exit strategy parameters
     """
     global active_trades  # Ensure we're using the global variable
+
+    # Validate and normalize trade type
+    valid_trade_types = ["Scalp", "Intraday", "Swing"]
+    if trade_type not in valid_trade_types:
+        log(f"⚠️ Invalid trade type '{trade_type}' for {symbol}, defaulting to Intraday", level="WARN")
+        trade_type = "Intraday"                      
     
     log(f"🔍 TRACK_ACTIVE_TRADE called for {symbol}")
     log(f"   Entry: {entry_price}, Direction: {direction}, Qty: {qty}")
@@ -391,6 +397,9 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         trailing_pct = fixed_params["trailing_pct"]
         if tp1_pct is None:
             tp1_pct = fixed_params["tp1_pct"]
+
+     log(f"📊 HF SCANNER: {symbol} using {trade_type} percentages - TP1: {tp1_pct}%, Trailing: {trailing_pct}%")
+     log(f"   Original trade_type from data: '{trade.get('trade_type')}'")                     
                                                 
     active_trades[symbol] = {
         "score_history": [initial_score],
