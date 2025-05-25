@@ -901,6 +901,10 @@ async def run_bot():
     asyncio.create_task(update_risk_metrics())
 
     load_active_trades()
+    
+    if len(active_trades) == 0:
+        await recover_active_trades_from_exchange()
+        
     asyncio.create_task(stream_candles(symbols))
     asyncio.create_task(monitor_loop())
     asyncio.create_task(pattern_discovery_loop(symbols))
