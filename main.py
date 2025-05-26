@@ -677,6 +677,7 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
             write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
 
+        if trade_type is not None:    
             track_active_trade(
                 symbol=symbol,
                 trade_type=trade_type,
@@ -693,6 +694,8 @@ async def scan_for_new_signals(symbols,trend_context):
                 exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
                 has_pump_potential=pump_potential  # Pass pump potential flag
             )
+        else:
+            log(f"⚠️ Skipping trade tracking for {symbol} — trade_type was not set", level="WARNING")    
 
         from auto_reentry import cooldown_exits, exit_history
     
