@@ -150,10 +150,6 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
         valid = (aligned_timeframes >= 1 and  # At least 1 higher timeframe aligned
                 (has_strong_pattern or has_supertrend or has_ema) and  # Need at least one strong indicator
                 (trend_aligned or has_volume_support))  # Either trend aligned or volume support
-
-    if trade_type == "Swing" and not has_strong_swing_conditions(...):
-        log(f"⛔ Swing trade failed advanced validation for {symbol}")
-        return
     
     # Log detailed validation results for debugging
     log(f"🔍 Swing validation for {direction} trade: " +
