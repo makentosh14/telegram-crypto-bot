@@ -463,6 +463,18 @@ async def handle_post_tp1_momentum(symbol, trade, current_price, candles):
                         f"50% of remaining position exited during pump\n"
                         f"Move: +{pump_move_pct:.2f}% beyond TP1"
                     )
+
+                    # Reentry integration logging
+                    if "entry_price" in trade:
+                    entry_price = trade["entry_price"]
+                    direction = trade["direction"].lower()
+                    if direction == "long":
+                        profit_pct = ((current_price - entry_price) / entry_price) * 100
+                    else:
+                        profit_pct = ((entry_price - current_price) / entry_price) * 100
+
+                    log_exit(symbol, trade, price=current_price, reason="TP2_Momentum", profit_pct=profit_pct)
+                    update_reentry_performance(symbol, success=(profit_pct > 0), profit_pct=profit_pct)
                     
                     log(f"💰 Second partial exit executed for {symbol} during pump")
                     write_log(f"SECOND EXIT: {symbol} | Price: {current_price} | Pump: {pump_move_pct:.2f}%")
