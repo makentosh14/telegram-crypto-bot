@@ -9,19 +9,19 @@ from error_handler import send_telegram_message, send_error_to_telegram
 # FIXED PERCENTAGES AS REQUESTED
 FIXED_SL_TP = {
     "Scalp": {
-        "sl_pct": 0.8,       # -0.8% stop loss
-        "tp1_pct": 1.2,      # +1.2% take profit
+        "sl_pct": 0.5,       # -0.8% stop loss
+        "tp1_pct": 1.0,      # +1.2% take profit
         "trailing_pct": 0.4  # 0.4% trailing stop
     },
     "Intraday": {
-        "sl_pct": 1.0,       # -1.0% stop loss
-        "tp1_pct": 2.0,      # +2.0% take profit
-        "trailing_pct": 1.0  # 1.0% trailing stop
+        "sl_pct": 0.8,       # -1.0% stop loss
+        "tp1_pct": 1.8,      # +2.0% take profit
+        "trailing_pct": 0.6  # 1.0% trailing stop
     },
     "Swing": {
-        "sl_pct": 2.0,       # Keep existing for swing
-        "tp1_pct": 5.0,      # Keep existing for swing
-        "trailing_pct": 1.5  # Keep existing for swing
+        "sl_pct": 1.5,       # Keep existing for swing
+        "tp1_pct": 3.5,      # Keep existing for swing
+        "trailing_pct": 0.8  # Keep existing for swing
     }
 }
 
