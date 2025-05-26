@@ -990,7 +990,7 @@ async def monitor_trades(live_candles):
             # 5. Check for SL hit (before TP1)
             if not trade.get("tp1_hit") and trade.get("original_sl"):
                 if check_sl_hit(trade, current_price, direction):
-                    await handle_sl_hit(symbol, trade, current_price, score, tf_scores, used_list)
+                    log_exit(symbol, trade, reason="SL Hit", price=current_price)
                     continue
             
             # 6. Check for trailing SL hit (after TP1)
