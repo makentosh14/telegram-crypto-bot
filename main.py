@@ -694,8 +694,8 @@ async def scan_for_new_signals(symbols,trend_context):
                     exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
                     has_pump_potential=pump_potential  # Pass pump potential flag
                 )
-            else:
-                log(f"⚠️ Skipping track_active_trade for {symbol}: trade_type not defined", level="WARNING")
+        else:
+            log(f"⚠️ Skipping track_active_trade for {symbol}: trade_type not defined", level="WARNING")
 
 
         from auto_reentry import cooldown_exits, exit_history
