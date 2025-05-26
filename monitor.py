@@ -1049,7 +1049,7 @@ async def monitor_trades(live_candles):
             if trade.get("tp1_hit") and trade.get("trailing_sl"):
                 if check_trailing_sl_hit(trade, current_price, direction):
                     if ENABLE_AUTO_REENTRY:
-                        await handle_any_exit(symbol, trade, current_price, "Trailing_SL", score)
+                        await log_exit_for_reentry(symbol, trade, current_price, "Trailing_SL")
                     
                     await handle_trailing_sl_hit(symbol, trade, current_price, score, tf_scores, used_list)
                     continue
@@ -1058,7 +1058,7 @@ async def monitor_trades(live_candles):
             if trade["cycles"] % 60 == 0:
                 if should_exit_by_time(trade, datetime.utcnow(), candles_by_tf.get('1'), current_price):
                     if ENABLE_AUTO_REENTRY:
-                        await handle_any_exit(symbol, trade, current_price, "Time_Exit", score)
+                        await log_exit_for_reentry(symbol, trade, current_price, "Time_Exit")
                     
                     await handle_time_exit(symbol, trade, current_price, score, tf_scores, used_list)
                     continue
