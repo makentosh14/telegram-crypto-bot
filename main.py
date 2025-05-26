@@ -518,7 +518,7 @@ async def scan_for_new_signals(symbols,trend_context):
                 recent_swing_trades[symbol] = current_time
 
             if trade_type == "Swing":
-                if trend_context.get("regime") != "trending" or trend_context.get("altseason") != "likely":
+                if trend_context.get("regime") != "trending" or trend_context.get("altseason") not in ["confirmed", "strong_altseason"]:
                     log(f"🚫 Skipping Swing setup for {symbol} — market not trending or altseason not confirmed")
                     continue
                     
@@ -1101,7 +1101,16 @@ async def run_bot():
 
     while True:
         try:
-            trend_context = await get_trend_context_cached()  # ✅ Define it here
+            trend_context = await get_trend_context_cached()# ✅ Define it here
+
+            if trend_context.get("altseason") == "strong_altseason":
+                ENABLE_MEME_SCANNER = True
+                SCAN_SPEED = 3
+                log("🚀 Strong altseason detected — enabling meme pump mode and faster scans")
+            else:
+                ENABLE_MEME_SCANNER = False
+                SCAN_SPEED = 5
+                
             await scan_for_new_signals(symbols, trend_context)
             await send_daily_report()
         except Exception as e:
@@ -1110,13 +1119,6 @@ async def run_bot():
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(0.5)
 
-     if trend_context.get("altseason") == "strong_altseason":
-         ENABLE_MEME_SCANNER = True
-         SCAN_SPEED = 3
-         log("🚀 Strong altseason detected — enabling meme pump mode and faster scans")
-     else:
-         ENABLE_MEME_SCANNER = False
-         SCAN_SPEED = 5
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
