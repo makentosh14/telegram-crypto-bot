@@ -153,7 +153,7 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
 
     if trade_type == "Swing" and not has_strong_swing_conditions(...):
         log(f"⛔ Swing trade failed advanced validation for {symbol}")
-        continue
+        return
     
     # Log detailed validation results for debugging
     log(f"🔍 Swing validation for {direction} trade: " +
@@ -222,7 +222,7 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
             return False
             
         if not validate_short_signal(symbol, candles_by_tf, trend_context, indicator_scores):
-            continue
+            return False
     
     
     return True
