@@ -128,16 +128,7 @@ async def handle_any_exit(symbol, trade, exit_price, exit_reason, score=None):
         profit_pct = ((entry_price - exit_price) / entry_price) * 100
     
     # Log exit for reentry system
-    log_exit(
-        symbol=symbol,
-        trade=trade,
-        price=exit_price,
-        reason=exit_reason,
-        profit_pct=profit_pct
-    )
-    
-    # Update reentry performance
-    update_reentry_performance(symbol, profit_pct > 0, profit_pct)
+    await log_exit_for_reentry(symbol, trade, exit_price, exit_reason)
     
     log(f"📤 Exit logged for reentry: {symbol} | Reason: {exit_reason} | Profit: {profit_pct:.2f}%")
 
