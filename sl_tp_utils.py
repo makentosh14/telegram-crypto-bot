@@ -15,7 +15,7 @@ FIXED_SL_TP = {
     },
     "Intraday": {
         "sl_pct": 0.8,       # -1.0% stop loss
-        "tp1_pct": 1.8,      # +2.0% take profit
+        "tp1_pct": 1.5,      # +2.0% take profit
         "trailing_pct": 0.6  # 1.0% trailing stop
     },
     "Swing": {
