@@ -220,6 +220,10 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
         if len(strong_bearish_indicators) < 2:
             log(f"⚠️ {symbol}: Short trade needs at least 2 strong bearish indicators, found {len(strong_bearish_indicators)}")
             return False
+            
+        if not validate_short_signal(symbol, candles_by_tf, trend_context, indicator_scores):
+            continue
+    
     
     return True
 
@@ -1079,6 +1083,7 @@ async def run_bot():
     asyncio.create_task(periodic_trade_sync())
     asyncio.create_task(periodic_performance_report())
     asyncio.create_task(cleanup_old_records())
+    asyncio.create_task(monitor_btc_trend_accuracy())
 
     await startup_cleanup()
 
