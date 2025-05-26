@@ -180,7 +180,8 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
             "Swing": 75
         }
     
-    if confidence < min_confidence.get(trade_type, 60):
+    if trade_type is not None:
+        if confidence < min_confidence.get(trade_type, 60):
         log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
         return False
     
