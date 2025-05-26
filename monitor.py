@@ -117,20 +117,9 @@ async def handle_any_exit(symbol, trade, exit_price, exit_reason, score=None):
     """Unified exit handler for reentry tracking"""
     if not ENABLE_AUTO_REENTRY:
         return
-        
-    direction = trade.get("direction", "").lower()
-    entry_price = trade.get("entry_price", 0)
-    
-    # Calculate profit percentage
-    if direction == "long":
-        profit_pct = ((exit_price - entry_price) / entry_price) * 100
-    else:
-        profit_pct = ((entry_price - exit_price) / entry_price) * 100
-    
-    # Log exit for reentry system
+
     await log_exit_for_reentry(symbol, trade, exit_price, exit_reason)
-    
-    log(f"📤 Exit logged for reentry: {symbol} | Reason: {exit_reason} | Profit: {profit_pct:.2f}%")
+
 
 async def periodic_trade_sync():
     """Periodically reload trades from file to ensure sync"""
