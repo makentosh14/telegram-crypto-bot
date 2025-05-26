@@ -447,12 +447,15 @@ async def scan_for_new_signals(symbols,trend_context):
             used_indicators.append("pump_potential")
 
         # Calculate risk percentage
+        market_season = trend_context.get("altseason", "no")
+
         if trade_type == "Scalp":
-            base_risk = 0.09
+            base_risk = 0.07 if market_season == "confirmed" else 0.09 if market_season == "strong_altseason" else 0.05
         elif trade_type == "Intraday":
-            base_risk = 0.06
-        else:
-            base_risk = 0.03
+            base_risk = 0.05 if market_season == "confirmed" else 0.06 if market_season == "strong_altseason" else 0.035
+        else:  # Swing
+            base_risk = 0.03 if market_season == "confirmed" else 0.04 if market_season == "strong_altseason" else 0.02
+
            
         # Determine strategy type for risk manager
         strategy = "core_strategy"
@@ -709,6 +712,12 @@ async def scan_for_new_signals(symbols,trend_context):
                 score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
                     symbol, candles_by_tf, market_context=trend_context
                 )
+
+                if trend_context.get("altseason") == "strong_altseason":
+                    score += 0.5
+                    log(f"🔥 Score boosted due to strong altseason: {symbol} → {score:.2f}")
+                elif trend_context.get("altseason") == "confirmed":
+                    score += 0.3
             
                 direction = determine_direction(tf_scores)
                 confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
@@ -1101,6 +1110,13 @@ async def run_bot():
             await send_error_to_telegram(traceback.format_exc())
         await asyncio.sleep(0.5)
 
+     if trend_context.get("altseason") == "strong_altseason":
+         ENABLE_MEME_SCANNER = True
+         SCAN_SPEED = 3
+         log("🚀 Strong altseason detected — enabling meme pump mode and faster scans")
+     else:
+         ENABLE_MEME_SCANNER = False
+         SCAN_SPEED = 5
 
 if __name__ == "__main__":
     log("🔧 DEBUG: main.py is running...")
