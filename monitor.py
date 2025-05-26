@@ -1579,9 +1579,8 @@ async def verify_trade_cleanup():
     for symbol, trade in list(active_trades.items()):
         if trade.get("exited", False):
             issues_found.append(f"{symbol} is marked as exited but still in active_trades")
-            # Remove it
             del active_trades[symbol]
-    
+
     if issues_found:
         log(f"⚠️ Found {len(issues_found)} trades that needed cleanup:", level="WARN")
         for issue in issues_found:
