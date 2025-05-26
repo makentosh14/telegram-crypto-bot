@@ -173,7 +173,7 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
             "Swing": 75
         }
     
-    if confidence < min_confidence.get(trade_type, 70):
+    if confidence < min_confidence.get(trade_type, 55):
         log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
         return False
     
@@ -534,7 +534,7 @@ async def scan_for_new_signals(symbols,trend_context):
         
         # Require higher confidence for shorts in neutral/bullish markets
         if direction == "Short" and market_sentiment != "bearish":
-            if confidence < 75:
+            if confidence < 70:
                 log(f"⚠️ Skipping {symbol}: Short confidence {confidence}% below 75% threshold")
                 continue
         
