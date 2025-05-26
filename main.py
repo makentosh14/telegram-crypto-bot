@@ -677,26 +677,22 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
             write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
 
-        if 'trade_type' in locals():
-                track_active_trade(
-                    symbol=symbol,
-                    trade_type=trade_type,
-                    initial_score=score,
-                    entry_price=trade['entry'],
-                    direction=direction,
-                    trailing_pct=trade.get("trailing_pct"),
-                    tp1_target=trade.get("tp1"),  # Store the actual TP1 price
-                    tp1_pct=tp1_pct,             # Store the TP1 percentage used
-                    tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
-                    sl=trade.get("sl"),
-                    qty=trade.get("qty"),
-                    sl_order_id=trade.get("sl_order_id"),
-                    exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
-                    has_pump_potential=pump_potential  # Pass pump potential flag
-                )
-        else:
-            log(f"⚠️ Skipping track_active_trade for {symbol}: trade_type not defined", level="WARNING")
-
+            track_active_trade(
+                symbol=symbol,
+                trade_type=trade_type,
+                initial_score=score,
+                entry_price=trade['entry'],
+                direction=direction,
+                trailing_pct=trade.get("trailing_pct"),
+                tp1_target=trade.get("tp1"),  # Store the actual TP1 price
+                tp1_pct=tp1_pct,             # Store the TP1 percentage used
+                tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
+                sl=trade.get("sl"),
+                qty=trade.get("qty"),
+                sl_order_id=trade.get("sl_order_id"),
+                exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
+                has_pump_potential=pump_potential  # Pass pump potential flag
+            )
 
         from auto_reentry import cooldown_exits, exit_history
     
