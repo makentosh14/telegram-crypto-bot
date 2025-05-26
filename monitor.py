@@ -90,6 +90,29 @@ TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% t
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
 
+async def log_exit_for_reentry(symbol, trade, price, reason):
+    """Unified async exit logger for reentry tracking"""
+    if not ENABLE_AUTO_REENTRY:
+        return
+
+    direction = trade.get("direction", "").lower()
+    entry_price = trade.get("entry_price", 0)
+
+    if not entry_price or not direction:
+        return
+
+    # Calculate profit percentage
+    if direction == "long":
+        profit_pct = ((price - entry_price) / entry_price) * 100
+    else:
+        profit_pct = ((entry_price - price) / entry_price) * 100
+
+    # Core logging and performance update
+    log_exit(symbol, trade, price=price, reason=reason, profit_pct=profit_pct)
+    update_reentry_performance(symbol, success=(profit_pct > 0), profit_pct=profit_pct)
+    log(f"📤 Reentry log: {symbol} | Reason: {reason} | Profit: {profit_pct:.2f}%")
+
+
 async def handle_any_exit(symbol, trade, exit_price, exit_reason, score=None):
     """Unified exit handler for reentry tracking"""
     if not ENABLE_AUTO_REENTRY:
@@ -1039,7 +1062,7 @@ async def monitor_trades(live_candles):
                     if ENABLE_AUTO_REENTRY:
                         await handle_any_exit(symbol, trade, current_price, "SL_Hit", score)
                     
-                    log_exit(symbol, trade, reason="SL Hit", price=current_price)
+                    await log_exit_for_reentry(symbol, trade, current_price, "SL_Hit")
                     continue
             
             # 6. Check for trailing SL hit (after TP1)
