@@ -8,6 +8,305 @@ from logger import log
 import numpy as np
 from collections import deque
 
+class AltseasonDetector:
+    """
+    Detects altseason conditions based on multiple metrics
+    """
+    
+    def __init__(self):
+        self.btc_dominance_history = deque(maxlen=30)
+        self.alt_performance_history = deque(maxlen=30)
+        self.is_altseason = False
+        self.altseason_strength = 0
+        
+    async def detect_altseason(self):
+        """
+        Detect if we're in altseason based on:
+        1. BTC dominance declining
+        2. Majority of alts outperforming BTC
+        3. Alt market cap increasing faster than BTC
+        4. Alt volume surge
+        """
+        
+        altseason_scores = {
+            'strong_altseason': 0,
+            'altseason': 0,
+            'neutral': 0,
+            'btc_season': 0
+        }
+        
+        analysis_details = {}
+        
+        # 1. Check alt performance vs BTC
+        alt_performance = await self._analyze_alt_performance()
+        altseason_scores[alt_performance['season']] += alt_performance['weight']
+        analysis_details['alt_performance'] = alt_performance
+        
+        # 2. Check volume distribution
+        volume_analysis = await self._analyze_volume_distribution()
+        altseason_scores[volume_analysis['season']] += volume_analysis['weight']
+        analysis_details['volume'] = volume_analysis
+        
+        # 3. Check momentum shift
+        momentum_shift = await self._analyze_momentum_shift()
+        altseason_scores[momentum_shift['season']] += momentum_shift['weight']
+        analysis_details['momentum'] = momentum_shift
+        
+        # 4. Check market breadth
+        breadth_analysis = await self._analyze_market_breadth()
+        altseason_scores[breadth_analysis['season']] += breadth_analysis['weight']
+        analysis_details['breadth'] = breadth_analysis
+        
+        # Determine final altseason status
+        total_score = sum(altseason_scores.values())
+        if total_score == 0:
+            season = 'neutral'
+            strength = 0
+        else:
+            season = max(altseason_scores.items(), key=lambda x: x[1])[0]
+            strength = altseason_scores[season] / total_score
+        
+        # Update state
+        self.is_altseason = season in ['altseason', 'strong_altseason']
+        self.altseason_strength = strength if self.is_altseason else 0
+        
+        # Log significant changes
+        if hasattr(self, 'last_season') and self.last_season != season:
+            log(f"🔄 Market Season Change: {self.last_season} → {season} (strength: {strength:.2f})")
+            
+            if season == 'strong_altseason':
+                try:
+                    from telegram_bot import send_telegram_message
+                    await send_telegram_message(
+                        f"🚀 <b>ALTSEASON DETECTED!</b>\n"
+                        f"Strength: {strength:.2%}\n"
+                        f"Alt coins showing strong outperformance vs BTC"
+                    )
+                except:
+                    pass
+        
+        self.last_season = season
+        
+        return {
+            'is_altseason': self.is_altseason,
+            'season': season,
+            'strength': strength,
+            'details': analysis_details
+        }
+    
+    async def _analyze_alt_performance(self):
+        """Check how many alts are outperforming BTC"""
+        
+        try:
+            # Top altcoins to check
+            alt_symbols = ["ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", 
+                          "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "MATICUSDT", 
+                          "DOTUSDT", "LINKUSDT", "UNIUSDT", "ATOMUSDT"]
+            
+            # Get BTC performance first
+            btc_resp = await signed_request("GET", "/v5/market/tickers", {
+                "category": "linear",
+                "symbol": "BTCUSDT"
+            })
+            
+            btc_perf_24h = 0
+            btc_perf_7d = 0
+            
+            if btc_resp.get("retCode") == 0:
+                btc_data = btc_resp.get("result", {}).get("list", [{}])[0]
+                btc_perf_24h = float(btc_data.get("price24hPcnt", 0)) * 100
+                
+            outperforming_24h = 0
+            outperforming_7d = 0
+            strong_performers = 0
+            total_checked = 0
+            
+            # Check each alt
+            for symbol in alt_symbols:
+                try:
+                    ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+                        "category": "linear",
+                        "symbol": symbol
+                    })
+                    
+                    if ticker_resp.get("retCode") == 0:
+                        ticker = ticker_resp.get("result", {}).get("list", [{}])[0]
+                        alt_perf_24h = float(ticker.get("price24hPcnt", 0)) * 100
+                        
+                        total_checked += 1
+                        
+                        # Check if outperforming BTC
+                        if alt_perf_24h > btc_perf_24h + 2:  # 2% outperformance threshold
+                            outperforming_24h += 1
+                            
+                        # Check for strong performers (>10% gain)
+                        if alt_perf_24h > 10:
+                            strong_performers += 1
+                            
+                except:
+                    continue
+            
+            # Calculate ratios
+            outperform_ratio = outperforming_24h / total_checked if total_checked > 0 else 0
+            strong_ratio = strong_performers / total_checked if total_checked > 0 else 0
+            
+            # Determine season based on performance
+            if outperform_ratio > 0.7 and strong_ratio > 0.3:
+                return {'season': 'strong_altseason', 'weight': 2.0, 'ratio': outperform_ratio}
+            elif outperform_ratio > 0.6:
+                return {'season': 'altseason', 'weight': 1.5, 'ratio': outperform_ratio}
+            elif outperform_ratio < 0.3:
+                return {'season': 'btc_season', 'weight': 1.5, 'ratio': outperform_ratio}
+            else:
+                return {'season': 'neutral', 'weight': 1.0, 'ratio': outperform_ratio}
+                
+        except Exception as e:
+            log(f"❌ Error analyzing alt performance: {e}", level="ERROR")
+            return {'season': 'neutral', 'weight': 0.5, 'ratio': 0.5}
+    
+    async def _analyze_volume_distribution(self):
+        """Analyze if volume is shifting to altcoins"""
+        
+        try:
+            # Get volume for BTC and major alts
+            symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
+            volumes = {}
+            
+            for symbol in symbols:
+                ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+                    "category": "linear",
+                    "symbol": symbol
+                })
+                
+                if ticker_resp.get("retCode") == 0:
+                    ticker = ticker_resp.get("result", {}).get("list", [{}])[0]
+                    volume_24h = float(ticker.get("volume24h", 0))
+                    volumes[symbol] = volume_24h
+            
+            if not volumes or "BTCUSDT" not in volumes:
+                return {'season': 'neutral', 'weight': 0.5}
+            
+            # Calculate BTC volume dominance
+            total_volume = sum(volumes.values())
+            btc_volume = volumes["BTCUSDT"]
+            btc_dominance = btc_volume / total_volume if total_volume > 0 else 0
+            
+            # Lower BTC dominance = altseason
+            if btc_dominance < 0.3:  # BTC less than 30% of volume
+                return {'season': 'strong_altseason', 'weight': 1.5, 'btc_dominance': btc_dominance}
+            elif btc_dominance < 0.4:
+                return {'season': 'altseason', 'weight': 1.2, 'btc_dominance': btc_dominance}
+            elif btc_dominance > 0.6:
+                return {'season': 'btc_season', 'weight': 1.2, 'btc_dominance': btc_dominance}
+            else:
+                return {'season': 'neutral', 'weight': 0.8, 'btc_dominance': btc_dominance}
+                
+        except Exception as e:
+            log(f"❌ Error analyzing volume distribution: {e}", level="ERROR")
+            return {'season': 'neutral', 'weight': 0.5}
+    
+    async def _analyze_momentum_shift(self):
+        """Check if momentum is shifting from BTC to alts"""
+        
+        try:
+            # Compare short-term momentum
+            timeframe = "15"  # 15-minute candles
+            limit = 20
+            
+            # Get BTC momentum
+            btc_kline = await signed_request("GET", "/v5/market/kline", {
+                "category": "linear",
+                "symbol": "BTCUSDT",
+                "interval": timeframe,
+                "limit": str(limit)
+            })
+            
+            btc_momentum = 0
+            if btc_kline.get("retCode") == 0:
+                candles = btc_kline.get("result", {}).get("list", [])
+                if len(candles) >= 10:
+                    # Calculate momentum
+                    closes = [float(c[4]) for c in candles[:10]]
+                    closes.reverse()
+                    btc_momentum = ((closes[-1] - closes[0]) / closes[0]) * 100
+            
+            # Get ETH momentum as alt proxy
+            eth_kline = await signed_request("GET", "/v5/market/kline", {
+                "category": "linear",
+                "symbol": "ETHUSDT",
+                "interval": timeframe,
+                "limit": str(limit)
+            })
+            
+            eth_momentum = 0
+            if eth_kline.get("retCode") == 0:
+                candles = eth_kline.get("result", {}).get("list", [])
+                if len(candles) >= 10:
+                    closes = [float(c[4]) for c in candles[:10]]
+                    closes.reverse()
+                    eth_momentum = ((closes[-1] - closes[0]) / closes[0]) * 100
+            
+            # Compare momentum
+            momentum_diff = eth_momentum - btc_momentum
+            
+            if momentum_diff > 2:  # ETH momentum 2% higher
+                return {'season': 'altseason', 'weight': 1.3, 'momentum_diff': momentum_diff}
+            elif momentum_diff < -2:  # BTC momentum 2% higher
+                return {'season': 'btc_season', 'weight': 1.3, 'momentum_diff': momentum_diff}
+            else:
+                return {'season': 'neutral', 'weight': 0.7, 'momentum_diff': momentum_diff}
+                
+        except Exception as e:
+            log(f"❌ Error analyzing momentum shift: {e}", level="ERROR")
+            return {'season': 'neutral', 'weight': 0.5}
+    
+    async def _analyze_market_breadth(self):
+        """Check how many alts are in uptrend"""
+        
+        try:
+            alt_symbols = ["ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", 
+                          "ADAUSDT", "DOGEUSDT", "AVAXUSDT", "MATICUSDT"]
+            
+            uptrending = 0
+            downtrending = 0
+            
+            for symbol in alt_symbols:
+                # Get daily candles
+                kline_resp = await signed_request("GET", "/v5/market/kline", {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "interval": "D",
+                    "limit": "10"
+                })
+                
+                if kline_resp.get("retCode") == 0:
+                    candles = kline_resp.get("result", {}).get("list", [])
+                    if len(candles) >= 5:
+                        # Simple trend check
+                        closes = [float(c[4]) for c in candles[:5]]
+                        closes.reverse()
+                        
+                        if closes[-1] > closes[0] * 1.05:  # 5% up
+                            uptrending += 1
+                        elif closes[-1] < closes[0] * 0.95:  # 5% down
+                            downtrending += 1
+            
+            total = len(alt_symbols)
+            uptrend_ratio = uptrending / total if total > 0 else 0
+            
+            if uptrend_ratio > 0.7:
+                return {'season': 'strong_altseason', 'weight': 1.5, 'uptrend_ratio': uptrend_ratio}
+            elif uptrend_ratio > 0.5:
+                return {'season': 'altseason', 'weight': 1.2, 'uptrend_ratio': uptrend_ratio}
+            elif uptrend_ratio < 0.3:
+                return {'season': 'btc_season', 'weight': 1.2, 'uptrend_ratio': uptrend_ratio}
+            else:
+                return {'season': 'neutral', 'weight': 0.8, 'uptrend_ratio': uptrend_ratio}
+                
+        except Exception as e:
+            log(f"❌ Error analyzing market breadth: {e}", level="ERROR")
+            return {'season': 'neutral', 'weight': 0.5}
+
 class BTCTrendAnalyzer:
     """
     Multi-timeframe BTC trend analyzer with multiple confirmation methods
@@ -418,6 +717,7 @@ class BTCTrendAnalyzer:
 
 # Global analyzer instance
 btc_analyzer = BTCTrendAnalyzer()
+altseason_detector = AltseasonDetector()
 
 async def get_btc_trend():
     """
@@ -554,11 +854,13 @@ async def get_trend_context():
         btc_trend_task = btc_analyzer.analyze_btc_trend()
         sentiment_task = get_market_sentiment()
         regime_task = detect_market_regime()
+        altseason_task = altseason_detector.detect_altseason()
         
         # Get BTC trend with full details
         btc_analysis = await btc_trend_task
         sentiment = await sentiment_task
         regime = await regime_task
+        altseason_analysis = await altseason_task
         
         # Map neutral to ranging for backward compatibility
         btc_trend = btc_analysis['trend']
@@ -572,12 +874,19 @@ async def get_trend_context():
             "btc_details": btc_analysis['details'],
             "sentiment": sentiment,
             "regime": regime,
+            "altseason": altseason_analysis['is_altseason'],
+            "altseason_strength": altseason_analysis['strength'],
+            "altseason_details": altseason_analysis['details'],
+            "market_season": altseason_analysis['season'],
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
         # Enhanced logging with confidence
+        season_str = f" | ALTSEASON ({altseason_analysis['strength']:.0%})" if altseason_analysis['is_altseason'] else ""
         log(f"📊 Market Context: BTC {btc_trend} (conf: {btc_analysis['confidence']:.1f}%), " +
-            f"Sentiment {sentiment}, Regime {regime}")
+            f"Sentiment {sentiment}, Regime {regime}{season_str}")
+        
+        return context
         
         # Alert on downtrend confirmation
         if btc_trend == 'downtrend' and btc_analysis['confidence'] >= 70:
@@ -587,7 +896,6 @@ async def get_trend_context():
         
     except Exception as e:
         log(f"❌ Error getting trend context: {e}", level="ERROR")
-        # Return safe defaults
         return {
             "btc_trend": "ranging",
             "btc_strength": 0,
@@ -595,6 +903,10 @@ async def get_trend_context():
             "btc_details": {},
             "sentiment": "neutral", 
             "regime": "trending",
+            "altseason": False,
+            "altseason_strength": 0,
+            "altseason_details": {},
+            "market_season": "neutral",
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
@@ -708,3 +1020,34 @@ async def monitor_btc_trend_accuracy():
             log(f"❌ Error in BTC trend monitor: {e}", level="ERROR")
         
         await asyncio.sleep(1800)  # 30 minutes
+
+# Add monitoring function for altseason
+async def monitor_altseason_status():
+    """Monitor and report altseason status"""
+    
+    while True:
+        try:
+            result = await altseason_detector.detect_altseason()
+            
+            if result['is_altseason']:
+                details = result['details']
+                
+                # Build status message
+                msg = f"🚀 ALTSEASON STATUS\n"
+                msg += f"Season: {result['season']}\n"
+                msg += f"Strength: {result['strength']:.0%}\n"
+                
+                if 'alt_performance' in details:
+                    ratio = details['alt_performance'].get('ratio', 0)
+                    msg += f"Alts outperforming BTC: {ratio:.0%}\n"
+                
+                if 'volume' in details:
+                    btc_dom = details['volume'].get('btc_dominance', 0)
+                    msg += f"BTC volume dominance: {btc_dom:.0%}\n"
+                
+                log(msg)
+                
+        except Exception as e:
+            log(f"❌ Error in altseason monitor: {e}", level="ERROR")
+        
+        await asyncio.sleep(3600)  # Check every hour
