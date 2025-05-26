@@ -466,8 +466,8 @@ async def handle_post_tp1_momentum(symbol, trade, current_price, candles):
 
                     # Reentry integration logging
                     if "entry_price" in trade:
-                    entry_price = trade["entry_price"]
-                    direction = trade["direction"].lower()
+                        entry_price = trade["entry_price"]
+                        direction = trade["direction"].lower()
                     if direction == "long":
                         profit_pct = ((current_price - entry_price) / entry_price) * 100
                     else:
