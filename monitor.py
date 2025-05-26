@@ -11,7 +11,16 @@ from pattern_detector import detect_pattern
 from volume import get_average_volume
 from logger import log, write_log
 from exit_manager import should_trail_stop, adjust_profit_protection, should_exit_by_time, evaluate_score_exit, detect_momentum_surge, calculate_exit_tranches
-from auto_reentry import log_exit, update_exit_cooldowns, should_reenter, handle_reentry
+from config import ENABLE_AUTO_REENTRY, REENTRY_FEATURES
+from auto_reentry import (
+    log_exit, 
+    update_exit_cooldowns, 
+    update_reentry_performance,
+    should_reenter,
+    handle_reentry,
+    cooldown_exits,
+    exit_history
+)
 from ai_memory import log_trade_result
 from activity_logger import log_trade_to_file
 from bybit_api import signed_request, check_order_exists, place_stop_loss, place_stop_loss_with_retry, place_market_order
@@ -80,6 +89,34 @@ TP1_PUMP_CANDLE_LOOKAHEAD = 8  # Increased from 4 to look further ahead for pump
 TP1_PUMP_THRESHOLD = 1.0  # Lower threshold to detect pumps earlier (from 1.2% to 1.0%)
 
 MIN_SL_BUFFER = 0.0025  # 0.25% safety margin
+
+async def handle_any_exit(symbol, trade, exit_price, exit_reason, score=None):
+    """Unified exit handler for reentry tracking"""
+    if not ENABLE_AUTO_REENTRY:
+        return
+        
+    direction = trade.get("direction", "").lower()
+    entry_price = trade.get("entry_price", 0)
+    
+    # Calculate profit percentage
+    if direction == "long":
+        profit_pct = ((exit_price - entry_price) / entry_price) * 100
+    else:
+        profit_pct = ((entry_price - exit_price) / entry_price) * 100
+    
+    # Log exit for reentry system
+    log_exit(
+        symbol=symbol,
+        trade=trade,
+        price=exit_price,
+        reason=exit_reason,
+        profit_pct=profit_pct
+    )
+    
+    # Update reentry performance
+    update_reentry_performance(symbol, profit_pct > 0, profit_pct)
+    
+    log(f"📤 Exit logged for reentry: {symbol} | Reason: {exit_reason} | Profit: {profit_pct:.2f}%")
 
 async def periodic_trade_sync():
     """Periodically reload trades from file to ensure sync"""
@@ -913,6 +950,15 @@ async def check_for_momentum_surge(symbol, candles_by_tf):
 
 async def monitor_trades(live_candles):
     """Main monitoring loop - cleaned up and optimized"""
+
+    # Update reentry cooldowns if enabled
+    if ENABLE_AUTO_REENTRY:
+        update_exit_cooldowns()
+    
+    # Skip during startup grace period
+    if time.time() - startup_time < 120:
+        log("⏳ Grace period active, skipping trade monitoring...")
+        return
     
     # Skip during startup grace period
     if time.time() - startup_time < 120:
@@ -990,28 +1036,85 @@ async def monitor_trades(live_candles):
             # 5. Check for SL hit (before TP1)
             if not trade.get("tp1_hit") and trade.get("original_sl"):
                 if check_sl_hit(trade, current_price, direction):
+                    if ENABLE_AUTO_REENTRY:
+                        await handle_any_exit(symbol, trade, current_price, "SL_Hit", score)
+                    
                     log_exit(symbol, trade, reason="SL Hit", price=current_price)
                     continue
             
             # 6. Check for trailing SL hit (after TP1)
             if trade.get("tp1_hit") and trade.get("trailing_sl"):
                 if check_trailing_sl_hit(trade, current_price, direction):
+                    if ENABLE_AUTO_REENTRY:
+                        await handle_any_exit(symbol, trade, current_price, "Trailing_SL", score)
+                    
                     await handle_trailing_sl_hit(symbol, trade, current_price, score, tf_scores, used_list)
                     continue
             
             # 7. Time-based exit check (every 60 cycles = 5 minutes)
             if trade["cycles"] % 60 == 0:
                 if should_exit_by_time(trade, datetime.utcnow(), candles_by_tf.get('1'), current_price):
+                    if ENABLE_AUTO_REENTRY:
+                        await handle_any_exit(symbol, trade, current_price, "Time_Exit", score)
+                    
                     await handle_time_exit(symbol, trade, current_price, score, tf_scores, used_list)
                     continue
                     
         except Exception as e:
             log(f"❌ Error monitoring {symbol}: {e}", level="ERROR")
             log(traceback.format_exc(), level="ERROR")
+
+    if ENABLE_AUTO_REENTRY:
+        await check_reentry_opportunities(live_candles)
     
     # Save only if there were changes
     if any(t.get("cycles", 0) > 0 for t in active_trades.values()):
         save_active_trades()
+
+async def check_reentry_opportunities(live_candles):
+    """Check exited symbols for reentry opportunities"""
+    from score import score_symbol, determine_direction, calculate_confidence
+    
+    # Get symbols that are in cooldown but not currently active
+    potential_reentries = []
+    for symbol in cooldown_exits.keys():
+        if symbol not in active_trades and symbol in live_candles:
+            potential_reentries.append(symbol)
+    
+    for symbol in potential_reentries:
+        try:
+            # Prepare candles
+            candles_by_tf = {}
+            for tf in ['1', '3', '5', '15', '30', '60', '240']:
+                if str(tf) in live_candles[symbol]:
+                    candles_by_tf[tf] = list(live_candles[symbol][str(tf)])
+            
+            if not candles_by_tf or len(candles_by_tf.get('5', [])) < 30:
+                continue
+            
+            # Score the symbol
+            score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
+                symbol, candles_by_tf
+            )
+            
+            direction = determine_direction(tf_scores)
+            
+            # Check reentry conditions
+            if await should_reenter(symbol, candles_by_tf, score, direction, trade_type):
+                # Set a flag for main.py to pick up
+                if symbol not in exit_history:
+                    continue
+                    
+                last_exit = exit_history[symbol][-1]
+                
+                # Create a reentry signal that main.py will detect
+                log(f"🔄 Reentry opportunity detected for {symbol}: Score {score:.2f}")
+                
+                # We don't execute trades here, just flag them
+                # The main scanner will pick them up with priority
+                
+        except Exception as e:
+            log(f"❌ Error checking reentry for {symbol}: {e}", level="ERROR")
 
 def check_tp1_hit(trade, current_price, candles):
     """Check if TP1 has been hit"""
@@ -1096,6 +1199,8 @@ async def handle_tp1_hit(symbol, trade, current_price):
         exit_success = await execute_partial_exit_with_retry(symbol, trade, 20)
         if exit_success:
             trade["tp1_partial_exit"] = True
+            if ENABLE_AUTO_REENTRY:
+                await handle_any_exit(symbol, trade, current_price, "TP_Hit")
     
     # Move SL to breakeven
     entry_price = trade.get("entry_price")
