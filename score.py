@@ -641,7 +641,7 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
     
     # Multi-timeframe bonuses
 
-    if trade_type == "Swing":
+    if best_type == "Swing":
         has_momentum, direction, strength = detect_momentum_strength(candles_by_timeframe.get("60", []))
         if not has_momentum or strength < 0.6:
             log(f"⚠️ {symbol} skipped as Swing: insufficient momentum (strength={strength})")
