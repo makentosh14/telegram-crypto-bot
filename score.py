@@ -621,12 +621,6 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
                 if detect_whale_activity(candles):
                     score += WEIGHTS["whale"]
                     indicator_scores[f"{tf_label}_whale"] = WEIGHTS["whale"]
-
-                if trade_type == "Swing":
-                    has_momentum, direction, strength = detect_momentum_strength(candles_by_timeframe.get("60", []))
-                    if not has_momentum or strength < 0.6:
-                        log(f"⚠️ {symbol} skipped as Swing: insufficient momentum (strength={strength})")
-                        return 0, tf_scores, None, indicator_scores, list(used_indicators)
         
                 type_scores["Swing"] += score
                 tf_count["Swing"] += 1
@@ -646,6 +640,12 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
     best_score = type_scores[best_type]
     
     # Multi-timeframe bonuses
+
+    if trade_type == "Swing":
+        has_momentum, direction, strength = detect_momentum_strength(candles_by_timeframe.get("60", []))
+        if not has_momentum or strength < 0.6:
+            log(f"⚠️ {symbol} skipped as Swing: insufficient momentum (strength={strength})")
+            return 0, tf_scores, None, indicator_scores, list(used_indicators)
     
     # Supertrend MTF Alignment
     if mtf_supertrend['alignment'] > 0.7:
