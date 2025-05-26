@@ -44,6 +44,13 @@ from symbol_utils import get_symbol_category
 from ai_memory import periodic_cleanup
 from volume import is_volume_spike, get_average_volume
 from indicator_fixes import rebalance_indicator_scores, analyze_volume_direction
+from auto_reentry import (
+    should_reenter,
+    handle_reentry,
+    periodic_performance_report,
+    cleanup_old_records,
+    update_reentry_performance
+)
 
 load_memory()
 
@@ -656,6 +663,100 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
             write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
 
+
+        from auto_reentry import cooldown_exits, exit_history
+    
+        reentry_symbols = []
+        for symbol in list(cooldown_exits.keys()):
+            if symbol in active_signals:
+                continue  # Skip if already tracking
+        
+            if symbol not in live_candles:
+                continue
+        
+            # Check if cooldown has expired
+            if cooldown_exits.get(symbol, 0) > 0:
+                continue
+        
+            reentry_symbols.append(symbol)
+    
+        # Process reentry symbols first (higher priority)
+        for symbol in reentry_symbols:
+            try:
+                candles_by_tf = {
+                    tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
+                    if str(tf) in live_candles[symbol]
+                }
+            
+                if not all(len(candles_by_tf.get(tf, [])) >= 30 for tf in TIMEFRAMES):
+                    continue
+            
+                # Score the symbol
+                score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
+                    symbol, candles_by_tf, market_context=trend_context
+                )
+            
+                direction = determine_direction(tf_scores)
+                confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
+                price = float(candles_by_tf['1'][-1]['close'])
+            
+                # Check reentry conditions
+                if await should_reenter(symbol, candles_by_tf, score, direction, trade_type):
+                    log(f"🔄 Processing reentry for {symbol} with score {score:.2f}")
+                
+                    # Boost confidence for reentry trades that meet conditions
+                    confidence = min(confidence * 1.1, 100)  # 10% confidence boost
+                
+                    # Execute the reentry trade
+                    await handle_reentry(
+                        symbol=symbol,
+                        current_score=score,
+                        trade_type=trade_type,
+                        direction=direction,
+                        entry_price=price,
+                        candles_by_tf=candles_by_tf
+                    )
+                
+                    # Continue with normal trade execution flow
+                    # Calculate SL/TP
+                    result = calculate_dynamic_sl_tp(
+                        candles_by_tf, price, trade_type, direction, score, confidence, regime
+                    )
+                    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+                
+                    # Execute trade with reentry flag
+                    trade = await execute_trade_if_valid({
+                        "symbol": symbol,
+                        "price": price,
+                        "trade_type": trade_type,
+                        "direction": direction,
+                        "score": score,
+                        "confidence": confidence,
+                        "candles": candles_by_tf,
+                        "indicator_scores": indicator_scores,
+                        "used_indicators": used_indicators,
+                        "tf_scores": tf_scores,
+                        "regime": regime,
+                        "is_reentry": True,  # Flag for tracking
+                        "market_type": get_symbol_category(symbol)
+                    })
+                
+                    if trade:
+                        # Track the reentry trade
+                        active_signals[symbol] = {
+                            'score': score,
+                            'score_history': [score],
+                            'is_reentry': True
+                        }
+                    
+                        log(f"✅ Reentry trade executed for {symbol}")
+                    
+                        # Skip normal scanning for this symbol
+                        continue
+                    
+            except Exception as e:
+                log(f"❌ Error processing reentry for {symbol}: {e}", level="ERROR")
+
             # Pass pump potential and exit tranches to trade tracker
             track_active_trade(
                 symbol=symbol,
@@ -966,6 +1067,8 @@ async def run_bot():
     asyncio.create_task(breakout_cache_cleanup())  # Add breakout cache cleanup
     asyncio.create_task(strategy_stats_report())   # Add strategy stats reporting
     asyncio.create_task(periodic_trade_sync())
+    asyncio.create_task(periodic_performance_report())
+    asyncio.create_task(cleanup_old_records())
 
     await startup_cleanup()
 
