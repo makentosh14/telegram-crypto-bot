@@ -398,6 +398,7 @@ async def scan_for_new_signals(symbols,trend_context):
     adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
     adj_swing = MIN_SWING_SCORE + adjust["swing"]
 
+    trade_type = None
     for i, symbol in enumerate(symbols, 1):
         if symbol not in live_candles:
             continue
