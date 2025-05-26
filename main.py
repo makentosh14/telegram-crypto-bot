@@ -505,6 +505,12 @@ async def scan_for_new_signals(symbols,trend_context):
                 min_score_met = True
                 # Record this swing trade for cooldown tracking
                 recent_swing_trades[symbol] = current_time
+
+            if trade_type == "Swing":
+                if trend_context.get("regime") != "trending" or trend_context.get("altseason") != "likely":
+                    log(f"🚫 Skipping Swing setup for {symbol} — market not trending or altseason not confirmed")
+                    continue
+                    
         # Only allow ALWAYS_ALLOW_SWING exception if score is at least 70% of threshold (increased from 50%)
         elif trade_type == "Swing" and ALWAYS_ALLOW_SWING and score >= adj_swing * 0.7:
             log(f"⚠️ Swing setup below min score ({score} < {adj_swing}), but ALWAYS_ALLOW_SWING is enabled — checking additional conditions.")
