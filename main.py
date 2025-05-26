@@ -182,8 +182,8 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
     
     if trade_type is not None:
         if confidence < min_confidence.get(trade_type, 60):
-        log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
-        return False
+            log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
+            return False
     
     # Check for conflicting signals
     bullish_count = sum(1 for k, v in indicator_scores.items() if v > 0)
