@@ -52,3 +52,63 @@ ENABLE_AI_SIGNAL_MEMORY = True
 ENABLE_LIQUIDITY_TRAP_FILTER = True
 ENABLE_WHALE_WATCH = True
 ENABLE_NEWS_REACTION = True
+
+# Master switch for the reentry system
+ENABLE_AUTO_REENTRY = True  # Set to False to disable completely
+
+# Reentry cooldown settings (in monitoring cycles, 1 cycle = 5 seconds)
+REENTRY_COOLDOWNS = {
+    "Scalp": {
+        "base_cooldown": 6,      # 30 seconds base cooldown
+        "max_cooldown": 60,      # 5 minutes maximum
+        "min_score": 7.5,        # Minimum score to consider reentry
+        "confidence_boost": 1.1  # Confidence multiplier for reentries
+    },
+    "Intraday": {
+        "base_cooldown": 12,     # 1 minute base cooldown
+        "max_cooldown": 180,     # 15 minutes maximum
+        "min_score": 8.5,
+        "confidence_boost": 1.1
+    },
+    "Swing": {
+        "base_cooldown": 24,     # 2 minutes base cooldown
+        "max_cooldown": 360,     # 30 minutes maximum
+        "min_score": 10.0,
+        "confidence_boost": 1.1
+    }
+}
+
+# Exit type multipliers for cooldown calculation
+REENTRY_EXIT_MULTIPLIERS = {
+    "TP_Hit": 0.5,          # Target hit - fastest reentry
+    "Trailing_SL": 0.7,     # Trailing stop - fast reentry
+    "Breakeven_SL": 1.0,    # Breakeven stop - normal
+    "SL_Hit": 2.0,          # Stop loss - slow reentry
+    "Time_Exit": 1.5,       # Time-based - slower
+    "Score_Exit": 1.8,      # Score deterioration - slow
+    "Manual": 1.0           # Manual exit - normal
+}
+
+# Performance thresholds
+MIN_REENTRY_WIN_RATE = 0.3     # 30% minimum win rate to allow reentry
+MAX_DAILY_REENTRIES = 3        # Maximum reentries per symbol per day
+MIN_PROFIT_FOR_QUICK_REENTRY = 2.0  # 2% profit for faster reentry
+
+# Technical confirmation requirements
+REENTRY_CONFIRMATION_REQUIRED = 3  # Number of confirming indicators needed
+REENTRY_TECH_WEIGHTS = {
+    "rsi": 0.2,
+    "macd": 0.25,
+    "bollinger": 0.2,
+    "supertrend": 0.2,
+    "volume": 0.15
+}
+
+# Reentry feature flags
+REENTRY_FEATURES = {
+    "check_whale_activity": True,
+    "check_momentum": True,
+    "check_patterns": True,
+    "check_volume_profile": True,
+    "require_trend_alignment": True
+}
