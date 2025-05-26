@@ -7,6 +7,7 @@ from logger import log, write_log
 from error_handler import send_telegram_message, send_error_to_telegram
 from bybit_api import place_market_order, place_stop_loss, place_stop_loss_with_retry, check_order_exists
 from symbol_info import round_qty
+from auto_reentry import log_exit, update_reentry_performance
 
 def detect_tp1_hit(symbol, trade, current_price, candles):
     """
@@ -288,6 +289,17 @@ async def execute_tp1_strategy(symbol, trade, current_price, candles):
         trade["tp1_hit_cycle"] = trade.get("cycles", 0)
         trade["break_even_triggered"] = True
         trade["tp1_price"] = current_price
+
+        if first_tranche_executed:
+            # Calculate current profit
+            if direction == "long":
+                profit_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            # This is a partial exit, not a full exit, so we don't log_exit here
+            # Just update performance tracking
+            write_log(f"TP1_PARTIAL: {symbol} | Profit at TP1: {profit_pct:.2f}%")
         
         # 2. Calculate exit tranches if not already calculated
         if not trade.get("exit_tranches"):
@@ -421,6 +433,19 @@ async def handle_post_tp1_momentum(symbol, trade, current_price, candles):
             # Check if we have exit tranches
             if trade.get("exit_tranches") and len(trade.get("exit_tranches", [])) >= 2:
                 second_tranche = trade["exit_tranches"][1]
+
+                if exit_success:
+                    # Calculate profit at this exit point
+                    entry_price = trade.get("entry_price")
+                    direction = trade.get("direction", "").lower()
+            
+                    if direction == "long":
+                        profit_pct = ((current_price - entry_price) / entry_price) * 100
+                    else:
+                        profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+                    # Log this momentum-based exit
+                    write_log(f"MOMENTUM_EXIT: {symbol} | Profit: {profit_pct:.2f}% | Pump: {pump_move_pct:.2f}%")
                 
                 # Execute second partial exit
                 exit_success = await execute_partial_exit_with_retry(
