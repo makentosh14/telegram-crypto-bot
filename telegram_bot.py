@@ -103,7 +103,7 @@ def format_trade_signal(
         f"⚖️ <b>Risk:</b> {risk_pct:.1f}% of balance\n"
         f"📈 <b>Leverage:</b> {leverage}x\n"
         f"📉 <b>Smart Trailing SL:</b> {trailing_pct:.1f}% after TP1\n"
-        f"📊 <b>Trend:</b> BTC = {trend['btc_trend']}, Altseason = {trend['altseason']}\n"
+        f"📊 Trend: BTC = {trend.get('btc_trend', 'N/A')}, Altseason = {trend.get('altseason', 'N/A')}\n"
     )
 
     if confidence is not None:
