@@ -1084,6 +1084,7 @@ async def run_bot():
     asyncio.create_task(periodic_performance_report())
     asyncio.create_task(cleanup_old_records())
     asyncio.create_task(monitor_btc_trend_accuracy())
+    asyncio.create_task(monitor_altseason_status())
 
     await startup_cleanup()
 
