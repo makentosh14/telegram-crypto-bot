@@ -17,7 +17,7 @@ from error_handler import send_telegram_message, send_error_to_telegram
 from activity_logger import log_trade_to_file
 from symbol_info import round_qty, symbol_precisions, get_precision
 from pre_trade_validator import pre_trade_validator
-from stealth_detector.py import detect_stealth_accumulation_advanced
+from stealth_detector import detect_stealth_accumulation_advanced
 
 # Enhanced imports from position_manager.py
 from risk_manager import (
