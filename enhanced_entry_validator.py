@@ -125,7 +125,7 @@ class EntryValidator:
                     consecutive = 0
                     
         # If 5+ consecutive candles in opposite direction, momentum is exhausted
-        return consecutive >= 5
+        return consecutive >= 7
     
     def check_key_levels(self, symbol: str, candles_by_tf: Dict, 
                         entry_price: float, direction: str) -> Tuple[bool, str]:
