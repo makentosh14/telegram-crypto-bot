@@ -6,7 +6,7 @@ from stealth_detector import (
     detect_stealth_accumulation_advanced,
     get_stealth_statistics
 )
-from websocket_handler import live_candles  # or your actual websocket file
+from websocket_candles import live_candles  # or your actual websocket file
 
 
 async def test_stealth_detector():
