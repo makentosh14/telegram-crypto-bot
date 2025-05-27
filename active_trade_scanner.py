@@ -343,6 +343,7 @@ async def process_active_trade(symbol, trade, live_candles):
             
             # Check if update is needed (0.1% improvement)
             should_update = False
+            sl_updated = False  # at top of function
             
             if current_trailing_sl is None:
                 should_update = True
@@ -358,6 +359,7 @@ async def process_active_trade(symbol, trade, live_candles):
             if should_update:
                 trade["trailing_sl"] = new_sl
                 trade["needs_sl_update"] = True
+                sl_updated = True
                 if sl_updated:
                     trade["modified"] = True
                     log(f"🔐 HF SCANNER: Trailing SL updated for {symbol} to {new_sl}")
