@@ -22,5 +22,6 @@ async def test_stealth_detector():
         log(f"  Statistics: {stats}")
 
 # Run once after bot starts:
-await asyncio.sleep(30)  # Wait for candles to load
 await test_stealth_detector()
+await asyncio.sleep(30)  # Wait for candles to load
+
