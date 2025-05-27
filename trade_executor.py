@@ -17,6 +17,7 @@ from error_handler import send_telegram_message, send_error_to_telegram
 from activity_logger import log_trade_to_file
 from symbol_info import round_qty, symbol_precisions, get_precision
 from pre_trade_validator import pre_trade_validator
+from stealth_detector.py import detect_stealth_accumulation_advanced
 
 # Enhanced imports from position_manager.py
 from risk_manager import (
@@ -446,6 +447,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     confidence = signal_data.get("confidence", 60)
     entry_price = float(signal_data.get("price", 1.0))
     candles_by_tf = signal_data.get("candles", {})
+    stealth_data = detect_stealth_accumulation_advanced(
+        trade_params["candles"].get("5", []), 
+        trade_params["symbol"]
+    )
+
+    if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
+        # Adjust exit strategy for accumulation trades
+        trade_params["exit_strategy"] = "patient"  # Hold longer
+        trade_params["trailing_multiplier"] = 1.5  # Wider trailing stop
+        log(f"🎯 Stealth trade detected - using patient exit strategy")
 
     final_valid, final_reason = await pre_trade_validator.final_validation(
         symbol=trade_params["symbol"],
