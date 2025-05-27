@@ -195,7 +195,7 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
         return False
     
     # Require at least one strong indicator (score > 1.0)
-    strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 1.0]
+    strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 0.8]
     if len(strong_indicators) < 1:
         log(f"⚠️ {symbol}: No strong indicators found (need at least one with score > 1.0)")
         return False
