@@ -9,8 +9,8 @@ from error_handler import send_telegram_message, send_error_to_telegram
 # FIXED PERCENTAGES AS REQUESTED
 FIXED_SL_TP = {
     "Scalp": {
-        "sl_pct": 0.5,       # -0.8% stop loss
-        "tp1_pct": 1.0,      # +1.2% take profit
+        "sl_pct": 0.7,       # -0.8% stop loss
+        "tp1_pct": 1.2,      # +1.2% take profit
         "trailing_pct": 0.4  # 0.4% trailing stop
     },
     "Intraday": {
