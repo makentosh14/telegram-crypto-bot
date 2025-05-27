@@ -18,6 +18,9 @@ from whale_detector import detect_whale_activity, detect_whale_activity_advanced
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
 from indicator_fixes import rebalance_indicator_scores, get_balanced_rsi_signal, analyze_volume_direction
+from enhanced_entry_validator import entry_validator
+from pattern_context_analyzer import pattern_context_analyzer
+from divergence_detector import divergence_detector
 
 # Enhanced weights including pattern-specific weights
 WEIGHTS = {
@@ -63,6 +66,146 @@ MIN_TF_REQUIRED = {
     "Intraday": 1,
     "Swing": 2,
 }
+
+def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
+    """Enhanced scoring with all the new validations"""
+    
+    # First, get the original score
+    original_score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
+        symbol, candles_by_timeframe, market_context
+    )
+    
+    # If score is too low, skip enhanced checks
+    if original_score < 5:
+        return original_score, tf_scores, trade_type, indicator_scores, used_indicators
+    
+    # Get current price and direction
+    current_price = float(candles_by_timeframe['1'][-1]['close'])
+    direction = determine_direction(tf_scores)
+    
+    # 1. Validate entry timing
+    entry_valid, entry_reason = entry_validator.validate_entry(
+        symbol, candles_by_timeframe, direction, current_price, trade_type, original_score
+    )
+    
+    if not entry_valid:
+        log(f"❌ Entry validation failed for {symbol}: {entry_reason}")
+        # Severely penalize the score
+        original_score *= 0.3
+        indicator_scores["entry_validation_failed"] = -3.0
+        used_indicators.append("entry_validation_failed")
+        return original_score, tf_scores, trade_type, indicator_scores, used_indicators
+    
+    # 2. Check pattern context if pattern detected
+    pattern = None
+    pattern_context = None
+    
+    for ind in used_indicators:
+        if "pattern_" in ind:
+            pattern = ind.replace("pattern_", "")
+            break
+            
+    if pattern:
+        # Analyze pattern context
+        candles_5m = candles_by_timeframe.get('5', [])
+        if candles_5m:
+            pattern_context = pattern_context_analyzer.analyze_pattern_context(
+                pattern, candles_5m
+            )
+            
+            if not pattern_context["valid"]:
+                log(f"⚠️ Pattern {pattern} in poor context: {pattern_context['reason']}")
+                # Reduce pattern score
+                for key in indicator_scores:
+                    if "pattern" in key and pattern in key:
+                        indicator_scores[key] *= 0.5
+                        
+            # Apply context strength
+            pattern_strength = pattern_context.get("strength_score", 1.0)
+            for key in indicator_scores:
+                if "pattern" in key:
+                    indicator_scores[key] *= pattern_strength
+    
+    # 3. Check for divergences
+    divergences_found = []
+    
+    # RSI divergence
+    if 'rsi' in used_indicators:
+        candles_15m = candles_by_timeframe.get('15', [])
+        if candles_15m:
+            from rsi import calculate_rsi
+            rsi_values = calculate_rsi(candles_15m)
+            if rsi_values:
+                rsi_div = divergence_detector.detect_rsi_divergence(candles_15m, rsi_values)
+                if rsi_div:
+                    divergences_found.append(rsi_div)
+                    
+                    # Add to scoring
+                    if rsi_div["type"] == "bullish" and direction == "Long":
+                        original_score += 0.8
+                        indicator_scores["rsi_divergence_bullish"] = 0.8
+                    elif rsi_div["type"] == "bearish" and direction == "Short":
+                        original_score += 0.8
+                        indicator_scores["rsi_divergence_bearish"] = 0.8
+                    else:
+                        # Divergence against our direction
+                        original_score -= 1.0
+                        indicator_scores["rsi_divergence_against"] = -1.0
+    
+    # Volume divergence
+    vol_div = divergence_detector.detect_volume_divergence(candles_by_timeframe.get('5', []))
+    if vol_div:
+        divergences_found.append(vol_div)
+        
+        if vol_div["type"] == "bullish" and direction == "Long":
+            original_score += 0.5
+            indicator_scores["volume_divergence_bullish"] = 0.5
+        elif vol_div["type"] == "bearish" and direction == "Short":
+            original_score += 0.5
+            indicator_scores["volume_divergence_bearish"] = 0.5
+        else:
+            # Warning signal
+            original_score -= 0.5
+            indicator_scores["volume_divergence_warning"] = -0.5
+    
+    # 4. Apply final score adjustments based on entry quality
+    entry_quality_score = 0
+    
+    # Check momentum alignment
+    momentum_check = entry_validator.check_momentum_alignment(
+        candles_by_timeframe, direction, trade_type
+    )
+    if momentum_check[0]:
+        entry_quality_score += 0.3
+        
+    # Check timeframe alignment
+    tf_check = entry_validator.check_timeframe_alignment(
+        candles_by_timeframe, direction, trade_type
+    )
+    if tf_check[0]:
+        entry_quality_score += 0.3
+        
+    # Check market structure
+    structure_check = entry_validator.check_market_structure(
+        candles_by_timeframe, trade_type
+    )
+    if structure_check[0]:
+        entry_quality_score += 0.2
+        
+    # Apply entry quality bonus
+    original_score += entry_quality_score
+    indicator_scores["entry_quality"] = entry_quality_score
+    
+    # Log enhanced analysis
+    log(f"📊 Enhanced scoring for {symbol}:")
+    log(f"   Original score: {original_score:.2f}")
+    log(f"   Entry validation: {entry_reason}")
+    if pattern_context:
+        log(f"   Pattern context: {pattern_context['location']} - {pattern_context['trend_before']}")
+    if divergences_found:
+        log(f"   Divergences: {[d['type'] + ' ' + d['indicator'] for d in divergences_found]}")
+    
+    return original_score, tf_scores, trade_type, indicator_scores, used_indicators
 
 def detect_momentum_strength(candles, lookback=5):
     """Existing momentum detection function remains unchanged"""
