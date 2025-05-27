@@ -246,6 +246,26 @@ def extract_last_pattern_enhanced(candles_by_tf):
     
     return best_pattern
 
+async def stealth_activity_report():
+    """Report on stealth accumulation activity"""
+    while True:
+        await asyncio.sleep(3600)  # Every hour
+        
+        # Get statistics for active symbols
+        stealth_report = []
+        for symbol in active_signals.keys():
+            stats = get_stealth_statistics(symbol)
+            if stats['status'] == 'active':
+                stealth_report.append(
+                    f"{symbol}: {stats['total_detections']} detections, "
+                    f"avg strength: {stats['average_strength']}"
+                )
+        
+        if stealth_report:
+            msg = "🕵️ <b>Stealth Activity Report</b>\n\n"
+            msg += "\n".join(stealth_report[:10])  # Top 10 symbols
+            await send_telegram_message(msg)
+
 # Add this function to main.py
 async def cleanup_cooldowns():
     """Periodically clean up expired cooldown entries"""
@@ -1107,6 +1127,7 @@ async def run_bot():
     asyncio.create_task(monitor_btc_trend_accuracy())
     asyncio.create_task(monitor_altseason_status())
     asyncio.create_task(cleanup_stealth_cache())
+    asyncio.create_task(stealth_activity_report())
 
     await startup_cleanup()
 
