@@ -16,6 +16,7 @@ from logger import log, write_log
 from error_handler import send_telegram_message, send_error_to_telegram
 from activity_logger import log_trade_to_file
 from symbol_info import round_qty, symbol_precisions, get_precision
+from pre_trade_validator import pre_trade_validator
 
 # Enhanced imports from position_manager.py
 from risk_manager import (
@@ -445,6 +446,22 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     confidence = signal_data.get("confidence", 60)
     entry_price = float(signal_data.get("price", 1.0))
     candles_by_tf = signal_data.get("candles", {})
+
+    final_valid, final_reason = await pre_trade_validator.final_validation(
+        symbol=trade_params["symbol"],
+        direction=trade_params["direction"],
+        entry_price=trade_params["price"],
+        sl_price=sl,
+        tp_price=tp1
+    )
+    
+    if not final_valid:
+        log(f"❌ Pre-trade validation failed for {symbol}: {final_reason}")
+        await send_telegram_message(
+            f"❌ Trade cancelled for {symbol}\n"
+            f"Reason: {final_reason}"
+        )
+        return None
     
     # Determine strategy type
     strategy = "core_strategy"
