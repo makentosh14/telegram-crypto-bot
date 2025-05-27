@@ -64,15 +64,20 @@ def analyze_volume_profile(candles: List[Dict], lookback: int = 50) -> Dict:
 def get_position_size_multiplier(volume_analysis: Dict, trade_type: str) -> float:
     """Adjust position size based on volume quality"""
     quality_score = volume_analysis.get("score", 0.5)
+
+    # 💥 NEW SKIP LOGIC
+    if quality_score < 0.35:
+        log(f"⛔ Skipping trade due to very weak volume (score={quality_score:.2f})")
+        return 0.0  # SKIP TRADE
     
     # More conservative for scalping
     if trade_type == "Scalp":
         if quality_score >= 0.7:
             return 1.0
         elif quality_score >= 0.5:
-            return 0.7
+            return 0.6
         else:
-            return 0.5
+            return 0.4
     
     # Medium for intraday
     elif trade_type == "Intraday":
@@ -87,7 +92,7 @@ def get_position_size_multiplier(volume_analysis: Dict, trade_type: str) -> floa
     else:  # Swing
         if quality_score >= 0.5:
             return 1.0
-        elif quality_score >= 0.3:
-            return 0.9
-        else:
+        elif quality_score >= 0.35:
             return 0.7
+        else:
+            return 0.5
