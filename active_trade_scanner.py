@@ -56,6 +56,64 @@ FIXED_PERCENTAGES = {
 _last_save_time = 0
 _save_cooldown = 5  # 5 seconds between saves
 
+async def handle_trailing_sl_exit(symbol, trade, current_price):
+    """Handle trailing stop loss exit for HF scanner"""
+    try:
+        direction = trade.get("direction", "").lower()
+        entry_price = trade.get("entry_price")
+        
+        # Calculate profit percentage
+        if direction == "long":
+            profit_pct = ((current_price - entry_price) / entry_price) * 100
+        else:
+            profit_pct = ((entry_price - current_price) / entry_price) * 100
+        
+        # Mark trade as exited
+        trade["exited"] = True
+        trade["exit_price"] = current_price
+        trade["exit_reason"] = "Trailing_SL_Hit"
+        trade["profit_pct"] = profit_pct
+        trade["modified"] = True
+        
+        # Send notification
+        await send_telegram_message(
+            f"💔 <b>Trailing SL Hit</b> on <b>{symbol}</b>\n"
+            f"Exit Price: {current_price:.6f}\n"
+            f"Profit: {profit_pct:.2f}%\n"
+            f"Reason: Price hit trailing stop"
+        )
+        
+        # Log the exit
+        log(f"💔 HF SCANNER: Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% profit)")
+        write_log(f"HF_SCANNER_TRAILING_EXIT: {symbol} | Price: {current_price} | Profit: {profit_pct:.2f}%")
+        
+        # Log to activity file
+        log_trade_to_file(
+            symbol=symbol,
+            direction=direction,
+            entry=entry_price,
+            sl=trade.get("trailing_sl"),
+            tp1=trade.get("tp1_target"),
+            tp2=None,
+            result="trailing_sl",
+            score=trade.get("score_history", [0])[-1] if trade.get("score_history") else 0,
+            trade_type=trade.get("trade_type", "Unknown"),
+            confidence=0
+        )
+        
+        # Update reentry tracking if enabled
+        from config import ENABLE_AUTO_REENTRY
+        if ENABLE_AUTO_REENTRY:
+            from auto_reentry import log_exit, update_reentry_performance
+            log_exit(symbol, trade, price=current_price, reason="Trailing_SL_Hit", profit_pct=profit_pct)
+            update_reentry_performance(symbol, success=(profit_pct > 0), profit_pct=profit_pct)
+        
+        return True
+        
+    except Exception as e:
+        log(f"❌ HF SCANNER: Error handling trailing SL exit for {symbol}: {e}", level="ERROR")
+        return False
+
 def load_active_trades_directly():
     """Load active trades directly from file, bypassing potential import issues"""
     global _active_trades_cache, _cache_timestamp
