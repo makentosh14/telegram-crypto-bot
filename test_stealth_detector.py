@@ -6,7 +6,8 @@ from stealth_detector import (
     detect_stealth_accumulation_advanced,
     get_stealth_statistics
 )
-from candle_data import live_candles
+from websocket_handler import live_candles  # or your actual websocket file
+
 
 async def test_stealth_detector():
     test_symbol = "BTCUSDT"
