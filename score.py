@@ -422,12 +422,29 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
         tf_label = f"{tf}m"
 
         try:
-            # Volume check first
-            if not is_volume_spike(candles, 2.5):
-                avg_vol = get_average_volume(candles)
-                if avg_vol and avg_vol < 1000:
-                    tf_scores[tf] = -99.0
-                    continue
+            # UPDATED VOLUME CHECK - More intelligent filtering
+            avg_vol = get_average_volume(candles)
+            
+            # Dynamic volume threshold based on timeframe
+            min_volume_threshold = get_minimum_volume_threshold(symbol, tf)
+            
+            # Check volume quality, not just quantity
+            if not check_volume_quality(candles):
+                log(f"⚠️ {symbol} on {tf}m: Poor volume quality (erratic trading)")
+                tf_scores[tf] = score - 2.0  # Penalty but not disqualification
+                continue
+            
+            # Apply graduated penalty instead of hard cutoff
+            if avg_vol and avg_vol < min_volume_threshold:
+                volume_penalty = calculate_volume_penalty(avg_vol, min_volume_threshold, tf)
+                score -= volume_penalty
+                log(f"📉 {symbol} on {tf}m: Low volume penalty: -{volume_penalty:.1f} (vol: {avg_vol:.0f})")
+                # Don't continue - still process other indicators
+            else:
+                # Bonus for good volume
+                if avg_vol > min_volume_threshold * 2:
+                    score += 0.3
+                    indicator_scores[f"{tf_label}_volume_good"] = 0.3
             
             # Get current price for VWAP comparison
             current_price = float(candles[-1]['close'])
@@ -779,16 +796,31 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
     
     # Find the best trade type
     valid_types = [t for t in type_scores if tf_count[t] >= MIN_TF_REQUIRED[t]]
-    best_type = max(valid_types, key=lambda t: type_scores[t], default="Scalp")
-    best_score = type_scores[best_type]
+    
+    if not valid_types:
+        # Determine best fallback based on available timeframes
+        if '1' in candles_by_timeframe and '3' in candles_by_timeframe:
+            best_type = "Scalp"
+            log(f"ℹ️ {symbol}: No valid trade types, defaulting to Scalp based on available TFs")
+        elif '5' in candles_by_timeframe and '15' in candles_by_timeframe:
+            best_type = "Intraday"
+            log(f"ℹ️ {symbol}: No valid trade types, defaulting to Intraday based on available TFs")
+        else:
+            best_type = "Intraday"  # Safe default
+            log(f"ℹ️ {symbol}: No valid trade types, using Intraday as default")
+        best_score = type_scores[best_type]
+    else:
+        best_type = max(valid_types, key=lambda t: type_scores[t])
+        best_score = type_scores[best_type]
     
     # Multi-timeframe bonuses
 
     if best_type == "Swing":
         has_momentum, direction, strength = detect_momentum_strength(candles_by_timeframe.get("60", []))
-        if not has_momentum or strength < 0.6:
-            log(f"⚠️ {symbol} skipped as Swing: insufficient momentum (strength={strength})")
-            return 0, tf_scores, None, indicator_scores, list(used_indicators)
+        if not has_momentum or strength < 0.3:  # Lowered from 0.6
+            log(f"⚠️ {symbol} Swing trade allowed with moderate momentum (strength={strength:.2f})")
+            # Don't return 0 - just apply a penalty
+            best_score *= 0.8
     
     # Supertrend MTF Alignment
     if mtf_supertrend['alignment'] > 0.7:
@@ -820,6 +852,71 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
             log(f"🚀 Momentum bonus applied to {symbol}: +{bonus} (aligned {momentum_direction})")
 
     return round(best_score, 2), tf_scores, best_type, indicator_scores, list(used_indicators)
+
+def get_minimum_volume_threshold(symbol, timeframe):
+    """Dynamic volume threshold based on context"""
+    
+    # Known liquid pairs get lower thresholds
+    liquid_bases = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE']
+    for base in liquid_bases:
+        if base in symbol:
+            return 50  # These are always liquid enough
+    
+    # Timeframe-based thresholds
+    timeframe = str(timeframe)  # Ensure string
+    
+    # Higher standards for scalping (need liquidity for quick exits)
+    if timeframe in ['1', '3']:
+        return 300  # Higher for scalp trades
+    
+    # Medium for intraday
+    elif timeframe in ['5', '15', '30']:
+        return 150
+    
+    # Lower for swing (have time to exit)
+    else:  # 60, 240
+        return 80
+
+def check_volume_quality(candles):
+    """Check volume consistency, not just amount"""
+    if len(candles) < 20:
+        return True  # Not enough data to judge
+    
+    volumes = [float(c.get('volume', 0)) for c in candles[-20:]]
+    
+    # Check for consistency
+    avg_volume = np.mean(volumes)
+    std_volume = np.std(volumes)
+    
+    # Reject if volume is too erratic (possible manipulation)
+    if avg_volume > 0 and std_volume > avg_volume * 3:  # Increased from 2 to 3
+        return False
+    
+    # Check for minimum activity (at least some trades happening)
+    zero_volume_candles = sum(1 for v in volumes if v < 10)
+    if zero_volume_candles > 10:  # Increased from 5 to 10
+        return False
+    
+    return True
+
+def calculate_volume_penalty(current_vol, min_vol, timeframe):
+    """Calculate graduated penalty for low volume"""
+    if current_vol >= min_vol:
+        return 0
+    
+    # Calculate how far below minimum we are
+    deficit_ratio = (min_vol - current_vol) / min_vol
+    
+    # Different penalty scales by timeframe
+    if str(timeframe) in ['1', '3']:  # Scalp timeframes
+        # Stricter penalty for scalping
+        penalty = deficit_ratio * 3.0  # Max penalty of 3.0
+    elif str(timeframe) in ['5', '15']:  # Intraday
+        penalty = deficit_ratio * 2.0  # Max penalty of 2.0
+    else:  # Swing
+        penalty = deficit_ratio * 1.5  # Max penalty of 1.5
+    
+    return min(penalty, 3.0)  # Cap at 3.0
 
 # Keep existing helper functions unchanged
 def determine_direction(tf_scores):
