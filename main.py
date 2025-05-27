@@ -163,7 +163,7 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     
     return valid
 
-def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction=None):
+def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):
     """Enhanced quality filter with direction-specific requirements"""
     
     # Higher requirements for shorts
@@ -542,7 +542,7 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"⚠️ Skipping {symbol}: Score {score:.2f} below minimum threshold for {trade_type} ({adj_scalp if trade_type == 'Scalp' else adj_intraday if trade_type == 'Intraday' else adj_swing})")
             continue
 
-        if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction):
+        if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):
             log(f"⚠️ Skipping {symbol}: Failed quality standards check")
             continue
 
