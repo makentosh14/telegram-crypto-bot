@@ -13,7 +13,7 @@ from pattern_detector import (
 )
 from volume import (is_volume_spike, get_average_volume, detect_volume_climax, 
                    get_volume_profile, get_volume_weighted_average_price, analyze_volume_trend)
-from stealth_detector import detect_volume_divergence, detect_slow_breakout
+from stealth_detector import detect_volume_divergence, detect_slow_breakout, detect_stealth_accumulation_advanced
 from whale_detector import detect_whale_activity, detect_whale_activity_advanced, analyze_whale_impact
 from error_handler import send_error_to_telegram
 from config import ALWAYS_ALLOW_SWING
@@ -52,6 +52,9 @@ WEIGHTS = {
     "whale": 1.3,
     "whale_advanced": 1.4,
     "momentum": 1.5,
+    "divergence": 0.5,
+    "stealth": 0.8,  # Add this for advanced stealth detection
+    "strong_stealth": 1.0  # Add this for strong accumulation signals
 }
 
 # Existing code remains...
@@ -564,6 +567,23 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
                 if detect_volume_divergence(candles):
                     score += WEIGHTS["divergence"]
                     indicator_scores[f"{tf_label}_divergence"] = WEIGHTS["divergence"]
+
+                # You can now use:
+                stealth_result = detect_stealth_accumulation_advanced(candles, symbol)
+                if stealth_result['detected']:
+                    # Weight based on strength and pattern count
+                    stealth_score = WEIGHTS["divergence"] * stealth_result['strength']
+                    score += stealth_score
+                    indicator_scores[f"{tf_label}_stealth"] = stealth_score
+    
+                    # Log detected patterns for debugging
+                    if stealth_result['patterns']:
+                        log(f"🕵️ Stealth patterns on {symbol}: {', '.join(stealth_result['patterns'])}")
+    
+                    # Use recommendation for additional scoring
+                    if stealth_result['recommendation'] == 'strong_accumulation':
+                        score += 0.5  # Bonus for strong signals
+                        indicator_scores[f"{tf_label}_strong_stealth"] = 0.5
                     
                 if detect_slow_breakout(candles):
                     score += WEIGHTS["slow_breakout"]
