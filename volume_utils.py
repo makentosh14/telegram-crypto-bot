@@ -51,6 +51,10 @@ def analyze_volume_profile(candles: List[Dict], lookback: int = 50) -> Dict:
         quality = "acceptable"
     else:
         quality = "poor"
+
+    if correlation < 0.2 and volume_trend > 0.05:
+        log("⚠️ Volume trend lagging but increasing — potential stealth breakout.")
+        quality_score += 0.05  # Slight reward, not punishment
     
     return {
         "quality": quality,
