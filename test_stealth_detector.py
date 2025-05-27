@@ -1,219 +1,242 @@
-#!/usr/bin/env python3
-# test_stealth_detector.py - Test script for enhanced stealth detector
-
+# test_stealth_detector_enhanced.py
 import asyncio
-import sys
-import os
-import random
 import numpy as np
-from datetime import datetime, timedelta
-
-# Add the bot directory to Python path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import the stealth detector functions
 from stealth_detector import (
     detect_volume_divergence,
     detect_slow_breakout,
     detect_stealth_accumulation_advanced,
     get_stealth_statistics,
-    calculate_accumulation_score,
-    StealthAccumulationDetector
+    StealthAccumulationDetector,
+    clear_stealth_cache
 )
 
-def generate_test_candles(pattern_type="normal", num_candles=50):
-    """Generate test candle data with different patterns"""
+def create_stealth_accumulation_candles():
+    """Create candles that exhibit stealth accumulation pattern"""
     candles = []
     base_price = 100.0
-    base_volume = 1000.0
+    base_volume = 1000
     
-    for i in range(num_candles):
-        timestamp = datetime.now() - timedelta(minutes=num_candles-i)
+    # Phase 1: Price decline with increasing volume (accumulation)
+    for i in range(10):
+        price = base_price - (i * 0.1)  # Slight price decline
+        volume = base_volume * (1.2 + i * 0.1)  # Increasing volume
         
-        if pattern_type == "accumulation":
-            # Flat price with increasing volume
-            price_change = random.uniform(-0.001, 0.001)
-            volume_multiplier = 1.0 + (i / num_candles) * 0.5  # Gradually increasing
-        elif pattern_type == "distribution":
-            # Rising price with decreasing volume
-            price_change = random.uniform(0.001, 0.003)
-            volume_multiplier = 1.5 - (i / num_candles) * 0.5  # Gradually decreasing
-        elif pattern_type == "breakout":
-            # Slow steady rise
-            if i < num_candles * 0.7:
-                price_change = random.uniform(-0.002, 0.002)
-            else:
-                price_change = random.uniform(0.002, 0.004)
-            volume_multiplier = 1.0
-        else:  # normal
-            price_change = random.uniform(-0.003, 0.003)
-            volume_multiplier = random.uniform(0.8, 1.2)
+        candles.append({
+            'open': price + 0.05,
+            'high': price + 0.1,
+            'low': price - 0.05,
+            'close': price,
+            'volume': volume,
+            'timestamp': f'2024-01-01 00:{i:02d}:00'
+        })
+    
+    # Phase 2: Sideways movement with high volume
+    for i in range(10, 15):
+        price = base_price - 1.0 + np.random.uniform(-0.05, 0.05)
+        volume = base_volume * 2.0  # Sustained high volume
         
-        # Calculate OHLC
-        open_price = base_price * (1 + random.uniform(-0.002, 0.002))
-        close_price = open_price * (1 + price_change)
-        high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.002))
-        low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.002))
-        
-        candle = {
-            'timestamp': timestamp.isoformat(),
-            'open': open_price,
-            'high': high_price,
-            'low': low_price,
-            'close': close_price,
-            'volume': base_volume * volume_multiplier * random.uniform(0.9, 1.1)
-        }
-        
-        candles.append(candle)
-        base_price = close_price
-        
+        candles.append({
+            'open': price,
+            'high': price + 0.02,
+            'low': price - 0.02,
+            'close': price + np.random.uniform(-0.01, 0.01),
+            'volume': volume,
+            'timestamp': f'2024-01-01 00:{i:02d}:00'
+        })
+    
     return candles
 
-async def test_basic_functions():
-    """Test basic stealth detection functions"""
-    print("\n🧪 Testing Basic Functions")
-    print("=" * 50)
+def create_slow_breakout_candles():
+    """Create candles showing slow breakout pattern"""
+    candles = []
+    base_price = 100.0
     
-    # Test 1: Normal market
-    print("\n1. Testing Normal Market Conditions:")
-    normal_candles = generate_test_candles("normal")
-    vol_div = detect_volume_divergence(normal_candles)
-    slow_break = detect_slow_breakout(normal_candles)
-    print(f"   Volume Divergence: {vol_div}")
-    print(f"   Slow Breakout: {slow_break}")
+    # Consolidation phase
+    for i in range(10):
+        price = base_price + np.random.uniform(-0.1, 0.1)
+        candles.append({
+            'open': price,
+            'high': price + 0.05,
+            'low': price - 0.05,
+            'close': price + 0.02,
+            'volume': 1000 + np.random.randint(-100, 100),
+            'timestamp': f'2024-01-01 00:{i:02d}:00'
+        })
     
-    # Test 2: Accumulation pattern
-    print("\n2. Testing Accumulation Pattern:")
-    acc_candles = generate_test_candles("accumulation")
-    vol_div = detect_volume_divergence(acc_candles)
-    slow_break = detect_slow_breakout(acc_candles)
-    acc_score = calculate_accumulation_score(acc_candles)
-    print(f"   Volume Divergence: {vol_div}")
-    print(f"   Slow Breakout: {slow_break}")
-    print(f"   Accumulation Score: {acc_score}")
+    # Breakout phase - consistent closes above average
+    avg_price = base_price
+    for i in range(10, 16):
+        price = avg_price + 0.05 * (i - 9)  # Gradual increase
+        candles.append({
+            'open': price - 0.02,
+            'high': price + 0.03,
+            'low': price - 0.01,
+            'close': price + 0.02,  # Consistently closing higher
+            'volume': 1200 + i * 50,
+            'timestamp': f'2024-01-01 00:{i:02d}:00'
+        })
     
-    # Test 3: Breakout pattern
-    print("\n3. Testing Breakout Pattern:")
-    break_candles = generate_test_candles("breakout")
-    vol_div = detect_volume_divergence(break_candles)
-    slow_break = detect_slow_breakout(break_candles)
-    print(f"   Volume Divergence: {vol_div}")
-    print(f"   Slow Breakout: {slow_break}")
+    return candles
 
-async def test_advanced_detection():
-    """Test advanced stealth accumulation detection"""
-    print("\n\n🔬 Testing Advanced Detection")
-    print("=" * 50)
+def create_volume_divergence_candles():
+    """Create candles with volume divergence pattern"""
+    candles = []
+    base_price = 100.0
     
-    # Test accumulation pattern
-    print("\n1. Advanced Accumulation Detection:")
-    acc_candles = generate_test_candles("accumulation", 30)
-    result = detect_stealth_accumulation_advanced(acc_candles, "TESTUSDT")
+    for i in range(20):
+        # Price stays flat or declines slightly
+        price = base_price - (i * 0.01)
+        # Volume increases significantly
+        volume = 1000 * (1 + i * 0.15)  # 15% increase per candle
+        
+        candles.append({
+            'open': price + 0.02,
+            'high': price + 0.03,
+            'low': price - 0.01,
+            'close': price,
+            'volume': volume,
+            'timestamp': f'2024-01-01 00:{i:02d}:00'
+        })
     
-    print(f"   Detected: {result['detected']}")
-    print(f"   Patterns: {result['patterns']}")
-    print(f"   Strength: {result['strength']}")
-    print(f"   Recommendation: {result['recommendation']}")
+    return candles
+
+async def test_enhanced_detection():
+    print("\n🔬 Enhanced Stealth Detection Tests")
+    print("=" * 70)
     
-    # Test with real-time updates
-    print("\n2. Testing Real-time Detection:")
+    # Test 1: Volume Divergence
+    print("\n1. Testing Volume Divergence Pattern:")
+    div_candles = create_volume_divergence_candles()
+    
+    # Basic detection
+    has_divergence = detect_volume_divergence(div_candles, min_growth_ratio=1.5)
+    print(f"   Basic Detection: {has_divergence}")
+    
+    # Advanced detection
     detector = StealthAccumulationDetector("TESTUSDT")
-    
-    # Simulate real-time updates
-    for i, candle in enumerate(acc_candles[-10:]):
+    for candle in div_candles:
         result = detector.update(candle)
+    
+    advanced_result = detect_stealth_accumulation_advanced(div_candles, "TESTUSDT")
+    print(f"   Advanced Detection: {advanced_result['detected']}")
+    print(f"   Patterns Found: {advanced_result['patterns']}")
+    print(f"   Strength: {advanced_result['strength']}")
+    
+    # Test 2: Slow Breakout
+    print("\n2. Testing Slow Breakout Pattern:")
+    breakout_candles = create_slow_breakout_candles()
+    
+    has_breakout = detect_slow_breakout(breakout_candles)
+    print(f"   Basic Detection: {has_breakout}")
+    
+    # Test 3: Stealth Accumulation
+    print("\n3. Testing Stealth Accumulation Pattern:")
+    accum_candles = create_stealth_accumulation_candles()
+    
+    # Clear cache and detector
+    clear_stealth_cache()
+    detector2 = StealthAccumulationDetector("ACCUMUSDT")
+    
+    # Feed candles one by one
+    for i, candle in enumerate(accum_candles):
+        result = detector2.update(candle)
         if result['detected']:
-            print(f"   Candle {i+1}: Detected {result['type']} (strength: {result['strength']:.2f})")
+            print(f"   Stealth pattern detected at candle {i}!")
+            print(f"   Type: {result['type']}")
+            print(f"   Strength: {result['strength']}")
+    
+    # Full analysis
+    full_result = detect_stealth_accumulation_advanced(accum_candles, "ACCUMUSDT")
+    print(f"\n   Full Analysis:")
+    print(f"   Detected: {full_result['detected']}")
+    print(f"   Patterns: {full_result['patterns']}")
+    print(f"   Recommendation: {full_result['recommendation']}")
+    
+    # Test 4: Real-world scenario
+    print("\n4. Testing Combined Patterns:")
+    
+    # Create mixed pattern candles
+    mixed_candles = []
+    # Start with accumulation
+    mixed_candles.extend(create_stealth_accumulation_candles()[:10])
+    # Add breakout
+    mixed_candles.extend(create_slow_breakout_candles()[10:])
+    
+    mixed_result = detect_stealth_accumulation_advanced(mixed_candles, "MIXEDUSDT")
+    print(f"   Detected: {mixed_result['detected']}")
+    print(f"   All Patterns: {mixed_result['patterns']}")
+    print(f"   Strength: {mixed_result['strength']}")
+    print(f"   Recommendation: {mixed_result['recommendation']}")
     
     # Get statistics
-    stats = get_stealth_statistics("TESTUSDT")
-    print(f"\n3. Statistics:")
-    print(f"   Status: {stats['status']}")
-    if stats['status'] == 'active':
-        print(f"   Total Detections: {stats['total_detections']}")
-        print(f"   Pattern Types: {stats['pattern_types']}")
-        print(f"   Average Strength: {stats['average_strength']}")
+    stats = get_stealth_statistics("MIXEDUSDT")
+    print(f"\n   Statistics: {stats}")
 
-async def test_performance():
-    """Test performance with caching"""
-    print("\n\n⚡ Testing Performance")
-    print("=" * 50)
+async def test_thresholds():
+    """Test with different threshold values"""
+    print("\n⚙️ Testing Different Thresholds")
+    print("=" * 70)
     
-    # Generate large dataset
-    large_candles = generate_test_candles("normal", 100)
+    candles = create_volume_divergence_candles()
     
-    # Test without cache
-    import time
-    
-    print("\n1. Performance without cache:")
-    start = time.time()
-    for _ in range(100):
-        detect_volume_divergence(large_candles, use_cache=False)
-    no_cache_time = time.time() - start
-    print(f"   100 iterations: {no_cache_time:.3f} seconds")
-    
-    # Test with cache
-    print("\n2. Performance with cache:")
-    start = time.time()
-    for _ in range(100):
-        detect_volume_divergence(large_candles, use_cache=True)
-    cache_time = time.time() - start
-    print(f"   100 iterations: {cache_time:.3f} seconds")
-    print(f"   Speedup: {no_cache_time/cache_time:.1f}x")
+    thresholds = [1.2, 1.5, 1.8, 2.0, 2.5]
+    for threshold in thresholds:
+        result = detect_volume_divergence(candles, min_growth_ratio=threshold)
+        print(f"Threshold {threshold}: Detection = {result}")
 
-async def test_edge_cases():
-    """Test edge cases and error handling"""
-    print("\n\n🛡️ Testing Edge Cases")
-    print("=" * 50)
+async def visualize_patterns():
+    """Show what the patterns look like"""
+    print("\n📊 Pattern Visualization")
+    print("=" * 70)
     
-    # Test 1: Empty candles
-    print("\n1. Empty candles:")
-    result = detect_volume_divergence([])
-    print(f"   Result: {result} (should be False)")
+    # Volume Divergence
+    print("\n1. Volume Divergence Pattern:")
+    print("   Price: ↘️ (declining)")
+    print("   Volume: ↗️ (increasing)")
+    print("   Signal: Potential accumulation")
     
-    # Test 2: Invalid data
-    print("\n2. Invalid data:")
-    invalid_candles = [
-        {'close': 0, 'volume': 100},
-        {'close': 100, 'volume': 0},
-        {'close': -100, 'volume': 100}
-    ]
-    result = detect_volume_divergence(invalid_candles)
-    print(f"   Result: {result} (should handle gracefully)")
+    # Slow Breakout
+    print("\n2. Slow Breakout Pattern:")
+    print("   Price: →↗️ (sideways then gradual up)")
+    print("   Volume: ↗️ (increasing)")
+    print("   Signal: Early pump detection")
     
-    # Test 3: Insufficient data
-    print("\n3. Insufficient data:")
-    few_candles = generate_test_candles("normal", 5)
-    result = detect_stealth_accumulation_advanced(few_candles)
-    print(f"   Result: {result['recommendation']} (should be 'insufficient_data')")
+    # Stealth Accumulation
+    print("\n3. Stealth Accumulation:")
+    print("   Phase 1: Price ↘️ Volume ↗️")
+    print("   Phase 2: Price → Volume ↗️↗️")
+    print("   Signal: Smart money accumulating")
 
 async def main():
-    """Main test function"""
-    print("🚀 Stealth Detector Test Suite")
+    print("🚀 Enhanced Stealth Detector Test Suite")
     print("=" * 70)
     
     # Run all tests
-    await test_basic_functions()
-    await test_advanced_detection()
-    await test_performance()
-    await test_edge_cases()
+    await test_enhanced_detection()
+    await test_thresholds()
+    await visualize_patterns()
     
-    print("\n\n✅ All tests completed!")
+    print("\n✅ Enhanced tests completed!")
+    print("\n💡 Key Insights:")
+    print("1. Volume divergence needs price decline + volume increase")
+    print("2. Slow breakout needs consistent closes above average")
+    print("3. Stealth accumulation combines multiple patterns")
+    print("4. Adjust thresholds based on your market (crypto is volatile)")
     
-    # Summary
-    print("\n📊 Summary:")
-    print("- Basic functions: Working")
-    print("- Advanced detection: Working with pattern recognition")
-    print("- Performance: Caching provides significant speedup")
-    print("- Edge cases: Handled gracefully")
+    print("\n🔧 Integration Example:")
+    print("""
+    # In your score.py, add this to score_symbol():
     
-    print("\n💡 Integration Tips:")
-    print("1. Use detect_stealth_accumulation_advanced() for comprehensive analysis")
-    print("2. Enable caching for better performance in production")
-    print("3. Monitor get_stealth_statistics() for pattern insights")
-    print("4. Adjust thresholds based on your market conditions")
+    # Stealth Detection Bonus
+    stealth_result = detect_stealth_accumulation_advanced(candles, symbol)
+    if stealth_result['detected']:
+        if stealth_result['recommendation'] == 'accumulation_zone':
+            score += 1.5 * stealth_result['strength']
+            indicator_scores[f"{tf_label}_stealth_accumulation"] = 1.5
+            used_indicators.add("stealth_accumulation")
+            log(f"🕵️ Stealth accumulation detected: {stealth_result['patterns']}")
+    """)
 
 if __name__ == "__main__":
-    # Run the async main function
     asyncio.run(main())
 
