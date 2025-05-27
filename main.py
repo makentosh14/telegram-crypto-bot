@@ -418,7 +418,10 @@ async def scan_for_new_signals(symbols,trend_context):
             continue
 
         # ---- Primary strategy scoring ----
-        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(symbol, candles_by_tf, market_context=trend_context)
+        from score import enhanced_score_symbol
+        score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
+            symbol, candles_by_tf, market_context=trend_context
+        )
         direction = determine_direction(tf_scores)
         confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
