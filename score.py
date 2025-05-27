@@ -21,6 +21,7 @@ from indicator_fixes import rebalance_indicator_scores, get_balanced_rsi_signal,
 from enhanced_entry_validator import entry_validator
 from pattern_context_analyzer import pattern_context_analyzer
 from divergence_detector import divergence_detector
+import numpy as np
 
 # Enhanced weights including pattern-specific weights
 WEIGHTS = {
