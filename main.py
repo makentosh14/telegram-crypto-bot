@@ -51,6 +51,7 @@ from auto_reentry import (
     cleanup_old_records,
     update_reentry_performance
 )
+from stealth_detector import cleanup_stealth_cache
 
 load_memory()
 
