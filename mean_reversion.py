@@ -15,6 +15,7 @@ from atr import calculate_atr
 from logger import log, write_log
 from ema import calculate_dema, calculate_tema, calculate_ema_ribbon, analyze_ema_ribbon
 from macd import get_macd_divergence
+from stealth_detector.py import detect_stealth_accumulation_advanced
 import time
 
 # Configuration constants
@@ -477,6 +478,18 @@ def score_mean_reversion(symbol: str, candles_by_tf: Dict[str, List[Dict]], regi
                     score += 0.7 * whale_advanced['strength']
                     reasons[f"{tf}m_whale_distribution"] = True
                     confidence_factors.append(0.8)
+
+            stealth_data = detect_stealth_accumulation_advanced(candles, symbol)
+            if stealth_data['detected']:
+                if direction == "Long" and stealth_data['recommendation'] in ['strong_accumulation', 'moderate_accumulation']:
+                    score += 1.0 * stealth_data['strength']
+                    reasons[f"{tf}m_stealth_accumulation"] = stealth_data['strength']
+                    confidence_factors.append(0.8)
+                    log(f"   🕵️ Stealth accumulation detected: {stealth_data['patterns']}")
+                elif direction == "Short" and 'distribution' in stealth_data['patterns']:
+                    score += 0.8
+                    reasons[f"{tf}m_stealth_distribution"] = True
+                    confidence_factors.append(0.7)
             
             # ===== END EXISTING ADVANCED INDICATORS =====
             
