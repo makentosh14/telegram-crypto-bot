@@ -15,7 +15,7 @@ from atr import calculate_atr
 from logger import log, write_log
 from ema import calculate_dema, calculate_tema, calculate_ema_ribbon, analyze_ema_ribbon
 from macd import get_macd_divergence
-from stealth_detector.py import detect_stealth_accumulation_advanced
+from stealth_detector import detect_stealth_accumulation_advanced
 import time
 
 # Configuration constants
