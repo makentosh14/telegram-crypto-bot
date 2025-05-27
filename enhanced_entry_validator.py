@@ -112,19 +112,21 @@ class EntryValidator:
             candle = candles_1m[i]
             close = float(candle['close'])
             open_price = float(candle['open'])
+            high = float(candle['high'])
+            low = float(candle['low'])
+
+            # NEW: Only count real body candles (ignore small bodies)
+            body_pct = abs(close - open_price) / close if close > 0 else 0
+            if body_pct < 0.003:  # < 0.3%
+                continue
             
-            if direction == "Long":
-                if close > open_price:
-                    consecutive += 1
-                else:
-                    consecutive = 0
-            else:  # Short
-                if close < open_price:
-                    consecutive += 1
-                else:
-                    consecutive = 0
-                    
-        # If 5+ consecutive candles in opposite direction, momentum is exhausted
+            if direction == "Long" and close > open_price:
+                consecutive += 1
+            elif direction == "Short" and close < open_price:
+                consecutive += 1
+            else:
+                consecutive = 0
+
         return consecutive >= 7
     
     def check_key_levels(self, symbol: str, candles_by_tf: Dict, 
