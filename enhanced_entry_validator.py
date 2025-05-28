@@ -206,7 +206,7 @@ class EntryValidator:
                 log(f"⚠️ Not enough data for VWAP calculation on {symbol}")
                 return levels
 
-            vwap_numerator = sum(closes[-20:][i] * volumes[-20:][i] for i in range(20))
+            vwap_numerator = sum(c * v for c, v in zip(closes[-20:], volumes[-20:]))
             vwap_denominator = sum(volumes[-20:])
             vwap = vwap_numerator / vwap_denominator
             levels["vwap"] = vwap
