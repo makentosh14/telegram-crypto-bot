@@ -771,6 +771,7 @@ async def scan_for_new_signals(symbols,trend_context):
         indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
 
         # NOW check for range break setup AFTER score is defined
+        # NOW check for range break setup AFTER score is defined
         range_break_bonus = 0
         range_break_details = {}
         break_confidence = 0  # Initialize this too
