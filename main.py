@@ -456,14 +456,25 @@ async def process_pump_signal(pump_signal, trend_context):
         else:
             indicator_scores[f"pump_{reason}"] = 1.0
     
+    # Calculate SL/TP
+    price = pump_signal['current_price']
+    trade_type = "Scalp"
+    direction = "Long"
+    confidence = min(pump_signal['confidence'] * 100, 95)
+    
+    result = calculate_dynamic_sl_tp(
+        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile"
+    )
+    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    
     # Force trade evaluation
-    await execute_trade_if_valid({
+    trade = await execute_trade_if_valid({
         "symbol": symbol,
-        "price": pump_signal['current_price'],
-        "trade_type": "Scalp",  # Pumps are usually scalps
-        "direction": "Long",
+        "price": price,
+        "trade_type": trade_type,
+        "direction": direction,
         "score": base_score,
-        "confidence": min(pump_signal['confidence'] * 100, 95),
+        "confidence": confidence,
         "candles": candles_by_tf,
         "indicator_scores": indicator_scores,
         "used_indicators": list(pump_signal['reasons'].keys()),
@@ -472,6 +483,54 @@ async def process_pump_signal(pump_signal, trend_context):
         "pump_potential": True,
         "market_type": get_symbol_category(symbol)
     })
+    
+    # Send Telegram notification if trade was executed
+    if trade:
+        msg = format_trade_signal(
+            symbol=symbol,
+            score=base_score,
+            tf_scores={"pump_detector": base_score},
+            trend=trend_context,
+            entry_price=price,
+            sl=sl,
+            tp1=tp1,
+            trade_type=trade_type,
+            direction=direction,
+            trailing_pct=trailing_pct,
+            leverage=DEFAULT_LEVERAGE,
+            risk_pct=6.0,
+            confidence=confidence,
+            sl_pct=sl_pct,
+            tp1_pct=tp1_pct
+        )
+        msg += f"\n🚀 <b>Pre-Pump Signal Detected!</b>\n"
+        msg += f"Triggers: {', '.join(pump_signal['reasons'].keys())}"
+        
+        await send_telegram_message(msg)
+        
+        # Track the trade
+        active_signals[symbol] = {
+            'score': base_score,
+            'score_history': [base_score],
+            'pump_signal': True
+        }
+        
+        track_active_trade(
+            symbol=symbol,
+            trade_type=trade_type,
+            initial_score=base_score,
+            entry_price=trade['entry'],
+            direction=direction,
+            trailing_pct=trade.get("trailing_pct"),
+            tp1_target=trade.get("tp1"),
+            tp1_pct=tp1_pct,
+            tp2=trade.get("tp2"),
+            sl=trade.get("sl"),
+            qty=trade.get("qty"),
+            sl_order_id=trade.get("sl_order_id"),
+            exit_tranches=trade.get("exit_tranches"),
+            has_pump_potential=True
+        )
 
 async def process_break_signal(break_signal, trend_context):
     """Process a range break signal into a trade"""
@@ -492,13 +551,24 @@ async def process_break_signal(break_signal, trend_context):
         else:
             indicator_scores[f"break_{reason}"] = 1.0
     
-    await execute_trade_if_valid({
+    # Calculate SL/TP
+    price = break_signal['current_price']
+    trade_type = "Scalp"
+    direction = break_signal['direction']
+    confidence = min(break_signal['confidence'] * 100, 90)
+    
+    result = calculate_dynamic_sl_tp(
+        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile"
+    )
+    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    
+    trade = await execute_trade_if_valid({
         "symbol": symbol,
-        "price": break_signal['current_price'],
-        "trade_type": "Scalp",
-        "direction": break_signal['direction'],
+        "price": price,
+        "trade_type": trade_type,
+        "direction": direction,
         "score": base_score,
-        "confidence": min(break_signal['confidence'] * 100, 90),
+        "confidence": confidence,
         "candles": candles_by_tf,
         "indicator_scores": indicator_scores,
         "used_indicators": list(break_signal['reasons'].keys()),
@@ -506,6 +576,55 @@ async def process_break_signal(break_signal, trend_context):
         "regime": "volatile",
         "market_type": get_symbol_category(symbol)
     })
+    
+    # Send Telegram notification if trade was executed
+    if trade:
+        msg = format_trade_signal(
+            symbol=symbol,
+            score=base_score,
+            tf_scores={"break_detector": base_score},
+            trend=trend_context,
+            entry_price=price,
+            sl=sl,
+            tp1=tp1,
+            trade_type=trade_type,
+            direction=direction,
+            trailing_pct=trailing_pct,
+            leverage=DEFAULT_LEVERAGE,
+            risk_pct=6.0,
+            confidence=confidence,
+            sl_pct=sl_pct,
+            tp1_pct=tp1_pct
+        )
+        msg += f"\n🎯 <b>Range Break Signal!</b>\n"
+        msg += f"Direction: {direction}\n"
+        msg += f"Triggers: {', '.join(break_signal['reasons'].keys())}"
+        
+        await send_telegram_message(msg)
+        
+        # Track the trade
+        active_signals[symbol] = {
+            'score': base_score,
+            'score_history': [base_score],
+            'range_break': True
+        }
+        
+        track_active_trade(
+            symbol=symbol,
+            trade_type=trade_type,
+            initial_score=base_score,
+            entry_price=trade['entry'],
+            direction=direction,
+            trailing_pct=trade.get("trailing_pct"),
+            tp1_target=trade.get("tp1"),
+            tp1_pct=tp1_pct,
+            tp2=trade.get("tp2"),
+            sl=trade.get("sl"),
+            qty=trade.get("qty"),
+            sl_order_id=trade.get("sl_order_id"),
+            exit_tranches=trade.get("exit_tranches"),
+            has_pump_potential=False
+        )
 
 
 async def scan_for_new_signals(symbols,trend_context):
