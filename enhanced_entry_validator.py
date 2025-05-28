@@ -189,12 +189,18 @@ class EntryValidator:
             # Local low
             if lows[i] == min(lows[i-5:i+5]):
                 levels[f"support_{i}"] = lows[i]
+
+        if not volumes or sum(volumes) == 0:
+            return None  # or return a default/fallback level or False
                 
         # VWAP as key level
-        if len(candles) >= 20:
-            volumes = [float(c['volume']) for c in candles[-20:]]
+        if len(closes) < 20 or len(volumes) < 20 or sum(volumes) == 0:
+            log(f"⚠️ Not enough data for VWAP calculation on {symbol}")
+            return None
+            
             vwap = sum(closes[i] * volumes[i] for i in range(-20, 0)) / sum(volumes)
             levels["vwap"] = vwap
+            
             
         # Cache the results
         self.key_levels_cache[cache_key] = (datetime.now(), levels)
