@@ -434,6 +434,78 @@ async def range_break_scanner_loop(symbols):
             
         await asyncio.sleep(30)  # Scan every 30 seconds
 
+async def process_pump_signal(pump_signal, trend_context):
+    """Process a pre-pump signal into a trade"""
+    symbol = pump_signal['symbol']
+    
+    # Get current candles
+    candles_by_tf = {
+        tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
+        if str(tf) in live_candles[symbol]
+    }
+    
+    # Create artificial high score for pump
+    base_score = 8.0 + (pump_signal['confidence'] * 2)
+    
+    # Build indicator scores from pump reasons
+    indicator_scores = {}
+    for reason, data in pump_signal['reasons'].items():
+        if isinstance(data, dict) and 'strength' in data:
+            indicator_scores[f"pump_{reason}"] = data['strength']
+        else:
+            indicator_scores[f"pump_{reason}"] = 1.0
+    
+    # Force trade evaluation
+    await execute_trade_if_valid({
+        "symbol": symbol,
+        "price": pump_signal['current_price'],
+        "trade_type": "Scalp",  # Pumps are usually scalps
+        "direction": "Long",
+        "score": base_score,
+        "confidence": min(pump_signal['confidence'] * 100, 95),
+        "candles": candles_by_tf,
+        "indicator_scores": indicator_scores,
+        "used_indicators": list(pump_signal['reasons'].keys()),
+        "tf_scores": {"pump_detector": base_score},
+        "regime": "volatile",  # Override regime
+        "pump_potential": True,
+        "market_type": get_symbol_category(symbol)
+    })
+
+async def process_break_signal(break_signal, trend_context):
+    """Process a range break signal into a trade"""
+    symbol = break_signal['symbol']
+    
+    # Similar logic to pump signal but for breaks
+    candles_by_tf = {
+        tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
+        if str(tf) in live_candles[symbol]
+    }
+    
+    base_score = 7.5 + (break_signal['confidence'] * 1.5)
+    
+    indicator_scores = {}
+    for reason, data in break_signal['reasons'].items():
+        if isinstance(data, dict):
+            indicator_scores[f"break_{reason}"] = data.get('strength', 1.0)
+        else:
+            indicator_scores[f"break_{reason}"] = 1.0
+    
+    await execute_trade_if_valid({
+        "symbol": symbol,
+        "price": break_signal['current_price'],
+        "trade_type": "Scalp",
+        "direction": break_signal['direction'],
+        "score": base_score,
+        "confidence": min(break_signal['confidence'] * 100, 90),
+        "candles": candles_by_tf,
+        "indicator_scores": indicator_scores,
+        "used_indicators": list(break_signal['reasons'].keys()),
+        "tf_scores": {"break_detector": base_score},
+        "regime": "volatile",
+        "market_type": get_symbol_category(symbol)
+    })
+
 
 async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
