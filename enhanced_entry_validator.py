@@ -155,7 +155,7 @@ class EntryValidator:
         return True, "Safe distance from key levels"
     
     def calculate_key_levels(self, symbol: str, candles_by_tf: Dict) -> Dict[str, float]:
-    """Calculate support and resistance levels"""
+        """Calculate support and resistance levels"""
     
         # Check cache first
         cache_key = f"{symbol}_levels"
