@@ -850,8 +850,14 @@ async def execute_twap_slice(symbol, category, side, slice_qty, entries):
         log(f"❌ TWAP Slice Error: {e}", level="ERROR")
 
 # Add this at the bottom of trade_executor.py for testing
+# Add at the bottom of trade_executor.py
 async def test_range_break_integration():
     """Test function to verify range break integration"""
+    
+    # Mock account balance
+    global _cached_balance
+    _cached_balance = 1000  # Mock $1000 balance
+    
     test_signal = {
         "symbol": "BTCUSDT",
         "price": 50000,
@@ -859,7 +865,9 @@ async def test_range_break_integration():
         "direction": "Long",
         "score": 8.5,
         "confidence": 85,
-        "candles": {},
+        "candles": {
+            "5": [{"close": "50000", "open": "49900", "high": "50100", "low": "49800", "volume": "100"}] * 30
+        },
         "indicator_scores": {"range_break": 0.8},
         "used_indicators": ["range_break"],
         "tf_scores": {"5": 8.5},
@@ -868,15 +876,43 @@ async def test_range_break_integration():
             "range_high": 51000,
             "range_low": 49000,
             "range_width_pct": 4.0,
-            "pre_breakout": True
+            "pre_breakout": True,
+            "buildup_patterns": ["price_compression", "volume_tightening"]
         },
         "range_break_confidence": 0.85,
         "exit_strategy": "pump_optimized",
         "trailing_multiplier": 1.5,
         "tp1_multiplier": 1.3,
-        "exit_tranches": [0.25, 0.35, 0.40]
+        "exit_tranches": [0.25, 0.35, 0.40],
+        "market_type": "linear"
     }
     
     log("🧪 Testing range break integration...")
-    # This will test if all parameters are properly processed
-    # Don't actually execute the trade, just validate processing
+    log(f"📊 Test Signal: {test_signal['symbol']} @ {test_signal['price']}")
+    log(f"📊 Range: {test_signal['range_break_details']['range_low']} - {test_signal['range_break_details']['range_high']}")
+    
+    # Test the execution (dry run - comment out actual API calls)
+    try:
+        # You can temporarily modify execute_trade_if_valid to skip actual trading
+        result = await execute_trade_if_valid(test_signal, max_risk=0.06)
+        
+        if result:
+            log("✅ Test passed! Trade details:")
+            log(f"  Entry: {result.get('entry')}")
+            log(f"  SL: {result.get('sl')} ({result.get('sl_pct')}%)")
+            log(f"  TP1: {result.get('tp1')} ({result.get('tp1_pct')}%)")
+            log(f"  Exit Strategy: {result.get('exit_strategy')}")
+            log(f"  Exit Tranches: {result.get('exit_tranches')}")
+            log(f"  Range Levels: {result.get('range_levels')}")
+        else:
+            log("❌ Test failed - no trade executed")
+            
+    except Exception as e:
+        log(f"❌ Test error: {e}")
+        import traceback
+        log(traceback.format_exc())
+
+# To run the test, add this to the end of the file:
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_range_break_integration())
