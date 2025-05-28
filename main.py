@@ -1074,6 +1074,30 @@ async def scan_for_new_signals(symbols,trend_context):
                 )
                 msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
 
+            # Add pump potential info if detected
+                if bo_pump_potential:
+                    msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
+                    
+                await send_telegram_message(msg)
+
+                if bo_trade:
+                    track_active_trade(
+                        symbol=symbol,
+                        trade_type="Scalp",
+                        initial_score=bo_score,
+                        entry_price=price,
+                        direction=bo_dir,
+                        trailing_pct=trailing_pct,
+                        tp1_target=bo_trade.get("tp1"),
+                        tp1_pct=tp1_pct,
+                        tp2=bo_trade.get("tp2"),  # Now including TP2
+                        sl=bo_trade.get("sl"),
+                        qty=bo_trade.get("qty"),
+                        sl_order_id=bo_trade.get("sl_order_id"),
+                        exit_tranches=bo_trade.get("exit_tranches"),
+                        has_pump_potential=bo_pump_potential
+                    )        
+
         try:
             # Scan for both breaks and pumps
             potential_breaks, potential_pumps = await scan_for_breaks_and_pumps(
@@ -1114,30 +1138,6 @@ async def scan_for_new_signals(symbols,trend_context):
         
         except Exception as e:
             log(f"❌ Error in break/pump detection for {symbol}: {e}", level="ERROR")
-                
-                # Add pump potential info if detected
-                if bo_pump_potential:
-                    msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
-                    
-                await send_telegram_message(msg)
-
-                if bo_trade:
-                    track_active_trade(
-                        symbol=symbol,
-                        trade_type="Scalp",
-                        initial_score=bo_score,
-                        entry_price=price,
-                        direction=bo_dir,
-                        trailing_pct=trailing_pct,
-                        tp1_target=bo_trade.get("tp1"),
-                        tp1_pct=tp1_pct,
-                        tp2=bo_trade.get("tp2"),  # Now including TP2
-                        sl=bo_trade.get("sl"),
-                        qty=bo_trade.get("qty"),
-                        sl_order_id=bo_trade.get("sl_order_id"),
-                        exit_tranches=bo_trade.get("exit_tranches"),
-                        has_pump_potential=bo_pump_potential
-                    )
 
 def check_special_entry_conditions(symbol, score, indicator_scores, used_indicators, candles_by_tf, trend_context, trade_type):
     """Check for special conditions that warrant entry despite lower score"""
