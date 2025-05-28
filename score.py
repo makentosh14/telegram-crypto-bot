@@ -95,7 +95,7 @@ def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
     if not entry_valid:
         log(f"❌ Entry validation failed for {symbol}: {entry_reason}")
         # Severely penalize the score
-        original_score *= 0.3
+        original_score *= 0.7
         indicator_scores["entry_validation_failed"] = -3.0
         used_indicators.append("entry_validation_failed")
         return original_score, tf_scores, trade_type, indicator_scores, used_indicators
