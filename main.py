@@ -395,50 +395,60 @@ def is_short_favorable(candles_by_tf, trend_context):
     return True
 
 async def range_break_scanner_loop(symbols):
-    """Dedicated loop for proactive break/pump detection"""
+    """Enhanced range break scanner with full feature utilization"""
     while True:
         try:
             trend_context = await get_trend_context_cached()
+            
+            # Enhanced trend context with more data
+            trend_context['market_season'] = trend_context.get('altseason', 'no')
+            trend_context['volatility'] = 'high' if trend_context.get('regime') == 'volatile' else 'normal'
             
             # Scan all symbols for breaks and pumps
             potential_breaks, potential_pumps = await scan_for_breaks_and_pumps(
                 symbols, live_candles, trend_context
             )
             
-            # Process pump signals with priority
-            for pump_signal in potential_pumps:
+            # Sort by confidence for priority processing
+            potential_pumps.sort(key=lambda x: x['confidence'], reverse=True)
+            potential_breaks.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            # Process top pump signals with priority
+            for pump_signal in potential_pumps[:5]:  # Top 5 pumps
                 symbol = pump_signal['symbol']
-    
+                
                 # Skip if already in active trade
                 if symbol in active_trades:
                     continue
-        
+                
                 if symbol in active_signals or is_duplicate_signal(symbol):
                     continue
-                    
+                
+                # Process high confidence pumps immediately
                 if pump_signal['confidence'] >= 0.7:
                     log(f"🚀 HIGH CONFIDENCE PRE-PUMP: {symbol} - Confidence: {pump_signal['confidence']:.2f}")
+                    await process_enhanced_pump_signal(pump_signal, trend_context)
                     
-                    # Trigger immediate trade evaluation
-                    # Force a trade signal with boosted score
-                    await process_pump_signal(pump_signal, trend_context)
+                # Medium confidence pumps - wait for confirmation
+                elif pump_signal['confidence'] >= 0.6:
+                    # Store for monitoring
+                    if symbol not in range_break_detector.pre_breakout_alerts:
+                        log(f"👀 Monitoring potential pump: {symbol} - Confidence: {pump_signal['confidence']:.2f}")
             
             # Process break signals
-            for break_signal in potential_breaks:
+            for break_signal in potential_breaks[:5]:  # Top 5 breaks
                 symbol = break_signal['symbol']
                 if symbol in active_signals or is_duplicate_signal(symbol):
                     continue
-                    
+                
                 if break_signal['confidence'] >= 0.65:
                     log(f"🎯 RANGE BREAK DETECTED: {symbol} - Direction: {break_signal['direction']}")
-                    
-                    # Trigger trade evaluation
-                    await process_break_signal(break_signal, trend_context)
+                    await process_enhanced_break_signal(break_signal, trend_context)
                     
         except Exception as e:
-            log(f"❌ Error in range break scanner: {e}", level="ERROR")
+            log(f"❌ Error in enhanced range break scanner: {e}", level="ERROR")
             
-        await asyncio.sleep(30)  # Scan every 30 seconds
+        await asyncio.sleep(20)  # Faster scanning for better timing
 
 async def scan_for_breaks_and_pumps(symbols: List[str], live_candles: Dict, 
                                    trend_context: Dict) -> Tuple[List[Dict], List[Dict]]:
@@ -500,101 +510,111 @@ def should_override_regime_for_break(break_confidence: float, current_regime: st
     return False
 
 async def process_pump_signal(pump_signal, trend_context):
-    """Process a pre-pump signal into a trade"""
+    """Enhanced pump signal processing with full range break integration"""
     symbol = pump_signal['symbol']
     
-    # Get current candles
+    # Get comprehensive candle data
     candles_by_tf = {
         tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
         if str(tf) in live_candles[symbol]
     }
     
-    # Create artificial high score for pump
+    # Run full range breakout analysis for detailed data
+    breakout_detected, direction, confidence, details = range_break_detector.detect_range_breakout(
+        symbol, candles_by_tf.get('5', []), '5', trend_context
+    )
+    
+    # Calculate enhanced score based on all factors
     base_score = 6.5 + (pump_signal['confidence'] * 1.5)
     
-    # Build indicator scores from pump reasons
+    # Add bonuses for specific patterns
+    if details.get('pre_breakout'):
+        base_score += 0.5
+        log(f"   📈 Pre-breakout patterns: {details.get('buildup_patterns', [])}")
+    
+    if details.get('stealth_score', 0) > 0.5:
+        base_score += 0.3
+        log(f"   🕵️ Strong stealth accumulation: {details['stealth_score']:.2f}")
+    
+    if details.get('volume_analysis', {}).get('tightening', {}).get('detected'):
+        base_score += 0.3
+        log(f"   📉 Volume tightening detected")
+    
+    # Build comprehensive indicator scores
     indicator_scores = {}
+    
+    # Add all detected factors
     for reason, data in pump_signal['reasons'].items():
         if isinstance(data, dict) and 'strength' in data:
             indicator_scores[f"pump_{reason}"] = data['strength']
         else:
             indicator_scores[f"pump_{reason}"] = 1.0
     
-    # Calculate SL/TP
+    # Add range break specific indicators
+    if details.get('integrated_factors'):
+        for factor, score in details['integrated_factors'].items():
+            indicator_scores[f"range_{factor}"] = score
+    
+    # Calculate optimal entry based on range position
     price = pump_signal['current_price']
-    trade_type = "Scalp"
-    direction = "Long"
-    confidence = min(pump_signal['confidence'] * 100, 95)
+    if details.get('range_low') and details.get('range_high'):
+        # Adjust entry for better risk/reward
+        range_position = (price - details['range_low']) / (details['range_high'] - details['range_low'])
+        if range_position < 0.3:  # Near support - ideal entry
+            base_score += 0.2
+            indicator_scores['optimal_entry'] = 1.0
     
-    result = calculate_dynamic_sl_tp(
-        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile"
-    )
-    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    # Enhanced exit strategy for pumps
+    exit_strategy_params = {
+        'exit_strategy': 'pump_optimized',
+        'trailing_multiplier': 1.5,  # Wider trailing for pumps
+        'tp1_multiplier': 1.3,  # Higher TP1 for pumps
+        'exit_tranches': [0.25, 0.35, 0.40]  # Optimized for letting pumps run
+    }
     
-    # Force trade evaluation
+    # Execute trade with enhanced parameters
     trade = await execute_trade_if_valid({
         "symbol": symbol,
         "price": price,
-        "trade_type": trade_type,
-        "direction": direction,
+        "trade_type": "Scalp",  # Pumps usually start as scalps
+        "direction": "Long",
         "score": base_score,
-        "confidence": confidence,
+        "confidence": min(pump_signal['confidence'] * 100, 95),
         "candles": candles_by_tf,
         "indicator_scores": indicator_scores,
-        "used_indicators": list(pump_signal['reasons'].keys()),
+        "used_indicators": list(pump_signal['reasons'].keys()) + ['range_break'],
         "tf_scores": {"pump_detector": base_score},
-        "regime": "volatile",  # Override regime
+        "regime": "volatile",
         "pump_potential": True,
+        "range_break_details": details,
+        **exit_strategy_params,
         "market_type": get_symbol_category(symbol)
     })
     
-    # Send Telegram notification if trade was executed
     if trade:
-        msg = format_trade_signal(
-            symbol=symbol,
-            score=base_score,
-            tf_scores={"pump_detector": base_score},
-            trend=trend_context,
-            entry_price=price,
-            sl=sl,
-            tp1=tp1,
-            trade_type=trade_type,
-            direction=direction,
-            trailing_pct=trailing_pct,
-            leverage=DEFAULT_LEVERAGE,
-            risk_pct=6.0,
-            confidence=confidence,
-            sl_pct=sl_pct,
-            tp1_pct=tp1_pct
-        )
-        msg += f"\n🚀 <b>Pre-Pump Signal Detected!</b>\n"
-        msg += f"Triggers: {', '.join(pump_signal['reasons'].keys())}"
+        # Enhanced notification with range details
+        msg = f"🚀 <b>PUMP SIGNAL EXECUTED</b>\n"
+        msg += f"<b>{symbol}</b> @ {price:.8f}\n"
+        msg += f"Score: {base_score:.2f} | Conf: {pump_signal['confidence']*100:.1f}%\n"
+        
+        if details.get('range_high') and details.get('range_low'):
+            msg += f"\n📊 <b>Range Analysis:</b>\n"
+            msg += f"• High: {details['range_high']:.8f}\n"
+            msg += f"• Low: {details['range_low']:.8f}\n"
+            msg += f"• Width: {details['range_width_pct']:.2f}%\n"
+        
+        if details.get('buildup_patterns'):
+            msg += f"\n🎯 <b>Patterns:</b> {', '.join(details['buildup_patterns'])}"
         
         await send_telegram_message(msg)
         
-        # Track the trade
+        # Track with enhanced data
         active_signals[symbol] = {
             'score': base_score,
             'score_history': [base_score],
-            'pump_signal': True
+            'pump_signal': True,
+            'range_data': details
         }
-        
-        track_active_trade(
-            symbol=symbol,
-            trade_type=trade_type,
-            initial_score=base_score,
-            entry_price=trade['entry'],
-            direction=direction,
-            trailing_pct=trade.get("trailing_pct"),
-            tp1_target=trade.get("tp1"),
-            tp1_pct=tp1_pct,
-            tp2=trade.get("tp2"),
-            sl=trade.get("sl"),
-            qty=trade.get("qty"),
-            sl_order_id=trade.get("sl_order_id"),
-            exit_tranches=trade.get("exit_tranches"),
-            has_pump_potential=True
-        )
 
 async def process_break_signal(break_signal, trend_context):
     """Process a range break signal into a trade"""
@@ -730,6 +750,45 @@ async def scan_for_new_signals(symbols,trend_context):
 
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
+
+        range_break_bonus = 0
+        range_break_details = {}
+        
+        # Check for range break setup
+        if candles_by_tf.get('5') and len(candles_by_tf['5']) >= 50:
+            breakout, break_direction, break_confidence, details = range_break_detector.detect_range_breakout(
+                symbol, candles_by_tf['5'], '5', trend_context
+            )
+            
+            if breakout:
+                # Add bonus to score based on confidence
+                range_break_bonus = break_confidence * 2.0
+                range_break_details = details
+                
+                # Add to indicator scores
+                indicator_scores['range_break'] = break_confidence
+                indicator_scores['range_confidence'] = break_confidence
+                
+                # If direction matches, add extra bonus
+                if break_direction == direction:
+                    range_break_bonus += 0.5
+                    indicator_scores['range_direction_aligned'] = 1.0
+                
+                # Log range break detection
+                log(f"   🎯 Range break detected: {break_direction} with {break_confidence:.2f} confidence")
+                
+                # Add specific pattern bonuses
+                if details.get('pre_breakout'):
+                    range_break_bonus += 0.3
+                    indicator_scores['pre_breakout'] = 1.0
+                    log(f"   📈 Pre-breakout patterns: {details.get('buildup_patterns', [])}")
+                
+                # Override trade type for range breaks
+                if break_confidence > 0.7:
+                    trade_type = "Scalp"  # Range breaks often start as scalps
+                    
+        # Apply range break bonus
+        score += range_break_bonus
 
         # ---- Primary strategy scoring ----
         from score import enhanced_score_symbol
@@ -942,6 +1001,7 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"   📊 Pattern confidence adjustment: {pattern_confidence_multiplier:.2f} (final conf: {confidence:.1f}%)")
 
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
+    if min_score_met and meets_quality_standards(...):    
         trade = await execute_trade_if_valid({
             "symbol": symbol,
             "price": price,
@@ -960,7 +1020,10 @@ async def scan_for_new_signals(symbols,trend_context):
             "regime": regime,
             "pump_potential": pump_potential,
             "always_allow_swing": ALWAYS_ALLOW_SWING and trade_type == "Swing",
-            "market_type": get_symbol_category(symbol)
+            "market_type": get_symbol_category(symbol),
+            "range_break_active": range_break_bonus > 0,
+            "range_break_details": range_break_details,
+            "range_break_confidence": break_confidence if range_break_bonus > 0 else 0
         })
 
         # Format and send notification message after trade is placed
