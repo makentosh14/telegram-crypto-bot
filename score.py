@@ -880,6 +880,16 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
 
     return round(best_score, 2), tf_scores, best_type, indicator_scores, list(used_indicators)
 
+# After calculating type_scores, add bonuses for shorter timeframes
+    if type_scores["Scalp"] > 0 and tf_count["Scalp"] >= 2:
+        # Bonus for good scalp setups
+        type_scores["Scalp"] *= 1.2
+        
+    if type_scores["Intraday"] > 0 and tf_count["Intraday"] >= 2:
+        # Bonus for good intraday setups
+        type_scores["Intraday"] *= 1.15
+    
+
 def get_minimum_volume_threshold(symbol, timeframe):
     """Dynamic volume threshold based on context"""
     
@@ -887,22 +897,26 @@ def get_minimum_volume_threshold(symbol, timeframe):
     liquid_bases = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE']
     for base in liquid_bases:
         if base in symbol:
-            return 50  # These are always liquid enough
+            return 30  # These are always liquid enough
+
+    # During altseason, lower all thresholds
+    if market_context and market_context.get("altseason") in ["confirmed", "strong_altseason"]:
+        return 50  # Universal low threshold during altseason
     
     # Timeframe-based thresholds
     timeframe = str(timeframe)  # Ensure string
     
     # Higher standards for scalping (need liquidity for quick exits)
     if timeframe in ['1', '3']:
-        return 300  # Higher for scalp trades
+        return 200  # Higher for scalp trades
     
     # Medium for intraday
     elif timeframe in ['5', '15', '30']:
-        return 150
+        return 100
     
     # Lower for swing (have time to exit)
     else:  # 60, 240
-        return 80
+        return 50
 
 def check_volume_quality(candles):
     """Check volume consistency, not just amount"""
