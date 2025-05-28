@@ -155,69 +155,59 @@ class EntryValidator:
         return True, "Safe distance from key levels"
     
     def calculate_key_levels(self, symbol: str, candles_by_tf: Dict) -> Dict[str, float]:
-        """Calculate support and resistance levels"""
-        
+    """Calculate support and resistance levels"""
+    
         # Check cache first
         cache_key = f"{symbol}_levels"
         if cache_key in self.key_levels_cache:
             cached_time, cached_levels = self.key_levels_cache[cache_key]
             if (datetime.now() - cached_time).seconds < self.cache_ttl:
                 return cached_levels
-                
+            
         levels = {}
-        
+    
         # Use 15m candles for key levels
         candles = candles_by_tf.get("15", [])
         if len(candles) < 50:
             return levels
-            
+        
         # Get highs and lows
         highs = [float(c['high']) for c in candles[-50:]]
         lows = [float(c['low']) for c in candles[-50:]]
         closes = [float(c['close']) for c in candles[-50:]]
-        
+    
         # Recent high/low
         levels["recent_high"] = max(highs[-20:])
         levels["recent_low"] = min(lows[-20:])
-        
+    
         # Find local peaks and troughs
         for i in range(10, len(highs) - 10):
             # Local high
             if highs[i] == max(highs[i-5:i+5]):
                 levels[f"resistance_{i}"] = highs[i]
-                
+            
             # Local low
             if lows[i] == min(lows[i-5:i+5]):
                 levels[f"support_{i}"] = lows[i]
-
-        if not volumes or sum(volumes) == 0:
-            return None  # or return a default/fallback level or False
-                
+    
         # VWAP as key level
-        candles = candles_by_tf.get('15') or candles_by_tf.get('5')
-        if not candles or len(candles) < 20:
-            return levels  # Not enough data
-
         try:
-            closes = [float(c["close"]) for c in candles[-50:]]
-            volumes = [float(c["volume"]) for c in candles[-50:]]
-
-            if len(closes) < 20 or len(volumes) < 20 or sum(volumes[-20:]) == 0:
-                log(f"⚠️ Not enough data for VWAP calculation on {symbol}")
-                return levels
-
-            vwap_numerator = sum(c * v for c, v in zip(closes[-20:], volumes[-20:]))
-            vwap_denominator = sum(volumes[-20:])
-            vwap = vwap_numerator / vwap_denominator
-            levels["vwap"] = vwap
-        except Exception as e:
-            log(f"❌ VWAP calculation failed for {symbol}: {e}")
-
-        return levels
+            # Use the candles we already have
+            if len(candles) >= 20:
+                volumes = [float(c.get("volume", 0)) for c in candles[-20:]]
+                closes_for_vwap = [float(c["close"]) for c in candles[-20:]]
             
+                if sum(volumes) > 0:
+                    vwap_numerator = sum(c * v for c, v in zip(closes_for_vwap, volumes))
+                    vwap_denominator = sum(volumes)
+                    vwap = vwap_numerator / vwap_denominator
+                    levels["vwap"] = vwap
+        except Exception as e:
+            log(f"⚠️ VWAP calculation failed for {symbol}: {e}")
+    
         # Cache the results
         self.key_levels_cache[cache_key] = (datetime.now(), levels)
-        
+    
         return levels
     
     def check_timeframe_alignment(self, candles_by_tf: Dict, direction: str, 
