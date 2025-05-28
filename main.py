@@ -393,6 +393,47 @@ def is_short_favorable(candles_by_tf, trend_context):
     
     return True
 
+async def range_break_scanner_loop(symbols):
+    """Dedicated loop for proactive break/pump detection"""
+    while True:
+        try:
+            trend_context = await get_trend_context_cached()
+            
+            # Scan all symbols for breaks and pumps
+            potential_breaks, potential_pumps = await scan_for_breaks_and_pumps(
+                symbols, live_candles, trend_context
+            )
+            
+            # Process pump signals with priority
+            for pump_signal in potential_pumps:
+                symbol = pump_signal['symbol']
+                if symbol in active_signals or is_duplicate_signal(symbol):
+                    continue
+                    
+                if pump_signal['confidence'] >= 0.7:
+                    log(f"🚀 HIGH CONFIDENCE PRE-PUMP: {symbol} - Confidence: {pump_signal['confidence']:.2f}")
+                    
+                    # Trigger immediate trade evaluation
+                    # Force a trade signal with boosted score
+                    await process_pump_signal(pump_signal, trend_context)
+            
+            # Process break signals
+            for break_signal in potential_breaks:
+                symbol = break_signal['symbol']
+                if symbol in active_signals or is_duplicate_signal(symbol):
+                    continue
+                    
+                if break_signal['confidence'] >= 0.65:
+                    log(f"🎯 RANGE BREAK DETECTED: {symbol} - Direction: {break_signal['direction']}")
+                    
+                    # Trigger trade evaluation
+                    await process_break_signal(break_signal, trend_context)
+                    
+        except Exception as e:
+            log(f"❌ Error in range break scanner: {e}", level="ERROR")
+            
+        await asyncio.sleep(30)  # Scan every 30 seconds
+
 
 async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
@@ -1209,6 +1250,7 @@ async def run_bot():
     asyncio.create_task(monitor_altseason_status())
     asyncio.create_task(cleanup_stealth_cache())
     asyncio.create_task(stealth_activity_report())
+    asyncio.create_task(range_break_scanner_loop(symbols))
 
     await startup_cleanup()
 
