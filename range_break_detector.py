@@ -68,7 +68,6 @@ class RangeBreakDetector:
             return True, "Long", pump_confidence, pump_reasons
         
         # Continue with regular break detection (includes dumps)
-        # ... [Previous break detection code remains the same] ...
         
         # 1. Find key support/resistance levels
         support, resistance, levels_data = self._find_key_levels(candles)
@@ -109,8 +108,22 @@ class RangeBreakDetector:
             reasons['momentum_shift'] = momentum_data
             log(f"📊 {symbol}: Momentum shifting {momentum_dir} - strength: {momentum_data['strength']:.2f}")
             
-        # ... [Rest of the break detection code remains the same] ...
-        
+        # 5. Check volume building at extremes
+        volume_building, vol_direction, vol_data = self._detect_volume_at_extremes(
+            candles, support, resistance, current_price
+        )
+        if volume_building:
+            confidence += 0.2
+            if not direction:
+                direction = vol_direction
+            reasons['volume_building'] = vol_data
+            
+        # 6. Check for multiple tests of levels
+        tests_data = self._check_level_tests(symbol, candles, support, resistance)
+        if tests_data['multiple_tests']:
+            confidence += 0.15
+            reasons['level_tests'] = tests_data
+            
         # Determine if break is imminent
         break_imminent = confidence >= 0.6 and direction is not None
         
@@ -119,6 +132,272 @@ class RangeBreakDetector:
             log(f"   Reasons: {list(reasons.keys())}")
             
         return break_imminent, direction, confidence, reasons
+    
+    def _find_key_levels(self, candles: List[Dict]) -> Tuple[Optional[float], Optional[float], Dict]:
+        """Find key support and resistance levels"""
+        if len(candles) < 20:
+            return None, None, {}
+            
+        highs = [float(c['high']) for c in candles]
+        lows = [float(c['low']) for c in candles]
+        closes = [float(c['close']) for c in candles]
+        
+        # Method 1: Recent high/low
+        recent_high = max(highs[-20:])
+        recent_low = min(lows[-20:])
+        
+        # Method 2: Find levels with multiple touches
+        price_levels = {}
+        
+        # Group prices into bins (0.1% ranges)
+        for i, candle in enumerate(candles[-50:]):
+            high = float(candle['high'])
+            low = float(candle['low'])
+            
+            # Round to nearest 0.1%
+            high_level = round(high / 0.001) * 0.001
+            low_level = round(low / 0.001) * 0.001
+            
+            # Count touches
+            for level in [high_level, low_level]:
+                if level not in price_levels:
+                    price_levels[level] = 0
+                price_levels[level] += 1
+        
+        # Find most tested levels
+        sorted_levels = sorted(price_levels.items(), key=lambda x: x[1], reverse=True)
+        
+        # Find strongest support and resistance from tested levels
+        current_price = closes[-1]
+        
+        support_candidates = [level for level, count in sorted_levels if level < current_price and count >= MIN_TESTS_FOR_KEY_LEVEL]
+        resistance_candidates = [level for level, count in sorted_levels if level > current_price and count >= MIN_TESTS_FOR_KEY_LEVEL]
+        
+        support = max(support_candidates) if support_candidates else recent_low
+        resistance = min(resistance_candidates) if resistance_candidates else recent_high
+        
+        levels_data = {
+            'support': support,
+            'resistance': resistance,
+            'range_size': resistance - support,
+            'support_tests': price_levels.get(round(support / 0.001) * 0.001, 0),
+            'resistance_tests': price_levels.get(round(resistance / 0.001) * 0.001, 0)
+        }
+        
+        return support, resistance, levels_data
+    
+    def _detect_range_compression(self, candles: List[Dict], support: float, resistance: float) -> Tuple[bool, Dict]:
+        """Detect if range is compressing (volatility squeeze)"""
+        if len(candles) < 30:
+            return False, {}
+            
+        # Calculate range size over time
+        range_sizes = []
+        
+        for i in range(10, len(candles)):
+            period_candles = candles[i-10:i]
+            period_high = max(float(c['high']) for c in period_candles)
+            period_low = min(float(c['low']) for c in period_candles)
+            range_size = (period_high - period_low) / period_low * 100  # Percentage
+            range_sizes.append(range_size)
+        
+        if len(range_sizes) < 10:
+            return False, {}
+            
+        # Check if range is compressing
+        recent_avg = np.mean(range_sizes[-5:])
+        older_avg = np.mean(range_sizes[-20:-10])
+        
+        compression_pct = ((older_avg - recent_avg) / older_avg * 100) if older_avg > 0 else 0
+        is_compressing = compression_pct > 20  # 20% compression
+        
+        compression_data = {
+            'recent_range': recent_avg,
+            'older_range': older_avg,
+            'compression_pct': compression_pct,
+            'current_range': resistance - support
+        }
+        
+        return is_compressing, compression_data
+    
+    def _detect_failed_bounces(self, candles: List[Dict], support: float, resistance: float) -> Tuple[bool, str, Dict]:
+        """Detect failed bounces from support/resistance"""
+        if len(candles) < 10:
+            return False, None, {}
+            
+        # Check last 10 candles for bounce attempts
+        for i in range(-10, -1):
+            candle = candles[i]
+            high = float(candle['high'])
+            low = float(candle['low'])
+            close = float(candle['close'])
+            open_price = float(candle['open'])
+            
+            # Check for failed bounce at resistance
+            if high >= resistance * 0.998:  # Got close to resistance
+                # Check if it was rejected (bearish close)
+                if close < open_price and close < resistance * 0.995:
+                    # Check subsequent candles for continuation down
+                    if i < -2:
+                        next_candles = candles[i+1:]
+                        if all(float(c['close']) < resistance * 0.995 for c in next_candles):
+                            bounce_data = {
+                                'level': 'resistance',
+                                'bounce_price': high,
+                                'rejection_strength': (high - close) / high,
+                                'weakness': 0.8
+                            }
+                            return True, "Short", bounce_data
+                            
+            # Check for failed bounce at support
+            if low <= support * 1.002:  # Got close to support
+                # Check if it was rejected (bullish close)
+                if close > open_price and close > support * 1.005:
+                    # Check subsequent candles for continuation up
+                    if i < -2:
+                        next_candles = candles[i+1:]
+                        if all(float(c['close']) > support * 1.005 for c in next_candles):
+                            bounce_data = {
+                                'level': 'support',
+                                'bounce_price': low,
+                                'rejection_strength': (close - low) / low,
+                                'weakness': 0.8
+                            }
+                            return True, "Long", bounce_data
+                            
+        return False, None, {}
+    
+    def _detect_momentum_shift(self, candles: List[Dict], regime: str) -> Tuple[bool, str, Dict]:
+        """Detect momentum shifts that precede breaks"""
+        if len(candles) < 20:
+            return False, None, {}
+            
+        # Calculate momentum using price and volume
+        closes = [float(c['close']) for c in candles[-20:]]
+        volumes = [float(c['volume']) for c in candles[-20:]]
+        
+        # Price momentum
+        price_momentum = (closes[-1] - closes[-10]) / closes[-10]
+        
+        # Volume momentum
+        recent_vol = np.mean(volumes[-5:])
+        older_vol = np.mean(volumes[-20:-10])
+        vol_momentum = recent_vol / older_vol if older_vol > 0 else 1
+        
+        # RSI momentum
+        rsi_data = calculate_rsi_with_bands(candles)
+        rsi_momentum = 0
+        if rsi_data and 'momentum' in rsi_data:
+            rsi_momentum = rsi_data['momentum'] / 50  # Normalize
+            
+        # MACD momentum
+        macd_momentum = get_macd_momentum(candles)
+        
+        # Combine momentum indicators
+        total_momentum = (abs(price_momentum) * 0.3 + 
+                         (vol_momentum - 1) * 0.3 + 
+                         abs(rsi_momentum) * 0.2 + 
+                         abs(macd_momentum) * 0.2)
+        
+        direction = "Long" if price_momentum > 0 else "Short"
+        
+        momentum_data = {
+            'price_momentum': price_momentum,
+            'volume_momentum': vol_momentum,
+            'rsi_momentum': rsi_momentum,
+            'macd_momentum': macd_momentum,
+            'strength': total_momentum
+        }
+        
+        # Momentum shift detected if strong enough
+        is_shifting = total_momentum >= MOMENTUM_SHIFT_THRESHOLD
+        
+        return is_shifting, direction, momentum_data
+    
+    def _detect_volume_at_extremes(self, candles: List[Dict], support: float, resistance: float, 
+                                  current_price: float) -> Tuple[bool, str, Dict]:
+        """Detect volume building at range extremes"""
+        if len(candles) < 20:
+            return False, None, {}
+            
+        # Determine position in range
+        range_size = resistance - support
+        position = (current_price - support) / range_size if range_size > 0 else 0.5
+        
+        # Check if near extremes
+        near_resistance = position > 0.8
+        near_support = position < 0.2
+        
+        if not (near_resistance or near_support):
+            return False, None, {}
+            
+        # Analyze volume at extremes
+        recent_volumes = [float(c['volume']) for c in candles[-10:]]
+        older_volumes = [float(c['volume']) for c in candles[-30:-10]]
+        
+        recent_avg = np.mean(recent_volumes)
+        older_avg = np.mean(older_volumes)
+        
+        volume_increase = recent_avg / older_avg if older_avg > 0 else 1
+        
+        # Look for volume surge at extremes
+        if volume_increase > VOLUME_SURGE_MULTIPLIER:
+            direction = "Short" if near_resistance else "Long"
+            
+            vol_data = {
+                'position': 'resistance' if near_resistance else 'support',
+                'volume_increase': volume_increase,
+                'recent_volume': recent_avg,
+                'position_in_range': position
+            }
+            
+            return True, direction, vol_data
+            
+        return False, None, {}
+    
+    def _check_level_tests(self, symbol: str, candles: List[Dict], support: float, resistance: float) -> Dict:
+        """Track how many times levels have been tested"""
+        
+        # Initialize tracking for this symbol if needed
+        if symbol not in self.level_tests:
+            self.level_tests[symbol] = {
+                'support_tests': 0,
+                'resistance_tests': 0,
+                'last_support_test': None,
+                'last_resistance_test': None
+            }
+            
+        tests = self.level_tests[symbol]
+        
+        # Count recent tests
+        recent_support_tests = 0
+        recent_resistance_tests = 0
+        
+        for candle in candles[-20:]:
+            low = float(candle['low'])
+            high = float(candle['high'])
+            
+            # Support test
+            if low <= support * 1.002 and low >= support * 0.998:
+                recent_support_tests += 1
+                
+            # Resistance test
+            if high >= resistance * 0.998 and high <= resistance * 1.002:
+                recent_resistance_tests += 1
+        
+        # Update tracking
+        tests['support_tests'] = recent_support_tests
+        tests['resistance_tests'] = recent_resistance_tests
+        
+        # Multiple tests indicate level strength and potential break
+        multiple_tests = (recent_support_tests >= 3 or recent_resistance_tests >= 3)
+        
+        return {
+            'multiple_tests': multiple_tests,
+            'support_tests': recent_support_tests,
+            'resistance_tests': recent_resistance_tests,
+            'stronger_level': 'support' if recent_support_tests > recent_resistance_tests else 'resistance'
+        }
     
     def _detect_pre_pump_signals(self, symbol: str, candles_by_tf: Dict) -> Tuple[bool, float, Dict]:
         """
@@ -446,52 +725,6 @@ class RangeBreakDetector:
             return pattern_strength > 0.7, pattern_data
             
         return False, {}
-
-    async def process_pump_signal(pump_signal, trend_context):
-        """Process a pre-pump signal into a trade"""
-        symbol = pump_signal['symbol']
-    
-        # Get current candles
-        candles_by_tf = {
-            tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
-            if str(tf) in live_candles[symbol]
-        }
-    
-        # Create artificial high score for pump
-        base_score = 8.0 + (pump_signal['confidence'] * 2)
-    
-        # Build indicator scores from pump reasons
-        indicator_scores = {}
-        for reason, data in pump_signal['reasons'].items():
-            if isinstance(data, dict) and 'strength' in data:
-                indicator_scores[f"pump_{reason}"] = data['strength']
-            else:
-                indicator_scores[f"pump_{reason}"] = 1.0
-    
-        # Force trade evaluation
-        await execute_trade_if_valid({
-            "symbol": symbol,
-            "price": pump_signal['current_price'],
-            "trade_type": "Scalp",  # Pumps are usually scalps
-            "direction": "Long",
-            "score": base_score,
-            "confidence": min(pump_signal['confidence'] * 100, 95),
-            "candles": candles_by_tf,
-            "indicator_scores": indicator_scores,
-            "used_indicators": list(pump_signal['reasons'].keys()),
-            "tf_scores": {"pump_detector": base_score},
-            "regime": "volatile",  # Override regime
-            "pump_potential": True,
-            "market_type": get_symbol_category(symbol)
-        })
-
-    def should_override_regime_for_break(break_confidence: float, current_regime: str) -> bool:
-        """Determine if break signal should override current regime"""
-        if break_confidence >= 0.8:
-            return True  # High confidence breaks override any regime
-        elif break_confidence >= 0.65 and current_regime == "ranging":
-            return True  # Medium confidence sufficient in ranging markets
-        return False
     
     def get_pump_success_rate(self, symbol: str = None) -> Dict:
         """Track and return pump prediction success rate"""
@@ -521,12 +754,10 @@ class RangeBreakDetector:
             'success_rate': successful / total if total > 0 else 0
         }
 
-# ... [Keep all the previous helper methods like _find_key_levels, _detect_range_compression, etc.] ...
-
 # Global instance
 range_break_detector = RangeBreakDetector()
 
-# Updated integration function
+# Integration function for main.py
 async def scan_for_breaks_and_pumps(symbols: List[str], live_candles: Dict, 
                                    trend_context: Dict) -> Tuple[List[Dict], List[Dict]]:
     """Scan all symbols for potential range breaks AND pre-pump signals"""
@@ -577,3 +808,11 @@ async def scan_for_breaks_and_pumps(symbols: List[str], live_candles: Dict,
             log(f"❌ Error scanning {symbol}: {e}", level="ERROR")
             
     return potential_breaks, potential_pumps
+
+def should_override_regime_for_break(break_confidence: float, current_regime: str) -> bool:
+    """Determine if break signal should override current regime"""
+    if break_confidence >= 0.8:
+        return True  # High confidence breaks override any regime
+    elif break_confidence >= 0.65 and current_regime == "ranging":
+        return True  # Medium confidence sufficient in ranging markets
+    return False
