@@ -399,6 +399,12 @@ async def range_break_scanner_loop(symbols):
     while True:
         try:
             trend_context = await get_trend_context_cached()
+
+            # Check if we have valid candle data
+            if not live_candles:
+                log("⚠️ No live candles available for range break scanning")
+                await asyncio.sleep(30)
+                continue
             
             # Enhanced trend context with more data
             trend_context['market_season'] = trend_context.get('altseason', 'no')
@@ -447,6 +453,8 @@ async def range_break_scanner_loop(symbols):
                     
         except Exception as e:
             log(f"❌ Error in enhanced range break scanner: {e}", level="ERROR")
+            import traceback
+            log(traceback.format_exc(), level="ERROR")
             
         await asyncio.sleep(20)  # Faster scanning for better timing
 
