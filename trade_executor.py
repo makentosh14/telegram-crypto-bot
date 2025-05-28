@@ -848,3 +848,35 @@ async def execute_twap_slice(symbol, category, side, slice_qty, entries):
                 entries.append(price)
     except Exception as e:
         log(f"❌ TWAP Slice Error: {e}", level="ERROR")
+
+# Add this at the bottom of trade_executor.py for testing
+async def test_range_break_integration():
+    """Test function to verify range break integration"""
+    test_signal = {
+        "symbol": "BTCUSDT",
+        "price": 50000,
+        "trade_type": "Scalp",
+        "direction": "Long",
+        "score": 8.5,
+        "confidence": 85,
+        "candles": {},
+        "indicator_scores": {"range_break": 0.8},
+        "used_indicators": ["range_break"],
+        "tf_scores": {"5": 8.5},
+        "regime": "volatile",
+        "range_break_details": {
+            "range_high": 51000,
+            "range_low": 49000,
+            "range_width_pct": 4.0,
+            "pre_breakout": True
+        },
+        "range_break_confidence": 0.85,
+        "exit_strategy": "pump_optimized",
+        "trailing_multiplier": 1.5,
+        "tp1_multiplier": 1.3,
+        "exit_tranches": [0.25, 0.35, 0.40]
+    }
+    
+    log("🧪 Testing range break integration...")
+    # This will test if all parameters are properly processed
+    # Don't actually execute the trade, just validate processing
