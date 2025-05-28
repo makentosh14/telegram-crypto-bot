@@ -194,19 +194,26 @@ class EntryValidator:
             return None  # or return a default/fallback level or False
                 
         # VWAP as key level
+        candles = candles_by_tf.get('15') or candles_by_tf.get('5')
+        if not candles or len(candles) < 20:
+            return levels  # Not enough data
+
         try:
             closes = [float(c["close"]) for c in candles[-50:]]
             volumes = [float(c["volume"]) for c in candles[-50:]]
 
             if len(closes) < 20 or len(volumes) < 20 or sum(volumes[-20:]) == 0:
                 log(f"⚠️ Not enough data for VWAP calculation on {symbol}")
-            else:
-                vwap_numerator = sum(closes[-20:][i] * volumes[-20:][i] for i in range(20))
-                vwap_denominator = sum(volumes[-20:])
-                vwap = vwap_numerator / vwap_denominator
-                levels["vwap"] = vwap
+                return levels
+
+            vwap_numerator = sum(closes[-20:][i] * volumes[-20:][i] for i in range(20))
+            vwap_denominator = sum(volumes[-20:])
+            vwap = vwap_numerator / vwap_denominator
+            levels["vwap"] = vwap
         except Exception as e:
             log(f"❌ VWAP calculation failed for {symbol}: {e}")
+
+        return levels
             
         # Cache the results
         self.key_levels_cache[cache_key] = (datetime.now(), levels)
