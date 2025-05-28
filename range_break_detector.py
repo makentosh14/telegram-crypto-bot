@@ -410,6 +410,10 @@ class RangeBreakDetector:
         confidence = 0
         
         candles_5m = candles_by_tf.get('5', [])
+        if candles_5m:
+            avg_volume = get_average_volume(candles_5m)
+            if avg_volume < 1000:  # Minimum volume threshold
+                return False, 0, {}
         candles_15m = candles_by_tf.get('15', [])
         
         if not candles_5m or len(candles_5m) < 50:
@@ -466,7 +470,11 @@ class RangeBreakDetector:
             reasons['pump_pattern'] = pattern_data
             
         # Require minimum confidence for pump signal
-        pump_imminent = confidence >= 0.85
+        min_required_signals = 4  # Increase from implicit 2-3
+        if len(reasons) < min_required_signals:
+            return False, 0, {}
+    
+        pump_imminent = confidence >= 0.85 and len(reasons) >= min_required_signals
         
         if pump_imminent:
             log(f"🚀 {symbol}: Pre-pump signals detected! Confidence: {confidence:.2f}")
