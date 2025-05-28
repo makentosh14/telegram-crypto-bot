@@ -165,67 +165,50 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
     return valid
 
 def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):
-    """Enhanced quality filter with direction-specific requirements"""
+    """More flexible quality filter"""
     
-    # Higher requirements for shorts
+    # Lower confidence requirements
+    min_confidence = {
+        "Scalp": 55,      # Reduced from 65
+        "Intraday": 60,   # Reduced from 70
+        "Swing": 65       # Reduced from 75
+    }
+    
+    # For shorts, slightly higher but not too restrictive
     if direction == "Short":
-        min_confidence = {
-            "Scalp": 70,      # was 65
-            "Intraday": 75,   # was 70
-            "Swing": 80       # was 75
-        }
-    else:
-        min_confidence = {
-            "Scalp": 65,
-            "Intraday": 70,
-            "Swing": 75
-        }
+        for key in min_confidence:
+            min_confidence[key] += 5
     
     if trade_type is not None:
-        if confidence < min_confidence.get(trade_type, 60):
+        if confidence < min_confidence.get(trade_type, 50):
             log(f"⚠️ {symbol}: Confidence {confidence:.1f}% below minimum {min_confidence[trade_type]}%")
             return False
-
-    if "stealth" in used_indicators or "strong_stealth" in used_indicators:
-        # Stealth accumulation is a strong quality signal
-        strong_indicators.append("stealth_accumulation")
     
-    # Check for conflicting signals
+    # Check for conflicting signals - more tolerant
     bullish_count = sum(1 for k, v in indicator_scores.items() if v > 0)
     bearish_count = sum(1 for k, v in indicator_scores.items() if v < 0)
     
-    # If we have too many conflicting signals, skip
-    if min(bullish_count, bearish_count) > 2:
+    # Allow more conflicts
+    if min(bullish_count, bearish_count) > 4:  # Increased from 2
         log(f"⚠️ {symbol}: Too many conflicting signals (Bull: {bullish_count}, Bear: {bearish_count})")
         return False
     
-    # Require at least one strong indicator (score > 1.0)
-    strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 0.8]
+    # Require fewer strong indicators
+    strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 0.7]  # Reduced from 0.8
     if len(strong_indicators) < 1:
-        log(f"⚠️ {symbol}: No strong indicators found (need at least one with score > 1.0)")
+        log(f"⚠️ {symbol}: No strong indicators found")
         return False
     
-    # For shorts, require more confirming indicators
+    # Lower indicator count requirements
     min_indicators_required = {
-        "Scalp": 5 if direction == "Short" else 4,
-        "Intraday": 6 if direction == "Short" else 5,
-        "Swing": 7 if direction == "Short" else 6
+        "Scalp": 3,      # Reduced from 4-5
+        "Intraday": 4,   # Reduced from 5-6
+        "Swing": 5       # Reduced from 6-7
     }
     
-    if len(used_indicators) < min_indicators_required.get(trade_type, 5):
+    if len(used_indicators) < min_indicators_required.get(trade_type, 3):
         log(f"⚠️ {symbol}: Insufficient indicators: {len(used_indicators)} < {min_indicators_required[trade_type]}")
         return False
-    
-    # For shorts, require at least 2 strong indicators
-    if direction == "Short":
-        strong_bearish_indicators = [k for k, v in indicator_scores.items() if v < -1.0]
-        if len(strong_bearish_indicators) < 2:
-            log(f"⚠️ {symbol}: Short trade needs at least 2 strong bearish indicators, found {len(strong_bearish_indicators)}")
-            return False
-            
-        if not validate_short_signal(symbol, candles_by_tf, trend_context, indicator_scores):
-            return False
-    
     
     return True
 
@@ -409,6 +392,7 @@ def is_short_favorable(candles_by_tf, trend_context):
     
     return True
 
+
 async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
     altseason = trend_context.get("altseason", "no")
@@ -574,8 +558,15 @@ async def scan_for_new_signals(symbols,trend_context):
         
         # Skip if minimum score not met
         if not min_score_met:
-            log(f"⚠️ Skipping {symbol}: Score {score:.2f} below minimum threshold for {trade_type} ({adj_scalp if trade_type == 'Scalp' else adj_intraday if trade_type == 'Intraday' else adj_swing})")
-            continue
+            # Check for special conditions that override score requirements
+            special_conditions = check_special_entry_conditions(
+                symbol, score, indicator_scores, used_indicators, 
+                candles_by_tf, trend_context, trade_type
+            )
+    
+            if special_conditions:
+                log(f"✅ {symbol}: Special entry condition met despite low score")
+                min_score_met = True
 
         if not meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):
             log(f"⚠️ Skipping {symbol}: Failed quality standards check")
@@ -991,6 +982,42 @@ async def scan_for_new_signals(symbols,trend_context):
                         exit_tranches=bo_trade.get("exit_tranches"),
                         has_pump_potential=bo_pump_potential
                     )
+
+def check_special_entry_conditions(symbol, score, indicator_scores, used_indicators, candles_by_tf, trend_context, trade_type):
+    """Check for special conditions that warrant entry despite lower score"""
+    
+    # 1. Strong whale activity
+    whale_score = sum(v for k, v in indicator_scores.items() if 'whale' in k)
+    if whale_score > 1.5:
+        return True
+    
+    # 2. Multiple timeframe alignment
+    aligned_timeframes = sum(1 for v in indicator_scores.values() if v > 0.5)
+    if aligned_timeframes >= 4:
+        return True
+    
+    # 3. Strong momentum
+    momentum_score = sum(v for k, v in indicator_scores.items() if 'momentum' in k)
+    if momentum_score > 1.0:
+        return True
+    
+    # 4. Stealth accumulation
+    stealth_score = sum(v for k, v in indicator_scores.items() if 'stealth' in k)
+    if stealth_score > 1.0:
+        return True
+    
+    # 5. Volume surge with pattern
+    has_volume_surge = any('volume_spike' in k for k in indicator_scores)
+    has_pattern = any('pattern_' in k for k in used_indicators)
+    if has_volume_surge and has_pattern and score > (MIN_SCALP_SCORE * 0.8):
+        return True
+    
+    # 6. During altseason, be more lenient
+    if trend_context.get("altseason") in ["confirmed", "strong_altseason"]:
+        if score > (MIN_SCALP_SCORE * 0.85):  # 85% of minimum
+            return True
+    
+    return False
 
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
