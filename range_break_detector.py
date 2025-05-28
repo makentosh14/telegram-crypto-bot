@@ -125,7 +125,7 @@ class RangeBreakDetector:
             reasons['level_tests'] = tests_data
             
         # Determine if break is imminent
-        break_imminent = confidence >= 0.6 and direction is not None
+        break_imminent = confidence >= 0.8 and direction is not None
         
         if break_imminent:
             log(f"🚨 {symbol}: Range break imminent! Direction: {direction}, Confidence: {confidence:.2f}")
@@ -466,7 +466,7 @@ class RangeBreakDetector:
             reasons['pump_pattern'] = pattern_data
             
         # Require minimum confidence for pump signal
-        pump_imminent = confidence >= 0.65
+        pump_imminent = confidence >= 0.85
         
         if pump_imminent:
             log(f"🚀 {symbol}: Pre-pump signals detected! Confidence: {confidence:.2f}")
