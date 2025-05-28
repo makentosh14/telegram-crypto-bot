@@ -65,9 +65,9 @@ recent_swing_trades = {}  # Track recent swing trades by symbol with timestamp
 SWING_COOLDOWN = 3600  # 1 hour cooldown in seconds
 
 # Slightly reduced thresholds in volatile regime to capture more potential pumps
-MIN_SCALP_SCORE = 7.5
-MIN_INTRADAY_SCORE = 8.5
-MIN_SWING_SCORE = 10
+MIN_SCALP_SCORE = 9
+MIN_INTRADAY_SCORE = 10
+MIN_SWING_SCORE = 11
 
 def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
     """
@@ -408,6 +408,11 @@ async def range_break_scanner_loop(symbols):
             # Process pump signals with priority
             for pump_signal in potential_pumps:
                 symbol = pump_signal['symbol']
+    
+                # Skip if already in active trade
+                if symbol in active_trades:
+                    continue
+        
                 if symbol in active_signals or is_duplicate_signal(symbol):
                     continue
                     
