@@ -25,37 +25,36 @@ import numpy as np
 
 # Enhanced weights including pattern-specific weights
 WEIGHTS = {
-    "macd": 1.5,
-    "macd_divergence": 1.2,
+    "macd": 1.2,          # Reduced from 1.5
+    "macd_divergence": 1.0,  # Reduced from 1.2
     "macd_momentum": 0.8,
     "ema": 1.0,
-    "ema_ribbon": 0.9,
-    "ema_squeeze": 0.7,
-    "volume_spike": 1.2,
-    "volume_climax": 1.3,
-    "volume_profile": 0.6,
-    "vwap": 0.8,
+    "ema_ribbon": 0.8,    # Reduced from 0.9
+    "ema_squeeze": 0.6,   # Reduced from 0.7
+    "volume_spike": 1.0,  # Reduced from 1.2
+    "volume_climax": 1.1, # Reduced from 1.3
+    "volume_profile": 0.5,
+    "vwap": 0.6,          # Reduced from 0.8
     "supertrend": 1.0,
-    "supertrend_squeeze": 0.8,
-    "supertrend_mtf": 1.1,
-    "rsi": 1.0,
-    "rsi_divergence": 1.2,
-    "stoch_rsi": 0.9,
-    "rsi_mtf": 1.0,
-    "bollinger": 0.5,
-    "bollinger_squeeze": 0.9,
-    "band_walk": 1.0,
-    "pattern": 0.7,  # Base pattern weight
-    "pattern_cluster": 0.3,  # Bonus for multiple patterns
-    "pattern_confluence": 0.5,  # Bonus for pattern agreement
-    "divergence": 0.5,
+    "supertrend_squeeze": 0.7,
+    "supertrend_mtf": 1.0,
+    "rsi": 0.8,           # Reduced from 1.0
+    "rsi_divergence": 1.0,
+    "stoch_rsi": 0.8,
+    "rsi_mtf": 0.9,
+    "bollinger": 0.6,     # Increased from 0.5
+    "bollinger_squeeze": 0.8,
+    "band_walk": 0.9,     # Reduced from 1.0
+    "pattern": 0.8,       # Increased from 0.7
+    "pattern_cluster": 0.4,
+    "pattern_confluence": 0.5,
+    "divergence": 0.6,    # Increased from 0.5
     "slow_breakout": 0.8,
-    "whale": 1.3,
-    "whale_advanced": 1.4,
-    "momentum": 1.5,
-    "divergence": 0.5,
-    "stealth": 0.8,  # Add this for advanced stealth detection
-    "strong_stealth": 1.0  # Add this for strong accumulation signals
+    "whale": 1.0,         # Reduced from 1.3
+    "whale_advanced": 1.1,
+    "momentum": 1.2,      # Reduced from 1.5
+    "stealth": 0.8,
+    "strong_stealth": 1.0
 }
 
 # Existing code remains...
@@ -272,19 +271,26 @@ def enhanced_pattern_scoring(candles, tf_label, score, indicator_scores, used_in
         pattern_direction = get_pattern_direction(pattern)
         
         # Calculate pattern score with strength multiplier
-        base_pattern_score = WEIGHTS.get("pattern", 0.7)
-        adjusted_score = base_pattern_score * pattern_strength
-        
-        # Apply directional scoring
-        if pattern_direction == "bullish":
+        base_pattern_score = WEIGHTS.get("pattern", 0.8)
+        if pattern in ["spinning_top", "doji", "harami"]:
+            # Neutral patterns indicate potential reversal
+            adjusted_score = base_pattern_score * pattern_strength * 0.5
             pattern_score_total += adjusted_score
             indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
-        elif pattern_direction == "bearish":
-            pattern_score_total -= adjusted_score
-            indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
-        else:  # neutral
-            pattern_score_total += adjusted_score * 0.5
-            indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.5
+        else:
+            # Directional patterns get full credit
+            adjusted_score = base_pattern_score * pattern_strength
+            
+            if pattern_direction == "bullish":
+                pattern_score_total += adjusted_score
+                indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score
+            elif pattern_direction == "bearish":
+                pattern_score_total -= adjusted_score
+                indicator_scores[f"{tf_label}_pattern_{pattern}"] = -adjusted_score
+            else:
+                # Even neutral directional patterns contribute something
+                pattern_score_total += adjusted_score * 0.3
+                indicator_scores[f"{tf_label}_pattern_{pattern}"] = adjusted_score * 0.3
         
         used_indicators.add(f"pattern_{pattern}")
         
