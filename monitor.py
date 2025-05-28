@@ -408,6 +408,13 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
     """
     global active_trades  # Ensure we're using the global variable
 
+    if 'range_break_details' in trade_data:
+        active_trades[symbol]['range_break'] = True
+        active_trades[symbol]['range_levels'] = {
+            'high': trade_data['range_break_details'].get('range_high'),
+            'low': trade_data['range_break_details'].get('range_low')
+        }                      
+
     # Validate and normalize trade type
     valid_trade_types = ["Scalp", "Intraday", "Swing"]
     if trade_type not in valid_trade_types:
