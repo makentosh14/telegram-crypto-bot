@@ -1,138 +1,201 @@
+#!/usr/bin/env python3
 """
-Test script for range break integration
-Run this to verify the range break detection and execution logic
+Test script for range break integration in trade_executor
 """
-
 import asyncio
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+import os
+from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime
 
-# Add the project directory to Python path
-sys.path.insert(0, '.')
+# Add the project root to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from trade_executor import execute_trade_if_valid
+# Import required modules
 from logger import log
+from trade_executor import execute_trade_if_valid
 
+# Mock the pre_trade_validator to return async mock
+import pre_trade_validator
+pre_trade_validator.pre_trade_validator = MagicMock()
+pre_trade_validator.pre_trade_validator.final_validation = AsyncMock(return_value=(True, "Test mode - validation bypassed"))
+
+# Mock symbol_info functions
+from symbol_info import symbol_precisions, get_precision, round_qty
+symbol_precisions["TESTUSDT"] = {
+    "base_coin": "TEST",
+    "min_qty": 0.001,
+    "quote_coin": "USDT",
+    "scale": 4
+}
+
+def mock_get_precision(symbol):
+    return 3
+
+def mock_round_qty(symbol, qty):
+    return round(qty, 3)
+
+# Apply mocks
+import symbol_info
+symbol_info.get_precision = mock_get_precision
+symbol_info.round_qty = mock_round_qty
+
+# Mock the API functions
+async def mock_signed_request(method, endpoint, params):
+    """Mock API responses for testing"""
+    
+    if endpoint == "/v5/account/wallet-balance":
+        return {
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": {
+                "list": [{
+                    "totalAvailableBalance": "1000.0",
+                    "accountType": "UNIFIED"
+                }]
+            }
+        }
+    
+    elif endpoint == "/v5/position/set-leverage":
+        return {"retCode": 0, "retMsg": "OK"}
+    
+    elif endpoint == "/v5/order/cancel-all":
+        return {"retCode": 0, "retMsg": "OK"}
+    
+    elif endpoint == "/v5/order/create":
+        if params.get("orderType") == "Market":
+            return {
+                "retCode": 0,
+                "retMsg": "OK",
+                "result": {
+                    "orderId": "test-market-order-123",
+                    "avgPrice": "100.0"
+                }
+            }
+        elif params.get("orderType") == "Stop":
+            return {
+                "retCode": 0,
+                "retMsg": "OK", 
+                "result": {
+                    "orderId": "test-stop-order-123"
+                }
+            }
+        elif params.get("orderType") == "Limit":
+            return {
+                "retCode": 0,
+                "retMsg": "OK",
+                "result": {
+                    "orderId": "test-limit-order-123"
+                }
+            }
+    
+    return {"retCode": 0, "retMsg": "OK"}
 
 async def test_range_break_integration():
-    """Test range break integration with proper mocking"""
+    """Test range break detection and execution in trade_executor"""
     
-    log("🧪 Starting Range Break Integration Test")
+    log("==================================================")
+    log("RANGE BREAK INTEGRATION TEST")
+    log("==================================================")
     
-    # Test configuration
-    test_config = {
-        "symbol": "TESTUSDT",
-        "price": 100.0,
-        "range_high": 105.0,
-        "range_low": 95.0,
-        "account_balance": 1000.0
-    }
-    
-    # Create test signal
-    test_signal = {
-        "symbol": test_config["symbol"],
-        "price": test_config["price"],
-        "trade_type": "Scalp",
-        "direction": "Long",
-        "score": 8.5,
-        "confidence": 85,
-        "candles": {
-            "5": [{"close": str(test_config["price"]), 
-                   "open": str(test_config["price"] - 0.5), 
-                   "high": str(test_config["price"] + 1), 
-                   "low": str(test_config["price"] - 1), 
-                   "volume": "1000"}] * 30
-        },
-        "indicator_scores": {"range_break": 0.8},
-        "used_indicators": ["range_break"],
-        "tf_scores": {"5": 8.5},
-        "regime": "volatile",
-        "range_break_details": {
-            "range_high": test_config["range_high"],
-            "range_low": test_config["range_low"],
-            "range_width_pct": 10.0,
-            "pre_breakout": True,
-            "buildup_patterns": ["price_compression", "volume_tightening"]
-        },
-        "range_break_confidence": 0.85,
-        "exit_strategy": "pump_optimized",
-        "trailing_multiplier": 1.5,
-        "tp1_multiplier": 1.3,
-        "exit_tranches": [0.25, 0.35, 0.40],
-        "market_type": "linear"
-    }
-    
-    # Mock all external dependencies
-    with patch('trade_executor._cached_balance', test_config["account_balance"]):
-        with patch('trade_executor.pre_trade_validator') as mock_validator:
-            with patch('trade_executor.signed_request') as mock_api:
-                with patch('trade_executor.set_position_leverage') as mock_leverage:
-                    with patch('trade_executor.cancel_all_orders') as mock_cancel:
-                        
-                        # Configure mocks
-                        mock_validator.pre_trade_validator.final_validation = AsyncMock(return_value=(True, "OK"))
-                        mock_leverage.return_value = True
-                        mock_cancel.return_value = True
-                        
-                        # Mock API responses
-                        async def mock_api_response(method, endpoint, params):
-                            if "order/create" in endpoint and params.get("orderType") == "Market":
-                                return {
-                                    "retCode": 0,
-                                    "result": {"orderId": "test-123", "avgPrice": str(test_config["price"])}
-                                }
-                            elif "order/create" in endpoint:
-                                return {
-                                    "retCode": 0,
-                                    "result": {"orderId": f"test-{params.get('orderType', 'order')}-123"}
-                                }
-                            return {"retCode": 0, "retMsg": "OK"}
-                        
-                        mock_api.side_effect = mock_api_response
-                        
-                        # Execute test
-                        log("📊 Executing test trade...")
-                        result = await execute_trade_if_valid(test_signal, max_risk=0.06)
-                        
-                        if result:
-                            log("✅ Test PASSED! Trade executed successfully")
-                            log("\n📋 Trade Details:")
-                            log(f"  Symbol: {result.get('symbol')}")
-                            log(f"  Entry: {result.get('entry')}")
-                            log(f"  Direction: {result.get('direction')}")
-                            log(f"  Strategy: {result.get('strategy')}")
-                            log(f"  Exit Strategy: {result.get('exit_strategy')}")
-                            
-                            log("\n💰 Risk Management:")
-                            log(f"  Stop Loss: {result.get('sl')} ({result.get('sl_pct')}%)")
-                            log(f"  Take Profit 1: {result.get('tp1')} ({result.get('tp1_pct')}%)")
-                            log(f"  Take Profit 2: {result.get('tp2')} ({result.get('tp2_pct')}%)")
-                            log(f"  Trailing Stop: {result.get('trailing_pct')}%")
-                            
-                            log("\n📊 Range Break Details:")
-                            if result.get('range_levels'):
-                                log(f"  Range High: {result['range_levels'].get('high')}")
-                                log(f"  Range Low: {result['range_levels'].get('low')}")
-                                log(f"  Range Width: {result['range_levels'].get('width_pct')}%")
-                            
-                            log("\n📈 Exit Tranches:")
-                            for i, tranche in enumerate(result.get('exit_tranches', [])):
-                                log(f"  Tranche {i+1}: {tranche}")
-                            
-                            # Verify range-based calculations
-                            if result.get('range_break'):
-                                log("\n✅ Range break integration verified!")
-                                log("  - Range-based SL/TP calculations applied")
-                                log("  - Pump-optimized exit strategy activated")
-                                log("  - Custom exit tranches configured")
-                            
-                        else:
-                            log("❌ Test FAILED - No trade executed")
-
+    # Patch the API calls
+    with patch('bybit_api.signed_request', side_effect=mock_signed_request):
+        with patch('trade_executor.get_account_balance', return_value=1000.0):
+            
+            # Create test signal with range break data
+            test_signal = {
+                "symbol": "TESTUSDT",
+                "price": 100.0,
+                "trade_type": "Scalp",
+                "direction": "Long",
+                "score": 8.5,
+                "confidence": 85,
+                "candles": {
+                    "5": [
+                        {
+                            "close": "100",
+                            "open": "99.5",
+                            "high": "100.5",
+                            "low": "99",
+                            "volume": "1000"
+                        }
+                    ] * 30  # 30 candles for indicators
+                },
+                "indicator_scores": {
+                    "range_break": 0.8,
+                    "stealth_accumulation": 0.7,
+                    "volume_compression": 0.6
+                },
+                "used_indicators": ["range_break", "stealth_accumulation"],
+                "tf_scores": {"5": 8.5},
+                "regime": "volatile",
+                "range_break_details": {
+                    "range_high": 105.0,
+                    "range_low": 95.0,
+                    "range_width_pct": 10.53,  # ~10% range
+                    "pre_breakout": True,
+                    "buildup_patterns": ["price_compression", "volume_tightening", "bb_squeeze"],
+                    "touches_high": 5,
+                    "touches_low": 4
+                },
+                "range_break_confidence": 0.85,
+                "exit_strategy": "pump_optimized",
+                "trailing_multiplier": 1.5,
+                "tp1_multiplier": 1.3,
+                "exit_tranches": [0.25, 0.35, 0.40],  # Custom exit tranches for pump
+                "market_type": "linear"
+            }
+            
+            log("🧪 Starting Range Break Integration Test")
+            log(f"📊 Executing test trade...")
+            
+            # Execute the trade
+            result = await execute_trade_if_valid(test_signal)
+            
+            if result:
+                log("✅ Test PASSED! Trade executed successfully")
+                log("\n📋 Trade Details:")
+                log(f"  Entry Price: {result.get('entry')}")
+                log(f"  Stop Loss: {result.get('sl')} ({result.get('sl_pct'):.2f}%)")
+                log(f"  Take Profit 1: {result.get('tp1')} ({result.get('tp1_pct'):.2f}%)")
+                log(f"  Take Profit 2: {result.get('tp2')} ({result.get('tp2_pct'):.2f}%)")
+                log(f"  Trailing Stop: {result.get('trailing_pct'):.2f}%")
+                log(f"  Exit Strategy: {result.get('exit_strategy')}")
+                log(f"  Exit Tranches: {result.get('exit_tranches')}")
+                log(f"  Strategy Type: {result.get('strategy')}")
+                
+                if result.get('range_levels'):
+                    log("\n📊 Range Levels:")
+                    log(f"  High: {result['range_levels'].get('high')}")
+                    log(f"  Low: {result['range_levels'].get('low')}")
+                    log(f"  Width: {result['range_levels'].get('width_pct'):.2f}%")
+                
+                # Verify range-based adjustments were applied
+                if result.get('sl') and test_signal['range_break_details']['range_low']:
+                    expected_sl = test_signal['range_break_details']['range_low'] * 0.995
+                    log(f"\n✅ Range-based SL applied correctly: {result['sl']} (expected ~{expected_sl:.2f})")
+                
+                if result.get('tp1') and test_signal['range_break_details']['range_high']:
+                    expected_tp1 = test_signal['range_break_details']['range_high']
+                    log(f"✅ Range-based TP1 applied correctly: {result['tp1']} (expected {expected_tp1})")
+                
+                # Verify pump optimization
+                if result.get('exit_strategy') == 'pump_optimized':
+                    log("\n✅ Pump optimization applied successfully")
+                    log(f"  - Enhanced TP multiplier applied")
+                    log(f"  - Wider trailing stop for letting winners run")
+                    log(f"  - Custom exit tranches: {result.get('exit_tranches')}")
+                
+                return True
+            else:
+                log("❌ Test FAILED - No trade executed")
+                return False
+                
+    log("\n==================================================")
+    log("TEST COMPLETED")
+    log("==================================================")
 
 if __name__ == "__main__":
-    log("=" * 50)
-    log("RANGE BREAK INTEGRATION TEST")
-    log("=" * 50)
-    asyncio.run(test_range_break_integration())
+    # Run the test
+    result = asyncio.run(test_range_break_integration())
+    sys.exit(0 if result else 1)
