@@ -411,14 +411,21 @@ def is_short_favorable(candles_by_tf, trend_context):
 
 async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
+    altseason = trend_context.get("altseason", "no")
 
     # Adjust score thresholds based on regime
     # In volatile regimes, lower thresholds to catch more pumps
     score_adjustments = {
-        "volatile": {"scalp": -0.2, "intraday": -0.2, "swing": -0.3},  # Less reduction in volatile markets
-        "ranging": {"scalp": 0.8, "intraday": 0.8, "swing": 1.0},      # Higher penalty for ranging markets
-        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": 0.0},     # No adjustment for trending
+        "volatile": {"scalp": -1.0, "intraday": -0.8, "swing": -0.5},  # More lenient in volatile markets
+        "ranging": {"scalp": -0.5, "intraday": -0.3, "swing": 0.0},   # Slightly more lenient in ranging
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": -0.5},   # More lenient for swings in trends
     }
+    
+    # Additional adjustment for altseason
+    if altseason in ["confirmed", "strong_altseason"]:
+        # Be more aggressive during altseason
+        for trade_type in score_adjustments[regime]:
+            score_adjustments[regime][trade_type] -= 0.5
     adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
     adj_scalp = MIN_SCALP_SCORE + adjust["scalp"]
     adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
