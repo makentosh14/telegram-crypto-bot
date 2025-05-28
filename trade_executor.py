@@ -858,24 +858,38 @@ async def test_range_break_integration():
     global _cached_balance
     _cached_balance = 1000  # Mock $1000 balance
     
+    # Temporarily disable pre-trade validation for testing
+    import pre_trade_validator
+    original_validation = pre_trade_validator.pre_trade_validator.final_validation
+    
+    async def mock_validation(*args, **kwargs):
+        return True, "Test mode - validation bypassed"
+    
+    pre_trade_validator.pre_trade_validator.final_validation = mock_validation
+    
+    # Use realistic BTC price based on current market
+    current_btc_price = 107416.60  # From the API response
+    
     test_signal = {
         "symbol": "BTCUSDT",
-        "price": 50000,
+        "price": current_btc_price,
         "trade_type": "Scalp",
         "direction": "Long",
         "score": 8.5,
         "confidence": 85,
         "candles": {
-            "5": [{"close": "50000", "open": "49900", "high": "50100", "low": "49800", "volume": "100"}] * 30
+            "5": [{"close": str(current_btc_price), "open": str(current_btc_price - 100), 
+                   "high": str(current_btc_price + 100), "low": str(current_btc_price - 200), 
+                   "volume": "100"}] * 30
         },
         "indicator_scores": {"range_break": 0.8},
         "used_indicators": ["range_break"],
         "tf_scores": {"5": 8.5},
         "regime": "volatile",
         "range_break_details": {
-            "range_high": 51000,
-            "range_low": 49000,
-            "range_width_pct": 4.0,
+            "range_high": current_btc_price + 1000,  # $1000 range
+            "range_low": current_btc_price - 1000,
+            "range_width_pct": 1.86,  # ~2% range
             "pre_breakout": True,
             "buildup_patterns": ["price_compression", "volume_tightening"]
         },
@@ -891,9 +905,48 @@ async def test_range_break_integration():
     log(f"📊 Test Signal: {test_signal['symbol']} @ {test_signal['price']}")
     log(f"📊 Range: {test_signal['range_break_details']['range_low']} - {test_signal['range_break_details']['range_high']}")
     
-    # Test the execution (dry run - comment out actual API calls)
     try:
-        # You can temporarily modify execute_trade_if_valid to skip actual trading
+        # Mock the signed_request function to avoid actual API calls during testing
+        import bybit_api
+        original_signed_request = bybit_api.signed_request
+        
+        async def mock_signed_request(method, endpoint, params):
+            # Mock responses for different endpoints
+            if endpoint == "/v5/position/set-leverage":
+                return {"retCode": 0, "retMsg": "OK"}
+            elif endpoint == "/v5/order/cancel-all":
+                return {"retCode": 0, "retMsg": "OK"}
+            elif endpoint == "/v5/order/create" and params.get("orderType") == "Market":
+                return {
+                    "retCode": 0,
+                    "retMsg": "OK",
+                    "result": {
+                        "orderId": "test-order-123",
+                        "avgPrice": str(current_btc_price)
+                    }
+                }
+            elif endpoint == "/v5/order/create" and params.get("orderType") == "Stop":
+                return {
+                    "retCode": 0,
+                    "retMsg": "OK",
+                    "result": {
+                        "orderId": "test-sl-order-123"
+                    }
+                }
+            elif endpoint == "/v5/order/create" and params.get("orderType") == "Limit":
+                return {
+                    "retCode": 0,
+                    "retMsg": "OK",
+                    "result": {
+                        "orderId": "test-tp-order-123"
+                    }
+                }
+            else:
+                return {"retCode": 0, "retMsg": "OK"}
+        
+        bybit_api.signed_request = mock_signed_request
+        
+        # Test the execution
         result = await execute_trade_if_valid(test_signal, max_risk=0.06)
         
         if result:
@@ -901,9 +954,11 @@ async def test_range_break_integration():
             log(f"  Entry: {result.get('entry')}")
             log(f"  SL: {result.get('sl')} ({result.get('sl_pct')}%)")
             log(f"  TP1: {result.get('tp1')} ({result.get('tp1_pct')}%)")
+            log(f"  TP2: {result.get('tp2')} ({result.get('tp2_pct')}%)")
             log(f"  Exit Strategy: {result.get('exit_strategy')}")
             log(f"  Exit Tranches: {result.get('exit_tranches')}")
             log(f"  Range Levels: {result.get('range_levels')}")
+            log(f"  Strategy: {result.get('strategy')}")
         else:
             log("❌ Test failed - no trade executed")
             
@@ -911,8 +966,8 @@ async def test_range_break_integration():
         log(f"❌ Test error: {e}")
         import traceback
         log(traceback.format_exc())
-
-# To run the test, add this to the end of the file:
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(test_range_break_integration())
+    finally:
+        # Restore original functions
+        pre_trade_validator.pre_trade_validator.final_validation = original_validation
+        if 'original_signed_request' in locals():
+            bybit_api.signed_request = original_signed_request
