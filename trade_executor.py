@@ -523,6 +523,53 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             sl, tp1, sl_pct = sl_tp_result[:3]
             trailing_pct = sl_pct * 0.5  # Default trailing percentage
             tp1_pct = sl_pct * 2.0      # Default TP percentage
+
+        # ADD THIS: Apply range-based adjustments
+        if range_break_details:
+            range_levels = calculate_range_based_exit_levels({
+                'direction': direction,
+                'entry_price': entry_price,
+                'range_break_details': range_break_details
+            })
+        
+            if range_levels:
+                # Use range-based levels if they provide better risk/reward
+                if direction.lower() == 'long':
+                    # For longs, use range low as SL reference
+                    if range_levels.get('sl') and range_levels['sl'] > sl * 0.95:
+                        sl = range_levels['sl']
+                        sl_pct = ((entry_price - sl) / entry_price) * 100
+                        log(f"📊 Using range-based SL: {sl:.8f}")
+                
+                    # Use range high as TP reference
+                    if range_levels.get('tp1'):
+                        tp1 = range_levels['tp1']
+                        tp1_pct = ((tp1 - entry_price) / entry_price) * 100
+                        log(f"📊 Using range-based TP1: {tp1:.8f}")
+                else:  # short
+                    # For shorts, use range high as SL reference
+                    if range_levels.get('sl') and range_levels['sl'] < sl * 1.05:
+                        sl = range_levels['sl']
+                        sl_pct = ((sl - entry_price) / entry_price) * 100
+                        log(f"📊 Using range-based SL: {sl:.8f}")
+                
+                    # Use range low as TP reference
+                    if range_levels.get('tp1'):
+                        tp1 = range_levels['tp1']
+                        tp1_pct = ((entry_price - tp1) / entry_price) * 100
+                        log(f"📊 Using range-based TP1: {tp1:.8f}")
+    
+        # Apply exit strategy multipliers
+        if exit_strategy == "pump_optimized":
+            tp1_pct *= tp1_multiplier
+            trailing_pct *= trailing_multiplier
+            log(f"🚀 Pump optimized: TP1 {tp1_pct:.2f}%, Trailing {trailing_pct:.2f}%")
+        elif exit_strategy == "breakout":
+            trailing_pct *= trailing_multiplier
+            log(f"📈 Breakout optimized: Trailing {trailing_pct:.2f}%")
+        elif exit_strategy == "patient":
+            trailing_pct *= trailing_multiplier
+            log(f"⏳ Patient strategy: Trailing {trailing_pct:.2f}%")
         
         # Apply trailing multiplier if using patient exit strategy
         if exit_strategy == "patient":
@@ -628,6 +675,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             volatility = "low"
             
         has_momentum = signal_data.get("momentum", False) or signal_data.get("pump_potential", False)
+
+        # ADD THIS: Use custom exit tranches if provided
+        if custom_exit_tranches:
+            # Use the custom tranches from range break config
+            exit_tranches = [round_qty(symbol, qty * pct) for pct in custom_exit_tranches]
+            log(f"📊 Using custom exit tranches: {custom_exit_tranches}")
+        else:
         
         exit_tranches = calculate_exit_tranches(
             symbol=symbol,
@@ -721,7 +775,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "regime": regime,
             "leverage": leverage,
             "strategy": strategy,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "exit_strategy": exit_strategy,
+            "range_break": range_break_details != {},
+            "range_break_confidence": range_break_confidence,
+            "range_levels": {
+                "high": range_break_details.get('range_high'),
+                "low": range_break_details.get('range_low'),
+                "width_pct": range_break_details.get('range_width_pct')
+            } if range_break_details else None
         }
         
         # Log trade execution details
