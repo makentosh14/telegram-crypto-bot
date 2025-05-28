@@ -427,7 +427,7 @@ async def range_break_scanner_loop(symbols):
                 # Process high confidence pumps immediately
                 if pump_signal['confidence'] >= 0.7:
                     log(f"🚀 HIGH CONFIDENCE PRE-PUMP: {symbol} - Confidence: {pump_signal['confidence']:.2f}")
-                    await process_enhanced_pump_signal(pump_signal, trend_context)
+                    await process_pump_signal(pump_signal, trend_context)
                     
                 # Medium confidence pumps - wait for confirmation
                 elif pump_signal['confidence'] >= 0.6:
@@ -443,7 +443,7 @@ async def range_break_scanner_loop(symbols):
                 
                 if break_signal['confidence'] >= 0.65:
                     log(f"🎯 RANGE BREAK DETECTED: {symbol} - Direction: {break_signal['direction']}")
-                    await process_enhanced_break_signal(break_signal, trend_context)
+                    await process_break_signal(break_signal, trend_context)
                     
         except Exception as e:
             log(f"❌ Error in enhanced range break scanner: {e}", level="ERROR")
