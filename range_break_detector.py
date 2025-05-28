@@ -446,6 +446,52 @@ class RangeBreakDetector:
             return pattern_strength > 0.7, pattern_data
             
         return False, {}
+
+    async def process_pump_signal(pump_signal, trend_context):
+        """Process a pre-pump signal into a trade"""
+        symbol = pump_signal['symbol']
+    
+        # Get current candles
+        candles_by_tf = {
+            tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
+            if str(tf) in live_candles[symbol]
+        }
+    
+        # Create artificial high score for pump
+        base_score = 8.0 + (pump_signal['confidence'] * 2)
+    
+        # Build indicator scores from pump reasons
+        indicator_scores = {}
+        for reason, data in pump_signal['reasons'].items():
+            if isinstance(data, dict) and 'strength' in data:
+                indicator_scores[f"pump_{reason}"] = data['strength']
+            else:
+                indicator_scores[f"pump_{reason}"] = 1.0
+    
+        # Force trade evaluation
+        await execute_trade_if_valid({
+            "symbol": symbol,
+            "price": pump_signal['current_price'],
+            "trade_type": "Scalp",  # Pumps are usually scalps
+            "direction": "Long",
+            "score": base_score,
+            "confidence": min(pump_signal['confidence'] * 100, 95),
+            "candles": candles_by_tf,
+            "indicator_scores": indicator_scores,
+            "used_indicators": list(pump_signal['reasons'].keys()),
+            "tf_scores": {"pump_detector": base_score},
+            "regime": "volatile",  # Override regime
+            "pump_potential": True,
+            "market_type": get_symbol_category(symbol)
+        })
+
+    def should_override_regime_for_break(break_confidence: float, current_regime: str) -> bool:
+        """Determine if break signal should override current regime"""
+        if break_confidence >= 0.8:
+            return True  # High confidence breaks override any regime
+        elif break_confidence >= 0.65 and current_regime == "ranging":
+            return True  # Medium confidence sufficient in ranging markets
+        return False
     
     def get_pump_success_rate(self, symbol: str = None) -> Dict:
         """Track and return pump prediction success rate"""
