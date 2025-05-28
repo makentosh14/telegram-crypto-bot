@@ -760,8 +760,20 @@ async def scan_for_new_signals(symbols,trend_context):
         if not all(len(candles_by_tf[tf]) >= 30 for tf in TIMEFRAMES):
             continue
 
+        # ---- Primary strategy scoring ----
+        from score import enhanced_score_symbol
+        score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
+            symbol, candles_by_tf, market_context=trend_context
+        )
+        direction = determine_direction(tf_scores)
+        confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
+        price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
+        indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
+
+        # NOW check for range break setup AFTER score is defined
         range_break_bonus = 0
         range_break_details = {}
+        break_confidence = 0  # Initialize this too
         
         # Check for range break setup
         if candles_by_tf.get('5') and len(candles_by_tf['5']) >= 50:
@@ -798,16 +810,6 @@ async def scan_for_new_signals(symbols,trend_context):
                     
         # Apply range break bonus
         score += range_break_bonus
-
-        # ---- Primary strategy scoring ----
-        from score import enhanced_score_symbol
-        score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
-            symbol, candles_by_tf, market_context=trend_context
-        )
-        direction = determine_direction(tf_scores)
-        confidence = calculate_confidence(score, tf_scores, trend_context, trade_type)
-        price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
-        indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
 
         # Enhanced pattern detection
         pattern = extract_last_pattern_enhanced(candles_by_tf)
