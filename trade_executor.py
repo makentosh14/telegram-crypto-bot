@@ -18,6 +18,8 @@ from activity_logger import log_trade_to_file
 from symbol_info import round_qty, symbol_precisions, get_precision
 from pre_trade_validator import pre_trade_validator
 from stealth_detector import detect_stealth_accumulation_advanced
+from range_break_detector import range_break_detector
+from exit_manager import calculate_range_based_exit_levels
 
 # Enhanced imports from position_manager.py
 from risk_manager import (
@@ -447,6 +449,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     confidence = signal_data.get("confidence", 60)
     entry_price = float(signal_data.get("price", 1.0))
     candles_by_tf = signal_data.get("candles", {})
+    range_break_details = signal_data.get('range_break_details', {})
+    range_break_confidence = signal_data.get('range_break_confidence', 0)
+    exit_strategy = signal_data.get('exit_strategy', 'normal')
+    trailing_multiplier = signal_data.get('trailing_multiplier', 1.0)
+    tp1_multiplier = signal_data.get('tp1_multiplier', 1.0)
+    custom_exit_tranches = signal_data.get('exit_tranches', None)
     
     # Detect stealth accumulation
     stealth_data = detect_stealth_accumulation_advanced(
@@ -458,10 +466,25 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     exit_strategy = "normal"
     trailing_multiplier = 1.0
     
+    if range_break_details and range_break_confidence > 0.6:
+        # High confidence range break
+        if range_break_details.get('pre_breakout'):
+            # Pre-breakout detected - use pump strategy
+            exit_strategy = "pump_optimized"
+            trailing_multiplier = 1.5
+            log(f"🎯 Pre-breakout range break - using pump exit strategy")
+        else:
+            # Regular breakout
+            exit_strategy = "breakout"
+            trailing_multiplier = 1.3
+            log(f"📊 Range breakout - using breakout exit strategy")
+    
+    # Existing stealth accumulation check
     if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
-        # Adjust exit strategy for accumulation trades
-        exit_strategy = "patient"  # Hold longer
-        trailing_multiplier = 1.5  # Wider trailing stop
+        # Only override if not already set by range break
+        if exit_strategy == "normal":
+            exit_strategy = "patient"
+            trailing_multiplier = 1.5
         log(f"🎯 Stealth trade detected - using patient exit strategy")
     
     # Determine strategy type
