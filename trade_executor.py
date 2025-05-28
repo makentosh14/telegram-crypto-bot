@@ -685,13 +685,13 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             log(f"📊 Using custom exit tranches: {custom_exit_tranches}")
         else:
         
-        exit_tranches = calculate_exit_tranches(
-            symbol=symbol,
-            total_qty=qty,
-            trade_type=trade_type,
-            volatility=volatility,
-            momentum=has_momentum
-        )
+            exit_tranches = calculate_exit_tranches(
+                symbol=symbol,
+                total_qty=qty,
+                trade_type=trade_type,
+                volatility=volatility,
+                momentum=has_momentum
+            )
         
         # Step 9: Place stop loss order with enhanced validation
         sl_order_id = await place_stop_loss_order(
