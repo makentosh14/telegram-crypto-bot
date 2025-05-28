@@ -447,32 +447,22 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     confidence = signal_data.get("confidence", 60)
     entry_price = float(signal_data.get("price", 1.0))
     candles_by_tf = signal_data.get("candles", {})
+    
+    # Detect stealth accumulation
     stealth_data = detect_stealth_accumulation_advanced(
-        trade_params["candles"].get("5", []), 
-        trade_params["symbol"]
-    )
-
-    if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
-        # Adjust exit strategy for accumulation trades
-        trade_params["exit_strategy"] = "patient"  # Hold longer
-        trade_params["trailing_multiplier"] = 1.5  # Wider trailing stop
-        log(f"🎯 Stealth trade detected - using patient exit strategy")
-
-    final_valid, final_reason = await pre_trade_validator.final_validation(
-        symbol=trade_params["symbol"],
-        direction=trade_params["direction"],
-        entry_price=trade_params["price"],
-        sl_price=sl,
-        tp_price=tp1
+        candles_by_tf.get("5", []), 
+        symbol
     )
     
-    if not final_valid:
-        log(f"❌ Pre-trade validation failed for {symbol}: {final_reason}")
-        await send_telegram_message(
-            f"❌ Trade cancelled for {symbol}\n"
-            f"Reason: {final_reason}"
-        )
-        return None
+    # Set exit strategy parameters
+    exit_strategy = "normal"
+    trailing_multiplier = 1.0
+    
+    if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
+        # Adjust exit strategy for accumulation trades
+        exit_strategy = "patient"  # Hold longer
+        trailing_multiplier = 1.5  # Wider trailing stop
+        log(f"🎯 Stealth trade detected - using patient exit strategy")
     
     # Determine strategy type
     strategy = "core_strategy"
@@ -498,7 +488,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         EXECUTION_STATES[exec_id]["stage"] = "balance_checked"
         
         # Step 2: Calculate SL/TP levels using enhanced calculation
-        # FIX: Properly unpack all 5 values including trailing_pct
         sl_tp_result = calculate_dynamic_sl_tp(
             candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
         )
@@ -512,7 +501,28 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             trailing_pct = sl_pct * 0.5  # Default trailing percentage
             tp1_pct = sl_pct * 2.0      # Default TP percentage
         
+        # Apply trailing multiplier if using patient exit strategy
+        if exit_strategy == "patient":
+            trailing_pct *= trailing_multiplier
+        
         EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
+        
+        # Step 3: Pre-trade validation (moved after SL/TP calculation)
+        final_valid, final_reason = await pre_trade_validator.final_validation(
+            symbol=symbol,
+            direction=direction,
+            entry_price=entry_price,
+            sl_price=sl,
+            tp_price=tp1
+        )
+        
+        if not final_valid:
+            log(f"❌ Pre-trade validation failed for {symbol}: {final_reason}")
+            await send_telegram_message(
+                f"❌ Trade cancelled for {symbol}\n"
+                f"Reason: {final_reason}"
+            )
+            return None
         
         # Step 3: Calculate position size using enhanced method
         qty = await calculate_enhanced_quantity(
