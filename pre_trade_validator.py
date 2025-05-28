@@ -67,9 +67,9 @@ class PreTradeValidator:
                 return False, f"Price moved {price_move_pct:.2f}% from intended entry"
                 
             # Check direction hasn't reversed
-            if direction == "Long" and current_price < intended_entry * 0.997:
+            if direction == "long" and current_price < intended_entry * 0.997:
                 return False, "Price moving against long entry"
-            elif direction == "Short" and current_price > intended_entry * 1.003:
+            elif direction == "short" and current_price > intended_entry * 1.003:
                 return False, "Price moving against short entry"
                 
             return True, "Price validation passed"
@@ -121,7 +121,7 @@ class PreTradeValidator:
                               direction: str) -> Tuple[bool, str]:
         """Validate SL and TP levels make sense"""
         
-        if direction == "Long":
+        if direction == "long":
             # For long: SL < Entry < TP
             if not (sl < entry < tp):
                 return False, f"Invalid long levels: SL={sl}, Entry={entry}, TP={tp}"
