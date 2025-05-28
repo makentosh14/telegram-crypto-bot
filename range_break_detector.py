@@ -35,6 +35,31 @@ VOLUME_SURGE_MULTIPLIER = 2.5  # Strong volume surge on breakout
 VOLUME_CONSISTENCY_LOOKBACK = 5  # Check volume consistency post-breakout
 MIN_VOLUME_PERCENTILE = 0.7  # Breakout volume should be in top 30% of recent volumes
 
+RANGE_BREAK_CONFIG = {
+    'min_confidence': {
+        'trending': 0.7,
+        'ranging': 0.65,
+        'volatile': 0.6
+    },
+    'score_multipliers': {
+        'pump_signal': 2.0,
+        'pre_breakout': 1.5,
+        'stealth_accumulation': 1.3
+    },
+    'exit_strategies': {
+        'pump': {
+            'tp1_mult': 1.3,
+            'trailing_mult': 1.5,
+            'tranches': [0.25, 0.35, 0.40]
+        },
+        'break': {
+            'tp1_mult': 1.2,
+            'trailing_mult': 1.2,
+            'tranches': [0.33, 0.33, 0.34]
+        }
+    }
+}
+
 class RangeBreakoutStrategy:
     """Enhanced range breakout strategy with advanced pre-breakout detection and volume analysis"""
     
