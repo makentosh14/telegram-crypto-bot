@@ -54,6 +54,7 @@ from auto_reentry import (
 from stealth_detector import cleanup_stealth_cache
 from range_break_detector import range_break_detector, should_override_regime_for_break, scan_for_breaks_and_pumps
 from symbol_utils import get_symbol_category
+from typing import List, Dict, Tuple
 
 load_memory()
 
