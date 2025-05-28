@@ -52,6 +52,7 @@ from auto_reentry import (
     update_reentry_performance
 )
 from stealth_detector import cleanup_stealth_cache
+from range_break_detector import range_break_detector, should_override_regime_for_break, scan_for_breaks_and_pumps
 
 load_memory()
 
@@ -958,6 +959,47 @@ async def scan_for_new_signals(symbols,trend_context):
                     tp1_pct=tp1_pct
                 )
                 msg += f"\n💥 Breakout Sniper Signal\nTriggers: {', '.join(bo_reasons.keys())}"
+
+        try:
+            # Scan for both breaks and pumps
+            potential_breaks, potential_pumps = await scan_for_breaks_and_pumps(
+                [symbol], live_candles, trend_context
+            )
+    
+            # Handle pump signals with priority
+            if potential_pumps:
+                pump_signal = potential_pumps[0]  # Current symbol
+                log(f"🚀 Pre-pump signal detected for {symbol}! Confidence: {pump_signal['confidence']:.2f}")
+        
+                # Boost score significantly for pump signals
+                score += 2.0
+                confidence = min(confidence * 1.3, 100)
+        
+                # Add pump indicators
+                indicator_scores.update({
+                    f"pump_{k}": v.get('strength', 1.0) if isinstance(v, dict) else 1.0 
+                    for k, v in pump_signal['reasons'].items()
+                })
+                used_indicators.extend([f"pump_{k}" for k in pump_signal['reasons'].keys()])
+        
+                # Force direction to Long for pumps
+                direction = "Long"
+        
+                # Mark as pump potential for exit strategy
+                pump_potential = True
+        
+            # Handle regular break signals
+            elif potential_breaks:
+                break_signal = potential_breaks[0]  # Current symbol
+        
+                # Override regime if high confidence break
+                if break_signal['confidence'] >= 0.7:
+                    regime = "volatile"
+            
+                # Continue with breakout logic...
+        
+        except Exception as e:
+            log(f"❌ Error in break/pump detection for {symbol}: {e}", level="ERROR")
                 
                 # Add pump potential info if detected
                 if bo_pump_potential:
