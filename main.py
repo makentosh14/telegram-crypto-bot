@@ -440,6 +440,65 @@ async def range_break_scanner_loop(symbols):
             
         await asyncio.sleep(30)  # Scan every 30 seconds
 
+async def scan_for_breaks_and_pumps(symbols: List[str], live_candles: Dict, 
+                                   trend_context: Dict) -> Tuple[List[Dict], List[Dict]]:
+    """Scan all symbols for potential range breaks AND pre-pump signals"""
+    potential_breaks = []
+    potential_pumps = []
+    
+    for symbol in symbols:
+        if symbol not in live_candles:
+            continue
+            
+        try:
+            # Get candles for all timeframes
+            candles_by_tf = {}
+            for tf in ['1', '3', '5', '15', '30']:
+                if tf in live_candles[symbol]:
+                    candles_by_tf[tf] = list(live_candles[symbol][tf])
+                    
+            if not candles_by_tf.get('5') or len(candles_by_tf['5']) < 50:
+                continue
+                
+            # Get current regime
+            regime = trend_context.get('regime', 'trending')
+            
+            # Check for imminent break (includes both dumps and pumps)
+            break_imminent, direction, confidence, reasons = range_break_detector.detect_imminent_break(
+                symbol, candles_by_tf, regime
+            )
+            
+            if break_imminent:
+                # Check if it's a pump signal
+                if direction == "Long" and any(k in reasons for k in ['stealth_accumulation', 'smart_money', 'pump_pattern']):
+                    potential_pumps.append({
+                        'symbol': symbol,
+                        'confidence': confidence,
+                        'reasons': reasons,
+                        'current_price': float(candles_by_tf['5'][-1]['close'])
+                    })
+                else:
+                    potential_breaks.append({
+                        'symbol': symbol,
+                        'direction': direction,
+                        'confidence': confidence,
+                        'reasons': reasons,
+                        'current_price': float(candles_by_tf['5'][-1]['close'])
+                    })
+                    
+        except Exception as e:
+            log(f"❌ Error scanning {symbol}: {e}", level="ERROR")
+            
+    return potential_breaks, potential_pumps
+
+def should_override_regime_for_break(break_confidence: float, current_regime: str) -> bool:
+    """Determine if break signal should override current regime"""
+    if break_confidence >= 0.8:
+        return True  # High confidence breaks override any regime
+    elif break_confidence >= 0.65 and current_regime == "ranging":
+        return True  # Medium confidence sufficient in ranging markets
+    return False
+
 async def process_pump_signal(pump_signal, trend_context):
     """Process a pre-pump signal into a trade"""
     symbol = pump_signal['symbol']
