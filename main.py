@@ -446,7 +446,7 @@ async def process_pump_signal(pump_signal, trend_context):
     }
     
     # Create artificial high score for pump
-    base_score = 8.0 + (pump_signal['confidence'] * 2)
+    base_score = 6.5 + (pump_signal['confidence'] * 1.5)
     
     # Build indicator scores from pump reasons
     indicator_scores = {}
@@ -542,7 +542,7 @@ async def process_break_signal(break_signal, trend_context):
         if str(tf) in live_candles[symbol]
     }
     
-    base_score = 7.5 + (break_signal['confidence'] * 1.5)
+    base_score = 6.0 + (break_signal['confidence'] * 1.0)
     
     indicator_scores = {}
     for reason, data in break_signal['reasons'].items():
