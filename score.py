@@ -436,7 +436,7 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
             avg_vol = get_average_volume(candles)
             
             # Dynamic volume threshold based on timeframe
-            min_volume_threshold = get_minimum_volume_threshold(symbol, tf)
+            min_volume_threshold = get_minimum_volume_threshold(symbol, tf,  market_context)
             
             # Check volume quality, not just quantity
             if not check_volume_quality(candles):
@@ -890,7 +890,7 @@ def score_symbol(symbol, candles_by_timeframe, market_context=None):
         type_scores["Intraday"] *= 1.15
     
 
-def get_minimum_volume_threshold(symbol, timeframe):
+def get_minimum_volume_threshold(symbol, timeframe, market_context=None):
     """Dynamic volume threshold based on context"""
     
     # Known liquid pairs get lower thresholds
