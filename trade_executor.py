@@ -493,6 +493,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         strategy = "mean_reversion"
     elif "breakout_sniper" in signal_data.get("tf_scores", {}):
         strategy = "breakout_sniper"
+    elif range_break_details and range_break_confidence > 0.6:
+        strategy = "range_break"
     
     log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type} ({strategy})")
     
