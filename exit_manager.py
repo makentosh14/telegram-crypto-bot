@@ -519,6 +519,42 @@ def calculate_early_trailing_stop(symbol, direction, entry_price, current_price,
             return round(new_sl, precision)
         return None
 
+def calculate_range_based_exit_levels(trade_data):
+    """Calculate exit levels based on range break data"""
+    range_details = trade_data.get('range_break_details', {})
+    
+    if not range_details:
+        return None
+        
+    direction = trade_data.get('direction', '').lower()
+    entry_price = trade_data.get('entry_price')
+    
+    exit_levels = {}
+    
+    if direction == 'long':
+        # Use range high as initial target
+        if range_details.get('range_high'):
+            exit_levels['tp1'] = range_details['range_high']
+            exit_levels['tp2'] = range_details['range_high'] * 1.02  # 2% above range
+            exit_levels['tp3'] = range_details['range_high'] * 1.05  # 5% above range
+            
+        # Use range low as stop loss reference
+        if range_details.get('range_low'):
+            exit_levels['sl'] = range_details['range_low'] * 0.995  # Just below support
+            
+    else:  # short
+        # Use range low as initial target
+        if range_details.get('range_low'):
+            exit_levels['tp1'] = range_details['range_low']
+            exit_levels['tp2'] = range_details['range_low'] * 0.98  # 2% below range
+            exit_levels['tp3'] = range_details['range_low'] * 0.95  # 5% below range
+            
+        # Use range high as stop loss reference
+        if range_details.get('range_high'):
+            exit_levels['sl'] = range_details['range_high'] * 1.005  # Just above resistance
+            
+    return exit_levels
+
 def adjust_profit_protection(symbol, entry_price, current_price, direction, trade_type="Intraday"):
     """
     Enhanced profit protection with advanced indicator awareness
