@@ -1013,49 +1013,49 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"   📊 Pattern confidence adjustment: {pattern_confidence_multiplier:.2f} (final conf: {confidence:.1f}%)")
 
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
-    if min_score_met and meets_quality_standards(...):    
-        trade = await execute_trade_if_valid({
-            "symbol": symbol,
-            "price": price,
-            "trade_type": trade_type,
-            "direction": direction,
-            "score": score,
-            "confidence": confidence,
-            "candles": candles_by_tf,
-            "indicator_scores": indicator_scores,
-            "used_indicators": used_indicators,
-            "tf_scores": tf_scores,
-            "pattern": pattern,
-            "pattern_strength": pattern_strength,
-            "whale": detect_whale_activity(candles_by_tf.get("5", [])),
-            "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
-            "regime": regime,
-            "pump_potential": pump_potential,
-            "always_allow_swing": ALWAYS_ALLOW_SWING and trade_type == "Swing",
-            "market_type": get_symbol_category(symbol),
-            "range_break_active": range_break_bonus > 0,
-            "range_break_details": range_break_details,
-            "range_break_confidence": break_confidence if range_break_bonus > 0 else 0
-        })
+        if min_score_met and meets_quality_standards(...):    
+            trade = await execute_trade_if_valid({
+                "symbol": symbol,
+                "price": price,
+                "trade_type": trade_type,
+                "direction": direction,
+                "score": score,
+                "confidence": confidence,
+                "candles": candles_by_tf,
+                "indicator_scores": indicator_scores,
+                "used_indicators": used_indicators,
+                "tf_scores": tf_scores,
+                "pattern": pattern,
+                "pattern_strength": pattern_strength,
+                "whale": detect_whale_activity(candles_by_tf.get("5", [])),
+                "volume_spike": is_volume_spike(candles_by_tf.get("1", []), 2.5),
+                "regime": regime,
+                "pump_potential": pump_potential,
+                "always_allow_swing": ALWAYS_ALLOW_SWING and trade_type == "Swing",
+                "market_type": get_symbol_category(symbol),
+                "range_break_active": range_break_bonus > 0,
+                "range_break_details": range_break_details,
+                "range_break_confidence": break_confidence if range_break_bonus > 0 else 0
+            })
 
-        # Format and send notification message after trade is placed
-        msg = format_trade_signal(
-            symbol=symbol,
-            score=score,
-            tf_scores=tf_scores,
-            trend=trend_context,
-            entry_price=price,
-            sl=sl,
-            tp1=tp1,
-            trade_type=trade_type,
-            direction=direction,
-            trailing_pct=trailing_pct,
-            leverage=DEFAULT_LEVERAGE,
-            risk_pct=risk_pct,
-            confidence=confidence,
-            sl_pct=sl_pct,      # Add this line
-            tp1_pct=tp1_pct     # Add this line
-       )
+            # Format and send notification message after trade is placed
+            msg = format_trade_signal(
+                symbol=symbol,
+                score=score,
+                tf_scores=tf_scores,
+                trend=trend_context,
+                entry_price=price,
+                sl=sl,
+                tp1=tp1,
+                trade_type=trade_type,
+                direction=direction,
+                trailing_pct=trailing_pct,
+                leverage=DEFAULT_LEVERAGE,
+                risk_pct=risk_pct,
+                confidence=confidence,
+                sl_pct=sl_pct,      # Add this line
+                tp1_pct=tp1_pct     # Add this line
+           )
 
         # Add pattern info to message if detected
         if pattern:
