@@ -527,39 +527,67 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             tp1_pct = sl_pct * 2.0      # Default TP percentage
 
         # ADD THIS: Apply range-based adjustments
-        if range_break_details:
-            range_levels = calculate_range_based_exit_levels({
-                'direction': direction,
-                'entry_price': entry_price,
-                'range_break_details': range_break_details
-            })
-        
-            if range_levels:
-                # Use range-based levels if they provide better risk/reward
-                if direction.lower() == 'long':
-                    # For longs, use range low as SL reference
-                    if range_levels.get('sl') and range_levels['sl'] > sl * 0.95:
-                        sl = range_levels['sl']
+        if range_break_details and range_break_confidence > 0.6:
+        log(f"📊 Applying range-based exit levels for {symbol}")
+    
+        # Calculate range-based levels
+        range_levels = calculate_range_based_exit_levels({
+            'direction': direction,
+            'entry_price': entry_price,
+            'range_break_details': range_break_details
+        })
+    
+        if range_levels:
+            # Apply range-based SL with validation
+            if direction.lower() == 'long':
+                # For longs, use range low as SL reference
+                if range_levels.get('sl'):
+                    # Ensure SL is below entry and provides reasonable risk
+                    range_sl = range_levels['sl']
+                    min_sl = entry_price * 0.98  # At least 2% stop
+                
+                    if range_sl < entry_price and range_sl > min_sl:
+                        sl = range_sl
                         sl_pct = ((entry_price - sl) / entry_price) * 100
-                        log(f"📊 Using range-based SL: {sl:.8f}")
+                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
+                    else:
+                        log(f"⚠️ Range SL {range_sl:.8f} not suitable, keeping calculated SL")
+            
+                # Use range-based TP levels
+                if range_levels.get('tp1'):
+                    tp1 = range_levels['tp1']
+                    tp1_pct = ((tp1 - entry_price) / entry_price) * 100
+                    log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
                 
-                    # Use range high as TP reference
-                    if range_levels.get('tp1'):
-                        tp1 = range_levels['tp1']
-                        tp1_pct = ((tp1 - entry_price) / entry_price) * 100
-                        log(f"📊 Using range-based TP1: {tp1:.8f}")
-                else:  # short
-                    # For shorts, use range high as SL reference
-                    if range_levels.get('sl') and range_levels['sl'] < sl * 1.05:
-                        sl = range_levels['sl']
+                    # Set TP2 based on range
+                    if range_levels.get('tp2'):
+                        tp2 = range_levels['tp2']
+                        log(f"✅ Setting range-based TP2: {tp2:.8f}")
+                        signal_data['tp2'] = tp2  # Store for later use
+                    
+            else:  # short
+                # For shorts, use range high as SL reference
+                if range_levels.get('sl'):
+                    range_sl = range_levels['sl']
+                    max_sl = entry_price * 1.02  # At least 2% stop
+                
+                    if range_sl > entry_price and range_sl < max_sl:
+                        sl = range_sl
                         sl_pct = ((sl - entry_price) / entry_price) * 100
-                        log(f"📊 Using range-based SL: {sl:.8f}")
+                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
+                    else:
+                        log(f"⚠️ Range SL {range_sl:.8f} not suitable, keeping calculated SL")
+            
+                # Use range-based TP levels
+                if range_levels.get('tp1'):
+                    tp1 = range_levels['tp1']
+                    tp1_pct = ((entry_price - tp1) / entry_price) * 100
+                    log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
                 
-                    # Use range low as TP reference
-                    if range_levels.get('tp1'):
-                        tp1 = range_levels['tp1']
-                        tp1_pct = ((entry_price - tp1) / entry_price) * 100
-                        log(f"📊 Using range-based TP1: {tp1:.8f}")
+                    if range_levels.get('tp2'):
+                        tp2 = range_levels['tp2']
+                        log(f"✅ Setting range-based TP2: {tp2:.8f}")
+                        signal_data['tp2'] = tp2
     
         # Apply exit strategy multipliers
         if exit_strategy == "pump_optimized":
