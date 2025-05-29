@@ -54,7 +54,7 @@ ENABLE_WHALE_WATCH = True
 ENABLE_NEWS_REACTION = True
 
 # Master switch for the reentry system
-ENABLE_AUTO_REENTRY = True  # Set to False to disable completely
+ENABLE_AUTO_REENTRY = False  # Set to False to disable completely
 
 # Reentry cooldown settings (in monitoring cycles, 1 cycle = 5 seconds)
 REENTRY_COOLDOWNS = {
