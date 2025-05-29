@@ -127,3 +127,5 @@ ALTSEASON_MODE = {
     "enable_micro_caps": True,  # Trade smaller alts
     "momentum_bias": 0.3,  # Extra score for momentum
 }
+
+NORMAL_MAX_POSITIONS = 10
