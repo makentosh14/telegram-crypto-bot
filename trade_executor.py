@@ -541,7 +541,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         # ADD THIS: Apply range-based adjustments
         if range_break_details and range_break_confidence > 0.6:
-        log(f"📊 Applying range-based exit levels for {symbol}")
+            log(f"📊 Applying range-based exit levels for {symbol}")
     
         # Calculate range-based levels
         range_levels = calculate_range_based_exit_levels({
