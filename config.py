@@ -112,3 +112,18 @@ REENTRY_FEATURES = {
     "check_volume_profile": True,
     "require_trend_alignment": True
 }
+
+ALTSEASON_MODE = {
+    "enabled": True,  # Master switch
+    "min_volume_override": True,  # Trade lower volume alts during altseason
+    "max_positions": 15,  # Increase from normal 10
+    "prefer_longs": True,  # Bias toward upside in altseason
+    "tp_multiplier": 1.5,  # Bigger profit targets
+    "sl_multiplier": 1.2,  # Wider stops for volatility
+    "confidence_reduction": 10,  # Lower confidence requirements by 10%
+    "score_threshold_reduction": 1.0,  # Reduce score requirements
+    "risk_multiplier": 1.3,  # Increase risk per trade
+    "scan_speed": 3,  # Faster scanning (seconds)
+    "enable_micro_caps": True,  # Trade smaller alts
+    "momentum_bias": 0.3,  # Extra score for momentum
+}
