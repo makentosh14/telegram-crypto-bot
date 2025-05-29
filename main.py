@@ -1057,14 +1057,14 @@ async def scan_for_new_signals(symbols,trend_context):
                 tp1_pct=tp1_pct     # Add this line
            )
 
-        # Add pattern info to message if detected
-        if pattern:
-            pattern_dir = get_pattern_direction(pattern)
-            msg += f"\n🎯 <b>Pattern:</b> {pattern} ({pattern_dir}) - Strength: {pattern_strength:.2f}"
+            # Add pattern info to message if detected
+            if pattern:
+                pattern_dir = get_pattern_direction(pattern)
+                msg += f"\n🎯 <b>Pattern:</b> {pattern} ({pattern_dir}) - Strength: {pattern_strength:.2f}"
 
-        # Add pump potential info to message if detected
-        if pump_potential:
-            msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
+            # Add pump potential info to message if detected
+            if pump_potential:
+                msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
 
         await send_telegram_message(msg)
         active_signals[symbol] = {
