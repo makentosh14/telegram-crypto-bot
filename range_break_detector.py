@@ -454,6 +454,15 @@ class RangeBreakoutStrategy:
         log(f"   Position in range: {position_in_range:.2f}")
         log(f"   Direction: {direction}")
         log(f"   Patterns: {patterns}")
+
+        # Use this in direction determination:
+        market_bias = self._should_favor_long_breaks(trend_context)
+        if market_bias is True and direction == "Short":
+            # Reduce confidence for shorts in bullish markets
+            confidence *= 0.7
+        elif market_bias is False and direction == "Long":
+            # Reduce confidence for longs in bearish markets
+            confidence *= 0.7
         
         # Boost confidence for multiple pattern confluence
         if len(patterns) >= 4:
@@ -493,15 +502,6 @@ class RangeBreakoutStrategy:
         
         # Only in clear downtrends should we favor shorts
         return False
-
-    # Use this in direction determination:
-    market_bias = self._should_favor_long_breaks(trend_context)
-    if market_bias is True and direction == "Short":
-        # Reduce confidence for shorts in bullish markets
-        confidence *= 0.7
-    elif market_bias is False and direction == "Long":
-        # Reduce confidence for longs in bearish markets
-        confidence *= 0.7
        
     def _detect_advanced_compression(self, candles: List[Dict], resistance: float, support: float) -> Dict:
         """Detect advanced price compression patterns"""
