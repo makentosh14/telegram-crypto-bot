@@ -130,7 +130,7 @@ class RangeBreakoutStrategy:
         pre_breakout_data = self._detect_comprehensive_pre_breakout(
             symbol, candles, high_boundary, low_boundary,
             stealth_score, stealth_direction, trend_score, trend_bias,
-            volume_analysis
+            volume_analysis, trend_context
         )
         
         if pre_breakout_data['detected']:
@@ -351,7 +351,7 @@ class RangeBreakoutStrategy:
                                          resistance: float, support: float,
                                          stealth_score: float, stealth_direction: Optional[str],
                                          trend_score: float, trend_bias: Optional[str],
-                                         volume_analysis: Dict) -> Dict:
+                                         volume_analysis: Dict, trend_context: Dict = None) -> Dict:
         """Comprehensive pre-breakout detection with multiple buildup patterns"""
         
         patterns = []
