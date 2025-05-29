@@ -224,50 +224,60 @@ class RangeBreakoutStrategy:
         """Analyze volume distribution across price levels"""
         if len(candles) < 20:
             return {'score': 0, 'high_volume_node': None}
-        
+    
+        # Check if resistance and support are too close (avoid division by zero)
+        if abs(resistance - support) < 0.00001:  # Very tight range
+            log(f"⚠️ Range too tight for volume profile analysis: {resistance:.8f} - {support:.8f}")
+            return {'score': 0, 'high_volume_node': None, 'error': 'range_too_tight'}
+    
         # Create price bins
         price_bins = {}
         bin_size = (resistance - support) / 10  # 10 bins across range
-        
+    
+        # Additional safety check
+        if bin_size <= 0:
+            log(f"⚠️ Invalid bin size: {bin_size} (resistance: {resistance}, support: {support})")
+            return {'score': 0, 'high_volume_node': None, 'error': 'invalid_range'}
+    
         for candle in candles[-50:]:  # Last 50 candles
             high = float(candle['high'])
             low = float(candle['low'])
             volume = float(candle['volume'])
             avg_price = (high + low) / 2
-            
+        
             # Determine which bin this candle belongs to
             bin_index = int((avg_price - support) / bin_size)
             bin_index = max(0, min(9, bin_index))  # Ensure within bounds
-            
+        
             if bin_index not in price_bins:
                 price_bins[bin_index] = 0
             price_bins[bin_index] += volume
-        
+    
         # Find high volume nodes
         if price_bins:
             max_volume_bin = max(price_bins.items(), key=lambda x: x[1])
             total_volume = sum(price_bins.values())
-            
+        
             # Calculate score based on volume concentration
             concentration = max_volume_bin[1] / total_volume if total_volume > 0 else 0
-            
+        
             # High volume node position
             node_position = max_volume_bin[0] / 10  # Normalize to 0-1
-            
+        
             score = 0
             # Score higher if high volume node is at extremes (potential breakout)
             if node_position < 0.3 or node_position > 0.7:
                 score = concentration * 0.8
             else:
                 score = concentration * 0.4
-            
+        
             return {
                 'score': score,
                 'high_volume_node': max_volume_bin[0],
                 'concentration': concentration,
                 'distribution': price_bins
             }
-        
+    
         return {'score': 0, 'high_volume_node': None}
     
     def _analyze_volume_trend(self, candles: List[Dict]) -> Dict:
@@ -1190,41 +1200,46 @@ class RangeBreakoutStrategy:
         """Identify if price is in a range and find boundaries"""
         if len(candles) < LOOKBACK_PERIOD:
             return {'is_ranging': False}
-            
+        
         # Get price data
         highs = [float(c['high']) for c in candles[-LOOKBACK_PERIOD:]]
         lows = [float(c['low']) for c in candles[-LOOKBACK_PERIOD:]]
         closes = [float(c['close']) for c in candles[-LOOKBACK_PERIOD:]]
-        
+    
         # Calculate range
         range_high = max(highs)
         range_low = min(lows)
+    
+        # Check if range is valid (not zero or too small)
+        if range_high <= range_low or (range_high - range_low) < 0.00001:
+            return {'is_ranging': False, 'reason': 'invalid_range'}
+    
         range_size = (range_high - range_low) / range_low
-        
+    
         # Check if range is tight enough
         if range_size > RANGE_THRESHOLD:
             return {'is_ranging': False}
-        
+    
         # Find support and resistance levels with multiple touches
         resistance_touches = 0
         support_touches = 0
-        
+    
         for i, candle in enumerate(candles[-LOOKBACK_PERIOD:]):
             high = float(candle['high'])
             low = float(candle['low'])
-            
+        
             # Count touches of resistance
             if high >= range_high * 0.99:
                 resistance_touches += 1
-                
+            
             # Count touches of support
             if low <= range_low * 1.01:
                 support_touches += 1
-        
+    
         # Require minimum touches to confirm range
         is_ranging = (resistance_touches >= MIN_TOUCHES and 
                      support_touches >= MIN_TOUCHES)
-        
+    
         return {
             'is_ranging': is_ranging,
             'resistance': range_high,
