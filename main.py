@@ -1092,7 +1092,8 @@ async def scan_for_new_signals(symbols,trend_context):
                 qty=trade.get("qty"),
                 sl_order_id=trade.get("sl_order_id"),
                 exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
-                has_pump_potential=pump_potential  # Pass pump potential flag
+                has_pump_potential=pump_potential, # Pass pump potential flag
+                range_break_details=range_break_details if range_break_bonus > 0 else None  # Add this line
             )
 
             from monitor import active_trades
