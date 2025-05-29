@@ -528,31 +528,63 @@ def calculate_range_based_exit_levels(trade_data):
         
     direction = trade_data.get('direction', '').lower()
     entry_price = trade_data.get('entry_price')
+
+    if not entry_price or not direction:
+        log(f"⚠️ Missing required data for range-based exits")
+        return None
     
     exit_levels = {}
+
+    range_high = range_details.get('range_high')
+    range_low = range_details.get('range_low')
+    
+    if not range_high or not range_low:
+        log(f"⚠️ Missing range boundaries")
+        return None
+    
+    # Validate range is reasonable
+    range_width = (range_high - range_low) / range_low
+    if range_width > 0.10:  # Range too wide (>10%)
+        log(f"⚠️ Range too wide ({range_width*100:.1f}%), using standard exits")
+        return None
     
     if direction == 'long':
-        # Use range high as initial target
-        if range_details.get('range_high'):
-            exit_levels['tp1'] = range_details['range_high']
-            exit_levels['tp2'] = range_details['range_high'] * 1.02  # 2% above range
-            exit_levels['tp3'] = range_details['range_high'] * 1.05  # 5% above range
-            
-        # Use range low as stop loss reference
-        if range_details.get('range_low'):
-            exit_levels['sl'] = range_details['range_low'] * 0.995  # Just below support
-            
+        # For long positions
+        
+        # SL: Just below range low with small buffer
+        exit_levels['sl'] = range_low * 0.995  # 0.5% below support
+        
+        # TP1: At range high (first resistance)
+        exit_levels['tp1'] = range_high
+        
+        # TP2: 2% above range high
+        exit_levels['tp2'] = range_high * 1.02
+        
+        # TP3: 5% above range high (for runners)
+        exit_levels['tp3'] = range_high * 1.05
+        
     else:  # short
-        # Use range low as initial target
-        if range_details.get('range_low'):
-            exit_levels['tp1'] = range_details['range_low']
-            exit_levels['tp2'] = range_details['range_low'] * 0.98  # 2% below range
-            exit_levels['tp3'] = range_details['range_low'] * 0.95  # 5% below range
-            
-        # Use range high as stop loss reference
-        if range_details.get('range_high'):
-            exit_levels['sl'] = range_details['range_high'] * 1.005  # Just above resistance
-            
+        # For short positions
+        
+        # SL: Just above range high with small buffer
+        exit_levels['sl'] = range_high * 1.005  # 0.5% above resistance
+        
+        # TP1: At range low (first support)
+        exit_levels['tp1'] = range_low
+        
+        # TP2: 2% below range low
+        exit_levels['tp2'] = range_low * 0.98
+        
+        # TP3: 5% below range low (for runners)
+        exit_levels['tp3'] = range_low * 0.95
+    
+    # Log the calculated levels
+    log(f"📊 Range-based exit levels calculated:")
+    log(f"   Range: {range_low:.8f} - {range_high:.8f} ({range_width*100:.2f}% width)")
+    log(f"   SL: {exit_levels['sl']:.8f}")
+    log(f"   TP1: {exit_levels['tp1']:.8f}")
+    log(f"   TP2: {exit_levels['tp2']:.8f}")
+    
     return exit_levels
 
 def adjust_profit_protection(symbol, entry_price, current_price, direction, trade_type="Intraday"):
