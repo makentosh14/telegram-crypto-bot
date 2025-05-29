@@ -522,6 +522,10 @@ async def process_pump_signal(pump_signal, trend_context):
     """Enhanced pump signal processing with full range break integration"""
     symbol = pump_signal['symbol']
     
+    # Skip if already in active trade or signals
+    if symbol in active_trades or symbol in active_signals:
+        return
+    
     # Get comprehensive candle data
     candles_by_tf = {
         tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
@@ -581,6 +585,15 @@ async def process_pump_signal(pump_signal, trend_context):
         'exit_tranches': [0.25, 0.35, 0.40]  # Optimized for letting pumps run
     }
     
+    # Calculate confidence
+    confidence = min(pump_signal['confidence'] * 100, 95)
+    
+    # Calculate SL/TP
+    result = calculate_dynamic_sl_tp(
+        candles_by_tf, price, "Scalp", "Long", base_score, confidence, "volatile"
+    )
+    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    
     # Execute trade with enhanced parameters
     trade = await execute_trade_if_valid({
         "symbol": symbol,
@@ -588,7 +601,7 @@ async def process_pump_signal(pump_signal, trend_context):
         "trade_type": "Scalp",  # Pumps usually start as scalps
         "direction": "Long",
         "score": base_score,
-        "confidence": min(pump_signal['confidence'] * 100, 95),
+        "confidence": confidence,
         "candles": candles_by_tf,
         "indicator_scores": indicator_scores,
         "used_indicators": list(pump_signal['reasons'].keys()) + ['range_break'],
@@ -601,10 +614,28 @@ async def process_pump_signal(pump_signal, trend_context):
     })
     
     if trade:
-        # Enhanced notification with range details
-        msg = f"🚀 <b>PUMP SIGNAL EXECUTED</b>\n"
-        msg += f"<b>{symbol}</b> @ {price:.8f}\n"
-        msg += f"Score: {base_score:.2f} | Conf: {pump_signal['confidence']*100:.1f}%\n"
+        # Format and send the Telegram message
+        msg = format_trade_signal(
+            symbol=symbol,
+            score=base_score,
+            tf_scores={"range_break_pump": base_score},
+            trend=trend_context,
+            entry_price=price,
+            sl=sl,
+            tp1=tp1,
+            trade_type="Scalp",
+            direction="Long",
+            trailing_pct=trailing_pct,
+            leverage=DEFAULT_LEVERAGE,
+            risk_pct=6.0,
+            confidence=confidence,
+            sl_pct=sl_pct,
+            tp1_pct=tp1_pct
+        )
+        
+        # Add pump-specific information
+        msg += f"\n\n🚀 <b>PUMP SIGNAL DETECTED</b>\n"
+        msg += f"Confidence: {pump_signal['confidence']*100:.1f}%\n"
         
         if details.get('range_high') and details.get('range_low'):
             msg += f"\n📊 <b>Range Analysis:</b>\n"
@@ -615,6 +646,7 @@ async def process_pump_signal(pump_signal, trend_context):
         if details.get('buildup_patterns'):
             msg += f"\n🎯 <b>Patterns:</b> {', '.join(details['buildup_patterns'])}"
         
+        # Send the Telegram message
         await send_telegram_message(msg)
         
         # Track with enhanced data
@@ -624,10 +656,33 @@ async def process_pump_signal(pump_signal, trend_context):
             'pump_signal': True,
             'range_data': details
         }
+        
+        # Track the active trade
+        track_active_trade(
+            symbol=symbol,
+            trade_type="Scalp",
+            initial_score=base_score,
+            entry_price=trade['entry'],
+            direction="Long",
+            trailing_pct=trade.get("trailing_pct"),
+            tp1_target=trade.get("tp1"),
+            tp1_pct=tp1_pct,
+            tp2=trade.get("tp2"),
+            sl=trade.get("sl"),
+            qty=trade.get("qty"),
+            sl_order_id=trade.get("sl_order_id"),
+            exit_tranches=trade.get("exit_tranches"),
+            has_pump_potential=True,
+            range_break_details=details
+        )
 
 async def process_break_signal(break_signal, trend_context):
     """Process a range break signal into a trade"""
     symbol = break_signal['symbol']
+    
+    # Skip if already in active trade or signals
+    if symbol in active_trades or symbol in active_signals:
+        return
     
     # Similar logic to pump signal but for breaks
     candles_by_tf = {
@@ -675,7 +730,7 @@ async def process_break_signal(break_signal, trend_context):
         msg = format_trade_signal(
             symbol=symbol,
             score=base_score,
-            tf_scores={"break_detector": base_score},
+            tf_scores={"range_break": base_score},
             trend=trend_context,
             entry_price=price,
             sl=sl,
@@ -689,8 +744,9 @@ async def process_break_signal(break_signal, trend_context):
             sl_pct=sl_pct,
             tp1_pct=tp1_pct
         )
-        msg += f"\n🎯 <b>Range Break Signal!</b>\n"
+        msg += f"\n\n🎯 <b>RANGE BREAK SIGNAL</b>\n"
         msg += f"Direction: {direction}\n"
+        msg += f"Confidence: {break_signal['confidence']*100:.1f}%\n"
         msg += f"Triggers: {', '.join(break_signal['reasons'].keys())}"
         
         await send_telegram_message(msg)
@@ -716,7 +772,8 @@ async def process_break_signal(break_signal, trend_context):
             qty=trade.get("qty"),
             sl_order_id=trade.get("sl_order_id"),
             exit_tranches=trade.get("exit_tranches"),
-            has_pump_potential=False
+            has_pump_potential=False,
+            range_break_details=break_signal.get('reasons', {})
         )
 
 
