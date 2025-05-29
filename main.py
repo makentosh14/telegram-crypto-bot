@@ -1013,7 +1013,7 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"   📊 Pattern confidence adjustment: {pattern_confidence_multiplier:.2f} (final conf: {confidence:.1f}%)")
 
         # Execute trade immediately before Telegram notification - CRITICAL FIX: Pass always_allow_swing flag
-        if min_score_met and meets_quality_standards(...):    
+        if min_score_met and meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):    
             trade = await execute_trade_if_valid({
                 "symbol": symbol,
                 "price": price,
