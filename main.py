@@ -797,6 +797,8 @@ async def process_break_signal(break_signal, trend_context):
 
 
 async def scan_for_new_signals(symbols,trend_context):
+    global active_trades
+    
     regime = trend_context.get("regime", "trending")
     altseason = trend_context.get("altseason", False)
     altseason_strength = trend_context.get("altseason_strength", 0)
