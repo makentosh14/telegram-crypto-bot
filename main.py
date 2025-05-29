@@ -7,7 +7,7 @@ from score import score_symbol, determine_direction, calculate_confidence, has_p
 from telegram_bot import send_telegram_message, format_trade_signal, send_error_to_telegram
 from trend_filters import get_trend_context_cached, monitor_btc_trend_accuracy, monitor_altseason_status, validate_short_signal
 from signal_memory import log_signal, is_duplicate_signal
-from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING
+from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING, ALTSEASON_MODE, NORMAL_MAX_POSITIONS
 from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
@@ -169,6 +169,10 @@ def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_conte
 
 def meets_quality_standards(symbol, score, confidence, indicator_scores, used_indicators, trade_type, direction, candles_by_tf, trend_context):
     """More flexible quality filter"""
+
+    # Check if altseason mode is active
+    altseason = trend_context.get("altseason", False)
+    use_altseason_mode = ALTSEASON_MODE["enabled"] and altseason
     
     # Lower confidence requirements
     min_confidence = {
@@ -176,6 +180,21 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
         "Intraday": 60,   # Reduced from 70
         "Swing": 65       # Reduced from 75
     }
+
+    # Apply altseason confidence reduction
+    if use_altseason_mode:
+        conf_reduction = ALTSEASON_MODE["confidence_reduction"]
+        for key in min_confidence:
+            min_confidence[key] -= conf_reduction
+    
+    # For shorts during altseason, still require higher confidence
+    if direction == "Short":
+        if use_altseason_mode and ALTSEASON_MODE["prefer_longs"]:
+            for key in min_confidence:
+                min_confidence[key] += 15  # Much higher for shorts in altseason
+        else:
+            for key in min_confidence:
+                min_confidence[key] += 5
     
     # For shorts, slightly higher but not too restrictive
     if direction == "Short":
@@ -779,21 +798,47 @@ async def process_break_signal(break_signal, trend_context):
 
 async def scan_for_new_signals(symbols,trend_context):
     regime = trend_context.get("regime", "trending")
-    altseason = trend_context.get("altseason", "no")
+    altseason = trend_context.get("altseason", False)
+    altseason_strength = trend_context.get("altseason_strength", 0)
+    
+    # Check if we should use altseason mode
+    use_altseason_mode = (
+        ALTSEASON_MODE["enabled"] and 
+        altseason and 
+        altseason_strength > 0.6  # Only activate for strong altseason
+    )
+    
+    if use_altseason_mode:
+        log("🚀 ALTSEASON MODE ACTIVE - Using enhanced parameters")
+    
+    # Check max positions limit
+    current_positions = sum(1 for t in active_trades.values() if not t.get("exited"))
+    max_positions = ALTSEASON_MODE["max_positions"] if use_altseason_mode else NORMAL_MAX_POSITIONS
+    
+    if current_positions >= max_positions:
+        log(f"⚠️ Maximum positions reached ({current_positions}/{max_positions})")
+        return
 
-    # Adjust score thresholds based on regime
-    # In volatile regimes, lower thresholds to catch more pumps
+    # Adjust score thresholds based on regime AND altseason mode
     score_adjustments = {
-        "volatile": {"scalp": -1.0, "intraday": -0.8, "swing": -0.5},  # More lenient in volatile markets
-        "ranging": {"scalp": -0.5, "intraday": -0.3, "swing": 0.0},   # Slightly more lenient in ranging
-        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": -0.5},   # More lenient for swings in trends
+        "volatile": {"scalp": -1.0, "intraday": -0.8, "swing": -0.5},
+        "ranging": {"scalp": -0.5, "intraday": -0.3, "swing": 0.0},
+        "trending": {"scalp": 0.0, "intraday": 0.0, "swing": -0.5},
     }
+    
+    # Apply additional reduction during altseason
+    if use_altseason_mode:
+        reduction = ALTSEASON_MODE["score_threshold_reduction"]
+        for regime_type in score_adjustments:
+            for trade_type in score_adjustments[regime_type]:
+                score_adjustments[regime_type][trade_type] -= reduction
     
     # Additional adjustment for altseason
     if altseason in ["confirmed", "strong_altseason"]:
         # Be more aggressive during altseason
         for trade_type in score_adjustments[regime]:
             score_adjustments[regime][trade_type] -= 0.5
+            
     adjust = score_adjustments.get(regime, {"scalp": 0, "intraday": 0, "swing": 0})
     adj_scalp = MIN_SCALP_SCORE + adjust["scalp"]
     adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
@@ -827,7 +872,6 @@ async def scan_for_new_signals(symbols,trend_context):
         price = float(candles_by_tf['1'][-1]['close']) if '1' in candles_by_tf else 1.0
         indicator_scores = rebalance_indicator_scores(indicator_scores, trend_context)
 
-        # NOW check for range break setup AFTER score is defined
         # NOW check for range break setup AFTER score is defined
         range_break_bonus = 0
         range_break_details = {}
@@ -865,6 +909,18 @@ async def scan_for_new_signals(symbols,trend_context):
                 # Override trade type for range breaks
                 if break_confidence > 0.7:
                     trade_type = "Scalp"  # Range breaks often start as scalps
+
+        if use_altseason_mode and has_momentum:
+            momentum_bonus = ALTSEASON_MODE["momentum_bias"]
+            score += momentum_bonus
+            indicator_scores["altseason_momentum"] = momentum_bonus
+            log(f"🚀 Altseason momentum bonus: +{momentum_bonus}")
+
+        # Update direction bias during altseason
+        if use_altseason_mode and ALTSEASON_MODE["prefer_longs"] and direction == "Short":
+            # Reduce confidence for shorts during altseason
+            confidence *= 0.7
+            log(f"📉 Short confidence reduced during altseason: {confidence:.1f}%")
                     
         # Apply range break bonus
         score += range_break_bonus
