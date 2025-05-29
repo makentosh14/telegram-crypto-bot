@@ -101,7 +101,7 @@ async def get_account_balance():
         
         return 0
 
-def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending"):
+def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending", trend_context=None):
     """
     Use only enhanced SL/TP logic from sl_tp_utils. Fail if unavailable.
     """
@@ -115,6 +115,19 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
             confidence=confidence,
             regime=regime
         )
+
+        # Check for altseason mode
+        if trend_context:
+            altseason = trend_context.get("altseason", False)
+            use_altseason_mode = ALTSEASON_MODE["enabled"] and altseason
+        
+            if use_altseason_mode:
+                # Apply altseason multipliers
+                sl_pct *= ALTSEASON_MODE["sl_multiplier"]  # Wider stops
+                tp1_pct *= ALTSEASON_MODE["tp_multiplier"]  # Bigger targets
+            
+                log(f"🚀 Altseason SL/TP adjustment - SL: {sl_pct:.2f}%, TP: {tp1_pct:.2f}%")
+                
         if len(result) >= 5:
             return result[:5]
         else:
