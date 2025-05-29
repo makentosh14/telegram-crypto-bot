@@ -357,6 +357,9 @@ class RangeBreakoutStrategy:
         patterns = []
         confidence = 0
         direction = None
+
+        current_price = float(candles[-1]['close'])
+        position_in_range = (current_price - support) / (resistance - support) if (resistance - support) > 0 else 0.5
         
         # 1. Price compression pattern
         compression_data = self._detect_advanced_compression(candles, resistance, support)
@@ -406,16 +409,51 @@ class RangeBreakoutStrategy:
         
         # Direction determination with multiple factors
         if not direction:
-            # Use trend bias if available
-            if trend_bias and trend_score > 0.6:
-                direction = trend_bias
-            # Use volume profile bias
-            elif volume_analysis['profile']['high_volume_node'] is not None:
-                node = volume_analysis['profile']['high_volume_node']
-                if node < 3:  # Lower third of range
-                    direction = "Long"
-                elif node > 7:  # Upper third of range
-                    direction = "Short"
+            # Primary: Where is price consolidating?
+            if position_in_range > 0.7:  # Consolidating near resistance
+                # High probability of upward breakout
+                direction = "Long"
+                confidence += 0.1
+                log(f"📊 Price near resistance ({position_in_range:.2f}) - expecting upward break")
+            
+            elif position_in_range < 0.3:  # Consolidating near support
+                # High probability of downward breakout
+                direction = "Short"
+                confidence += 0.1
+                log(f"📊 Price near support ({position_in_range:.2f}) - expecting downward break")
+            
+            else:  # Middle of range
+                # Use other factors to determine direction
+            
+                # Volume profile analysis
+                if volume_analysis['profile']['high_volume_node'] is not None:
+                    node = volume_analysis['profile']['high_volume_node']
+                    if node > 7:  # High volume near resistance
+                        direction = "Long"  # Building pressure to break up
+                    elif node < 3:  # High volume near support
+                        direction = "Short"  # Building pressure to break down
+            
+                # If still no direction, use trend
+                if not direction and trend_bias:
+                    direction = trend_bias
+            
+                # If still no direction, use momentum
+                if not direction:
+                    recent_candles = candles[-10:]
+                    first_close = float(recent_candles[0]['close'])
+                    last_close = float(recent_candles[-1]['close'])
+                    momentum = (last_close - first_close) / first_close
+                
+                    if momentum > 0.005:  # 0.5% up
+                        direction = "Long"
+                    elif momentum < -0.005:  # 0.5% down
+                        direction = "Short"
+    
+        # Log the decision
+        log(f"🎯 Pre-breakout analysis for {symbol}:")
+        log(f"   Position in range: {position_in_range:.2f}")
+        log(f"   Direction: {direction}")
+        log(f"   Patterns: {patterns}")
         
         # Boost confidence for multiple pattern confluence
         if len(patterns) >= 4:
@@ -439,7 +477,32 @@ class RangeBreakoutStrategy:
             'compression_data': compression_data,
             'triangle_data': triangle_data
         }
+
+    def _should_favor_long_breaks(self, trend_context):
+        """Determine if we should favor long breakouts based on market"""
+        btc_trend = trend_context.get('btc_trend', 'ranging')
+        altseason = trend_context.get('altseason', False)
     
+        # Favor longs in uptrends and altseason
+        if btc_trend == 'uptrend' or altseason:
+            return True
+    
+        # Neutral in ranging markets
+        if btc_trend == 'ranging':
+            return None
+        
+        # Only in clear downtrends should we favor shorts
+        return False
+
+    # Use this in direction determination:
+    market_bias = self._should_favor_long_breaks(trend_context)
+    if market_bias is True and direction == "Short":
+        # Reduce confidence for shorts in bullish markets
+        confidence *= 0.7
+    elif market_bias is False and direction == "Long":
+        # Reduce confidence for longs in bearish markets
+        confidence *= 0.7
+       
     def _detect_advanced_compression(self, candles: List[Dict], resistance: float, support: float) -> Dict:
         """Detect advanced price compression patterns"""
         if len(candles) < PRE_BREAKOUT_LOOKBACK:
@@ -497,14 +560,22 @@ class RangeBreakoutStrategy:
             recent_closes = [float(c['close']) for c in candles[-10:]]
             micro_slope = np.polyfit(range(len(recent_closes)), recent_closes, 1)[0]
             
-            if position > 0.65 and micro_slope > 0:
-                bias = "Long"
-            elif position < 0.35 and micro_slope < 0:
-                bias = "Short"
-            elif micro_slope > 0:
-                bias = "Long"
-            elif micro_slope < 0:
-                bias = "Short"
+            if position > 0.65:  # Near resistance
+                if micro_slope > 0:  # Still pushing up
+                    bias = "Long"    # Likely to break resistance
+                else:  # Losing momentum at resistance
+                    bias = None      # Unclear direction
+            elif position < 0.35:  # Near support
+                if micro_slope < 0:  # Still pushing down
+                    bias = "Short"   # Likely to break support
+                else:  # Bouncing at support
+                bias = None      # Unclear direction
+            else:  # Middle of range
+                # Use micro-trend to predict which boundary it will test
+                if micro_slope > 0.001:  # Moving up toward resistance
+                    bias = "Long"
+                elif micro_slope < -0.001:  # Moving down toward support
+                    bias = "Short"
         
         score = 0
         if is_compressing:
