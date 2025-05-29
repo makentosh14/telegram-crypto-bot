@@ -1066,45 +1066,46 @@ async def scan_for_new_signals(symbols,trend_context):
             if pump_potential:
                 msg += "\n🚀 <b>Pump Potential Detected</b> - Using optimized exit strategy"
 
-        await send_telegram_message(msg)
-        active_signals[symbol] = {
-            'score': score,
-            'score_history': [score],
-            'pattern': pattern
-        }
+            await send_telegram_message(msg)
+            
+            active_signals[symbol] = {
+                'score': score,
+                'score_history': [score],
+                'pattern': pattern
+            }
 
-        if trade:
-            log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
-            write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
+            if trade:
+                log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
+                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
 
             
-            track_active_trade(
-                symbol=symbol,
-                trade_type=trade_type,
-                initial_score=score,
-                entry_price=trade['entry'],
-                direction=direction,
-                trailing_pct=trade.get("trailing_pct"),
-                tp1_target=trade.get("tp1"),  # Store the actual TP1 price
-                tp1_pct=tp1_pct,             # Store the TP1 percentage used
-                tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
-                sl=trade.get("sl"),
-                qty=trade.get("qty"),
-                sl_order_id=trade.get("sl_order_id"),
-                exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
-                has_pump_potential=pump_potential, # Pass pump potential flag
-                range_break_details=range_break_details if range_break_bonus > 0 else None  # Add this line
-            )
+                track_active_trade(
+                    symbol=symbol,
+                    trade_type=trade_type,
+                    initial_score=score,
+                    entry_price=trade['entry'],
+                    direction=direction,
+                    trailing_pct=trade.get("trailing_pct"),
+                    tp1_target=trade.get("tp1"),  # Store the actual TP1 price
+                    tp1_pct=tp1_pct,             # Store the TP1 percentage used
+                    tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
+                    sl=trade.get("sl"),
+                    qty=trade.get("qty"),
+                    sl_order_id=trade.get("sl_order_id"),
+                    exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
+                    has_pump_potential=pump_potential, # Pass pump potential flag
+                    range_break_details=range_break_details if range_break_bonus > 0 else None  # Add this line
+                )
 
-            from monitor import active_trades
-            if symbol in active_trades:
-                log(f"✅ Verified: {symbol} is in active_trades")
+                from monitor import active_trades
+                if symbol in active_trades:
+                    log(f"✅ Verified: {symbol} is in active_trades")
+                else:
+                    log(f"❌ ERROR: {symbol} was NOT added to active_trades!", level="ERROR")
+
+                await verify_stop_loss_placement(symbol, trade, direction)
             else:
-                log(f"❌ ERROR: {symbol} was NOT added to active_trades!", level="ERROR")
-
-            await verify_stop_loss_placement(symbol, trade, direction)
-        else:
-            log(f"⚠️ Trade execution failed for {symbol}")
+                log(f"⚠️ Trade execution failed for {symbol}")
        
 
         from auto_reentry import cooldown_exits, exit_history
