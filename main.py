@@ -955,6 +955,9 @@ async def scan_for_new_signals(symbols,trend_context):
         else:  # Swing
             base_risk = 0.03 if market_season == "confirmed" else 0.04 if market_season == "strong_altseason" else 0.02
 
+        if use_altseason_mode:
+            base_risk *= ALTSEASON_MODE["risk_multiplier"]
+            log(f"💰 Altseason risk multiplier applied: {base_risk:.2f}%")
            
         # Determine strategy type for risk manager
         strategy = "core_strategy"
