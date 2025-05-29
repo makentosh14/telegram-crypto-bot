@@ -402,24 +402,17 @@ async def periodic_backups():
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, 
                       trailing_pct=None, tp1_target=None, tp1_pct=None, tp2=None, sl=None, 
-                      sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False):
+                      sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False, range_break_details=None):
     """
     Track a new active trade with enhanced exit strategy parameters
     """
-    global active_trades  # Ensure we're using the global variable
-
-    if 'range_break_details' in trade_data:
-        active_trades[symbol]['range_break'] = True
-        active_trades[symbol]['range_levels'] = {
-            'high': trade_data['range_break_details'].get('range_high'),
-            'low': trade_data['range_break_details'].get('range_low')
-        }                      
+    global active_trades  # Ensure we're using the global variable                    
 
     # Validate and normalize trade type
     valid_trade_types = ["Scalp", "Intraday", "Swing"]
     if trade_type not in valid_trade_types:
         log(f"⚠️ Invalid trade type '{trade_type}' for {symbol}, defaulting to Intraday", level="WARN")
-        trade_type = "Intraday"                      
+        trade_type = "Intraday"
     
     log(f"🔍 TRACK_ACTIVE_TRADE called for {symbol}")
     log(f"   Entry: {entry_price}, Direction: {direction}, Qty: {qty}")
@@ -477,6 +470,15 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "entry_time": datetime.utcnow(),
         "last_score_update": datetime.utcnow()
     }
+
+    # Add range break info if available
+    if range_break_details:
+        active_trades[symbol]['range_break'] = True
+        active_trades[symbol]['range_levels'] = {
+            'high': range_break_details.get('range_high'),
+            'low': range_break_details.get('range_low'),
+            'width_pct': range_break_details.get('range_width_pct')
+        }
 
     log(f"✅ Trade added to active_trades for {symbol}")
     log(f"📊 Active trades count: {len(active_trades)}")
