@@ -569,7 +569,7 @@ class RangeBreakoutStrategy:
                 if micro_slope < 0:  # Still pushing down
                     bias = "Short"   # Likely to break support
                 else:  # Bouncing at support
-                bias = None      # Unclear direction
+                    bias = None      # Unclear direction
             else:  # Middle of range
                 # Use micro-trend to predict which boundary it will test
                 if micro_slope > 0.001:  # Moving up toward resistance
