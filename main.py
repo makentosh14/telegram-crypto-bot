@@ -555,6 +555,12 @@ async def process_pump_signal(pump_signal, trend_context):
     breakout_detected, direction, confidence, details = range_break_detector.detect_range_breakout(
         symbol, candles_by_tf.get('5', []), '5', trend_context
     )
+
+    # Ensure we have the range boundaries in details
+    if 'range_high' not in details and 'resistance' in details:
+        details['range_high'] = details['resistance']
+    if 'range_low' not in details and 'support' in details:
+        details['range_low'] = details['support']
     
     # Calculate enhanced score based on all factors
     base_score = 6.5 + (pump_signal['confidence'] * 1.5)
@@ -628,6 +634,7 @@ async def process_pump_signal(pump_signal, trend_context):
         "regime": "volatile",
         "pump_potential": True,
         "range_break_details": details,
+        "range_break_confidence": pump_signal['confidence'],  # Add this
         **exit_strategy_params,
         "market_type": get_symbol_category(symbol)
     })
