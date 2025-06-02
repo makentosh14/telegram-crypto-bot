@@ -360,9 +360,32 @@ async def set_position_leverage(symbol, leverage, category="linear"):
 async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
     """Enhanced stop loss placement with validation from position_manager.py"""
     try:
-        # Validate the SL price is on the correct side of the market
-        sl_price = await validate_sl_placement(symbol, direction, sl_price, market_type)
+        # Get current market price for validation
+        ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+            "category": market_type,
+            "symbol": symbol
+        })
         
+        if ticker_resp.get("retCode") == 0:
+            current_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+            
+            # Validate SL is on correct side with proper distance
+            if direction.lower() == "long":
+                if sl_price >= current_price:
+                    log(f"⚠️ Invalid long SL {sl_price} >= current {current_price}, adjusting...")
+                    sl_price = current_price * 0.99  # 1% below current
+                elif (current_price - sl_price) / current_price > 0.10:  # More than 10% away
+                    log(f"⚠️ SL too far for long ({((current_price - sl_price) / current_price) * 100:.1f}%), adjusting...")
+                    sl_price = current_price * 0.95  # Cap at 5% away
+            else:  # short
+                if sl_price <= current_price:
+                    log(f"⚠️ Invalid short SL {sl_price} <= current {current_price}, adjusting...")
+                    sl_price = current_price * 1.01  # 1% above current
+                elif (sl_price - current_price) / current_price > 0.10:  # More than 10% away
+                    log(f"⚠️ SL too far for short ({((sl_price - current_price) / current_price) * 100:.1f}%), adjusting...")
+                    sl_price = current_price * 1.05  # Cap at 5% away
+        
+        # Continue with validated SL price
         log(f"🛡️ Placing SL order for {symbol}: {direction} at {sl_price}")
         
         result = await place_stop_loss_with_retry(
