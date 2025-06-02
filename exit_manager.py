@@ -535,55 +535,70 @@ def calculate_range_based_exit_levels(trade_data):
     
     exit_levels = {}
 
-    range_high = range_details.get('range_high')
-    range_low = range_details.get('range_low')
+    range_high = range_details.get('range_high') or range_details.get('high') or range_details.get('resistance')
+    range_low = range_details.get('range_low') or range_details.get('low') or range_details.get('support')
     
     if not range_high or not range_low:
-        log(f"⚠️ Missing range boundaries")
+        log(f"⚠️ Missing range boundaries in details: {range_details.keys()}")
         return None
     
-    # Validate range is reasonable
+    # Calculate range width
     range_width = (range_high - range_low) / range_low
-    if range_width > 0.10:  # Range too wide (>10%)
-        log(f"⚠️ Range too wide ({range_width*100:.1f}%), using standard exits")
-        return None
+    
+    # More flexible range validation
+    if range_width > 0.15:  # Range too wide (>15%)
+        log(f"⚠️ Range too wide ({range_width*100:.1f}%), using modified exits")
+        # Don't return None, adjust the exits instead
     
     if direction == 'long':
         # For long positions
         
-        # SL: Just below range low with small buffer
-        exit_levels['sl'] = range_low * 0.995  # 0.5% below support
+        # SL: Just below range low with small buffer (0.3-0.5%)
+        buffer = 0.003 if range_width < 0.05 else 0.005
+        exit_levels['sl'] = range_low * (1 - buffer)
         
-        # TP1: At range high (first resistance)
-        exit_levels['tp1'] = range_high
+        # TP1: At or slightly below range high
+        exit_levels['tp1'] = range_high * 0.995  # Just below resistance
         
-        # TP2: 2% above range high
-        exit_levels['tp2'] = range_high * 1.02
+        # TP2: Based on range width
+        if range_width < 0.03:  # Tight range
+            exit_levels['tp2'] = range_high * 1.015  # 1.5% above
+        elif range_width < 0.05:  # Normal range
+            exit_levels['tp2'] = range_high * 1.02   # 2% above
+        else:  # Wide range
+            exit_levels['tp2'] = range_high * 1.03   # 3% above
         
-        # TP3: 5% above range high (for runners)
+        # TP3: For runners
         exit_levels['tp3'] = range_high * 1.05
         
     else:  # short
         # For short positions
         
         # SL: Just above range high with small buffer
-        exit_levels['sl'] = range_high * 1.005  # 0.5% above resistance
+        buffer = 0.003 if range_width < 0.05 else 0.005
+        exit_levels['sl'] = range_high * (1 + buffer)
         
-        # TP1: At range low (first support)
-        exit_levels['tp1'] = range_low
+        # TP1: At or slightly above range low
+        exit_levels['tp1'] = range_low * 1.005  # Just above support
         
-        # TP2: 2% below range low
-        exit_levels['tp2'] = range_low * 0.98
+        # TP2: Based on range width
+        if range_width < 0.03:  # Tight range
+            exit_levels['tp2'] = range_low * 0.985  # 1.5% below
+        elif range_width < 0.05:  # Normal range
+            exit_levels['tp2'] = range_low * 0.98   # 2% below
+        else:  # Wide range
+            exit_levels['tp2'] = range_low * 0.97   # 3% below
         
-        # TP3: 5% below range low (for runners)
+        # TP3: For runners
         exit_levels['tp3'] = range_low * 0.95
     
     # Log the calculated levels
     log(f"📊 Range-based exit levels calculated:")
     log(f"   Range: {range_low:.8f} - {range_high:.8f} ({range_width*100:.2f}% width)")
-    log(f"   SL: {exit_levels['sl']:.8f}")
-    log(f"   TP1: {exit_levels['tp1']:.8f}")
-    log(f"   TP2: {exit_levels['tp2']:.8f}")
+    log(f"   Entry: {entry_price:.8f}")
+    log(f"   SL: {exit_levels['sl']:.8f} ({abs((exit_levels['sl'] - entry_price) / entry_price) * 100:.2f}% risk)")
+    log(f"   TP1: {exit_levels['tp1']:.8f} ({abs((exit_levels['tp1'] - entry_price) / entry_price) * 100:.2f}% target)")
+    log(f"   TP2: {exit_levels['tp2']:.8f} ({abs((exit_levels['tp2'] - entry_price) / entry_price) * 100:.2f}% target)")
     
     return exit_levels
 
