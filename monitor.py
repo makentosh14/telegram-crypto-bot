@@ -63,11 +63,6 @@ SL_CHECK_COOLDOWN = 300  # 5 minutes between SL checks per symbol
 SL_CREATION_COOLDOWN = 60  # 1 minute cooldown after creating SL
 MONITOR_INTERVAL = 5  # Main monitor loop interval
 
-# Add these constants
-SL_CHECK_COOLDOWN = 300  # 5 minutes between SL checks per symbol
-SL_CREATION_COOLDOWN = 60  # 1 minute cooldown after creating SL
-MONITOR_INTERVAL = 5  # Main monitor loop interval
-
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
