@@ -502,74 +502,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     exit_strategy = "normal"
     trailing_multiplier = 1.0
     
-    # In execute_trade_if_valid function, around line 434-512
-
-    # ADD THIS: Apply range-based adjustments
-    if range_break_details and range_break_confidence > 0.6:
-        log(f"📊 Applying range-based exit levels for {symbol}")
-    
-        # Calculate range-based levels
-        range_levels = calculate_range_based_exit_levels({
-            'direction': direction,
-            'entry_price': entry_price,
-            'range_break_details': range_break_details
-        })
-    
-        if range_levels:
-            # Apply range-based SL
-            if direction.lower() == 'long':
-                # For longs, use range low as SL reference
-                if range_levels.get('sl'):
-                    range_sl = range_levels['sl']
-                
-                    # More flexible validation - allow SL if it provides reasonable risk
-                    max_sl_distance = entry_price * 0.05  # Max 5% stop
-                    min_sl_distance = entry_price * 0.005  # Min 0.5% stop
-                
-                    if range_sl < entry_price and (entry_price - range_sl) <= max_sl_distance and (entry_price - range_sl) >= min_sl_distance:
-                        sl = range_sl
-                        sl_pct = ((entry_price - sl) / entry_price) * 100
-                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-                    else:
-                        log(f"⚠️ Range SL {range_sl:.8f} not suitable (distance: {((entry_price - range_sl) / entry_price) * 100:.2f}%), keeping calculated SL")
-            else:  # short
-                # For shorts, use range high as SL reference
-                if range_levels.get('sl'):
-                    range_sl = range_levels['sl']
-                
-                    # More flexible validation
-                    max_sl_distance = entry_price * 0.05  # Max 5% stop
-                    min_sl_distance = entry_price * 0.005  # Min 0.5% stop
-                
-                    if range_sl > entry_price and (range_sl - entry_price) <= max_sl_distance and (range_sl - entry_price) >= min_sl_distance:
-                        sl = range_sl
-                        sl_pct = ((sl - entry_price) / entry_price) * 100
-                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-                    else:
-                        log(f"⚠️ Range SL {range_sl:.8f} not suitable (distance: {((range_sl - entry_price) / entry_price) * 100:.2f}%), keeping calculated SL")
-        
-            # Always use range-based TP levels if available
-            if range_levels.get('tp1'):
-                tp1 = range_levels['tp1']
-                tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
-                log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
-            
-                # Set additional TP levels
-                if range_levels.get('tp2'):
-                    tp2_price = range_levels['tp2']
-                    tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
-                    log(f"✅ Setting range-based TP2: {tp2_price:.8f} ({tp2_pct:.2f}%)")
-            
-                if range_levels.get('tp3'):
-                    tp3_price = range_levels['tp3']
-                    log(f"✅ Setting range-based TP3: {tp3_price:.8f}")
-                
-            # Adjust trailing percentage for range breaks
-            if exit_strategy == "pump_optimized" or exit_strategy == "breakout":
-                # Use wider trailing for range breaks
-                trailing_pct = min(trailing_pct * trailing_multiplier, 2.0)
-                log(f"📈 Adjusted trailing for range break: {trailing_pct:.2f}%")
-    
     # Existing stealth accumulation check
     if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
         # Only override if not already set by range break
@@ -621,64 +553,66 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         if range_break_details and range_break_confidence > 0.6:
             log(f"📊 Applying range-based exit levels for {symbol}")
     
-        # Calculate range-based levels
-        range_levels = calculate_range_based_exit_levels({
-            'direction': direction,
-            'entry_price': entry_price,
-            'range_break_details': range_break_details
-        })
+            # Calculate range-based levels
+            range_levels = calculate_range_based_exit_levels({
+                'direction': direction,
+                'entry_price': entry_price,
+                'range_break_details': range_break_details
+            })
     
-        if range_levels:
-            # Apply range-based SL with validation
-            if direction.lower() == 'long':
-                # For longs, use range low as SL reference
-                if range_levels.get('sl'):
-                    # Ensure SL is below entry and provides reasonable risk
-                    range_sl = range_levels['sl']
-                    min_sl = entry_price * 0.98  # At least 2% stop
-                
-                    if range_sl < entry_price and range_sl > min_sl:
-                        sl = range_sl
-                        sl_pct = ((entry_price - sl) / entry_price) * 100
-                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-                    else:
-                        log(f"⚠️ Range SL {range_sl:.8f} not suitable, keeping calculated SL")
-            
-                # Use range-based TP levels
-                if range_levels.get('tp1'):
-                    tp1 = range_levels['tp1']
-                    tp1_pct = ((tp1 - entry_price) / entry_price) * 100
-                    log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
-                
-                    # Set TP2 based on range
-                    if range_levels.get('tp2'):
-                        tp2 = range_levels['tp2']
-                        log(f"✅ Setting range-based TP2: {tp2:.8f}")
-                        signal_data['tp2'] = tp2  # Store for later use
-                    
-            else:  # short
-                # For shorts, use range high as SL reference
+            if range_levels:
+                # Apply range-based SL with validation
                 if range_levels.get('sl'):
                     range_sl = range_levels['sl']
-                    max_sl = entry_price * 1.02  # At least 2% stop
-                
-                    if range_sl > entry_price and range_sl < max_sl:
-                        sl = range_sl
-                        sl_pct = ((sl - entry_price) / entry_price) * 100
-                        log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-                    else:
-                        log(f"⚠️ Range SL {range_sl:.8f} not suitable, keeping calculated SL")
             
-                # Use range-based TP levels
+                    # Validate SL is on correct side of entry
+                    sl_valid = False
+                    if direction.lower() == 'long':
+                        # For longs, SL must be below entry
+                        if range_sl < entry_price:
+                            # Check if distance is reasonable (not more than 5%)
+                            sl_distance = (entry_price - range_sl) / entry_price
+                            if 0.005 <= sl_distance <= 0.05:  # Between 0.5% and 5%
+                                sl = range_sl
+                                sl_pct = sl_distance * 100
+                                sl_valid = True
+                                log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
+                    else:  # short
+                        # For shorts, SL must be above entry
+                        if range_sl > entry_price:
+                            # Check if distance is reasonable
+                            sl_distance = (range_sl - entry_price) / entry_price
+                            if 0.005 <= sl_distance <= 0.05:  # Between 0.5% and 5%
+                                sl = range_sl
+                                sl_pct = sl_distance * 100
+                                sl_valid = True
+                                log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
+            
+                    if not sl_valid:
+                        log(f"⚠️ Range SL {range_sl:.8f} not suitable for entry {entry_price:.8f}, keeping calculated SL")
+        
+                # Always use range-based TP levels if available
                 if range_levels.get('tp1'):
                     tp1 = range_levels['tp1']
-                    tp1_pct = ((entry_price - tp1) / entry_price) * 100
+                    tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
                     log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
-                
+            
+                    # Set additional TP levels
                     if range_levels.get('tp2'):
-                        tp2 = range_levels['tp2']
-                        log(f"✅ Setting range-based TP2: {tp2:.8f}")
-                        signal_data['tp2'] = tp2
+                        tp2_price = range_levels['tp2']
+                        tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
+                        log(f"✅ Setting range-based TP2: {tp2_price:.8f} ({tp2_pct:.2f}%)")
+                
+                    if range_levels.get('tp3'):
+                        tp3_price = range_levels['tp3']
+                        tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
+                        log(f"✅ Setting range-based TP3: {tp3_price:.8f} ({tp3_pct:.2f}%)")
+        
+        # Adjust trailing percentage for range breaks
+        if exit_strategy in ["pump_optimized", "breakout"]:
+            # Use wider trailing for range breaks
+            trailing_pct = min(trailing_pct * trailing_multiplier, 2.0)
+            log(f"📈 Adjusted trailing for range break: {trailing_pct:.2f}%")
     
         # Apply exit strategy multipliers
         if exit_strategy == "pump_optimized":
