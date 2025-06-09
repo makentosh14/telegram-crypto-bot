@@ -613,11 +613,21 @@ async def process_pump_signal(pump_signal, trend_context):
     # Calculate confidence
     confidence = min(pump_signal['confidence'] * 100, 95)
     
-    # Calculate SL/TP
+    # Calculate SL/TP - FIXED: Ensure we get all values
     result = calculate_dynamic_sl_tp(
-        candles_by_tf, price, "Scalp", "Long", base_score, confidence, "volatile"
+        candles_by_tf, price, "Scalp", "Long", base_score, confidence, "volatile", trend_context
     )
-    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    
+    # FIXED: Properly unpack all values
+    if len(result) >= 5:
+        sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    else:
+        # Fallback values
+        sl = price * 0.98  # 2% SL
+        tp1 = price * 1.015  # 1.5% TP
+        sl_pct = 2.0
+        tp1_pct = 1.5
+        trailing_pct = 0.5
     
     # Execute trade with enhanced parameters
     trade = await execute_trade_if_valid({
@@ -634,29 +644,29 @@ async def process_pump_signal(pump_signal, trend_context):
         "regime": "volatile",
         "pump_potential": True,
         "range_break_details": details,
-        "range_break_confidence": pump_signal['confidence'],  # Add this
+        "range_break_confidence": pump_signal['confidence'],
         **exit_strategy_params,
         "market_type": get_symbol_category(symbol)
     })
     
     if trade:
-        # Format and send the Telegram message
+        # FIXED: Format and send the Telegram message with all required parameters
         msg = format_trade_signal(
             symbol=symbol,
             score=base_score,
             tf_scores={"range_break_pump": base_score},
             trend=trend_context,
-            entry_price=price,
-            sl=sl,
-            tp1=tp1,
+            entry_price=trade['entry'],  # Use actual executed price
+            sl=trade['sl'],              # Use actual SL from trade
+            tp1=trade['tp1'],            # Use actual TP1 from trade
             trade_type="Scalp",
             direction="Long",
-            trailing_pct=trailing_pct,
+            trailing_pct=trade.get('trailing_pct', trailing_pct),
             leverage=DEFAULT_LEVERAGE,
             risk_pct=6.0,
             confidence=confidence,
-            sl_pct=sl_pct,
-            tp1_pct=tp1_pct
+            sl_pct=trade.get('sl_pct', sl_pct),      # FIXED: Add sl_pct
+            tp1_pct=trade.get('tp1_pct', tp1_pct)    # FIXED: Add tp1_pct
         )
         
         # Add pump-specific information
@@ -683,16 +693,16 @@ async def process_pump_signal(pump_signal, trend_context):
             'range_data': details
         }
         
-        # Track the active trade
+        # Track the active trade with all parameters
         track_active_trade(
             symbol=symbol,
             trade_type="Scalp",
             initial_score=base_score,
             entry_price=trade['entry'],
             direction="Long",
-            trailing_pct=trade.get("trailing_pct"),
+            trailing_pct=trade.get("trailing_pct", trailing_pct),
             tp1_target=trade.get("tp1"),
-            tp1_pct=tp1_pct,
+            tp1_pct=trade.get('tp1_pct', tp1_pct),
             tp2=trade.get("tp2"),
             sl=trade.get("sl"),
             qty=trade.get("qty"),
@@ -731,10 +741,24 @@ async def process_break_signal(break_signal, trend_context):
     direction = break_signal['direction']
     confidence = min(break_signal['confidence'] * 100, 90)
     
+    # FIXED: Get all values from calculate_dynamic_sl_tp
     result = calculate_dynamic_sl_tp(
-        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile"
+        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile", trend_context
     )
-    sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    
+    if len(result) >= 5:
+        sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    else:
+        # Fallback values
+        if direction == "Long":
+            sl = price * 0.98
+            tp1 = price * 1.015
+        else:
+            sl = price * 1.02
+            tp1 = price * 0.985
+        sl_pct = 2.0
+        tp1_pct = 1.5
+        trailing_pct = 0.5
     
     trade = await execute_trade_if_valid({
         "symbol": symbol,
@@ -753,22 +777,23 @@ async def process_break_signal(break_signal, trend_context):
     
     # Send Telegram notification if trade was executed
     if trade:
+        # FIXED: Use actual trade values and include all parameters
         msg = format_trade_signal(
             symbol=symbol,
             score=base_score,
             tf_scores={"range_break": base_score},
             trend=trend_context,
-            entry_price=price,
-            sl=sl,
-            tp1=tp1,
+            entry_price=trade['entry'],
+            sl=trade['sl'],
+            tp1=trade['tp1'],
             trade_type=trade_type,
             direction=direction,
-            trailing_pct=trailing_pct,
+            trailing_pct=trade.get('trailing_pct', trailing_pct),
             leverage=DEFAULT_LEVERAGE,
             risk_pct=6.0,
             confidence=confidence,
-            sl_pct=sl_pct,
-            tp1_pct=tp1_pct
+            sl_pct=trade.get('sl_pct', sl_pct),      # FIXED: Add sl_pct
+            tp1_pct=trade.get('tp1_pct', tp1_pct)    # FIXED: Add tp1_pct
         )
         msg += f"\n\n🎯 <b>RANGE BREAK SIGNAL</b>\n"
         msg += f"Direction: {direction}\n"
@@ -790,9 +815,9 @@ async def process_break_signal(break_signal, trend_context):
             initial_score=base_score,
             entry_price=trade['entry'],
             direction=direction,
-            trailing_pct=trade.get("trailing_pct"),
+            trailing_pct=trade.get("trailing_pct", trailing_pct),
             tp1_target=trade.get("tp1"),
-            tp1_pct=tp1_pct,
+            tp1_pct=trade.get('tp1_pct', tp1_pct),
             tp2=trade.get("tp2"),
             sl=trade.get("sl"),
             qty=trade.get("qty"),
