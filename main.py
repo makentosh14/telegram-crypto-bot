@@ -912,13 +912,6 @@ async def scan_for_new_signals(symbols,trend_context):
         # Check for momentum
         momentum_data = detect_momentum_strength(candles_by_tf.get("1", []))
         has_momentum = momentum_data[0] if momentum_data else False
-        
-        # NOW we can use has_momentum since it's defined
-        if use_altseason_mode and has_momentum:
-            momentum_bonus = ALTSEASON_MODE["momentum_bias"]
-            score += momentum_bonus
-            indicator_scores["altseason_momentum"] = momentum_bonus
-            log(f"🚀 Altseason momentum bonus: +{momentum_bonus}")
 
         # NOW check for range break setup AFTER score is defined
         range_break_bonus = 0
