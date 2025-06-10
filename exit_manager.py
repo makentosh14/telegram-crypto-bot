@@ -41,18 +41,40 @@ def calculate_exit_tranches(symbol, qty, tranches=3):
     tranche_percentages = [0.20, 0.30, 0.50]  # Changed from [0.33, 0.33, 0.34]
     
     # Calculate tranche sizes
-    tranche_sizes = [qty * pct for pct in tranche_percentages]
+    tranche_sizes = []
+    remaining_qty = qty
     
-    # Ensure all tranches meet minimum quantity requirements
-    precision = get_precision(symbol)
-    valid_tranches = [round(max(t, min_qty), precision) for t in tranche_sizes]
+    # Calculate first two tranches precisely
+    for i, pct in enumerate(tranche_percentages[:-1]):
+        tranche_qty = round_qty(symbol, qty * pct)
+        # Ensure minimum quantity
+        if tranche_qty < min_qty:
+            tranche_qty = min_qty
+        # Don't exceed remaining quantity
+        if tranche_qty > remaining_qty:
+            tranche_qty = remaining_qty
+        tranche_sizes.append(tranche_qty)
+        remaining_qty -= tranche_qty
     
-    # Adjust last tranche to ensure total equals original quantity
-    sum_tranches = sum(valid_tranches[:-1])
-    valid_tranches[-1] = round(max(qty - sum_tranches, min_qty), precision)
+    # Last tranche gets whatever is left (ensuring total equals original qty)
+    last_tranche = round_qty(symbol, remaining_qty)
+    if last_tranche >= min_qty:
+        tranche_sizes.append(last_tranche)
+    else:
+        # If last tranche is too small, add it to the previous tranche
+        if len(tranche_sizes) > 0:
+            tranche_sizes[-1] = round_qty(symbol, tranche_sizes[-1] + last_tranche)
     
-    log(f"🔢 EXIT TRANCHES (Let Winners Run): {symbol} - 20%: {valid_tranches[0]}, 30%: {valid_tranches[1]}, 50%: {valid_tranches[2]}")
-    return valid_tranches
+    # Verify total equals original quantity
+    total = sum(tranche_sizes)
+    if abs(total - qty) > 0.001:  # Small tolerance for rounding
+        log(f"⚠️ Exit tranches sum mismatch: {total} != {qty}, adjusting last tranche")
+        if len(tranche_sizes) > 0:
+            tranche_sizes[-1] = round_qty(symbol, tranche_sizes[-1] + (qty - total))
+    
+    log(f"🔢 EXIT TRANCHES (Let Winners Run): {symbol} - Total: {qty}, Tranches: {tranche_sizes} ({[round(t/qty*100, 1) for t in tranche_sizes]}%)")
+    
+    return tranche_sizes
 
 def detect_momentum_surge(candles, lookback=5):
     """
