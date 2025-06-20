@@ -345,8 +345,12 @@ async def set_position_leverage(symbol, leverage, category="linear"):
             "sellLeverage": str(leverage)
         })
         
-        if result.get("retCode") == 0:
+        ret_code = result.get("retCode")
+        if ret_code == 0:
             log(f"✅ Set leverage for {symbol} to {leverage}x")
+            return True
+        elif ret_code == 110043:
+            log(f"ℹ️ Leverage already set to {leverage}x for {symbol}")
             return True
         else:
             log(f"⚠️ Failed to set leverage: {result.get('retMsg')}", level="WARN")
