@@ -850,7 +850,7 @@ async def process_break_signal(break_signal, trend_context):
             direction=direction,
             trailing_pct=trade.get('trailing_pct', 1.0),
             leverage=DEFAULT_LEVERAGE,
-            risk_pct=actual_risk_pct,,
+            risk_pct=actual_risk_pct,
             confidence=confidence,
             sl_pct=sl_pct,
             tp1_pct=tp1_pct
