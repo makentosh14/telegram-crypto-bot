@@ -557,6 +557,7 @@ def calculate_range_based_exit_levels(trade_data):
     
     exit_levels = {}
 
+    # Get range boundaries - handle different key names
     range_high = range_details.get('range_high') or range_details.get('high') or range_details.get('resistance')
     range_low = range_details.get('range_low') or range_details.get('low') or range_details.get('support')
     
@@ -565,62 +566,61 @@ def calculate_range_based_exit_levels(trade_data):
         return None
     
     # Calculate range width
-    range_width = (range_high - range_low) / range_low
+    range_width = range_high - range_low
+    range_width_pct = (range_width / range_low) * 100
     
-    # More flexible range validation
-    if range_width > 0.15:  # Range too wide (>15%)
-        log(f"⚠️ Range too wide ({range_width*100:.1f}%), using modified exits")
-        # Don't return None, adjust the exits instead
+    # Log the range details
+    log(f"📊 Range boundaries: Low={range_low:.8f}, High={range_high:.8f}, Width={range_width_pct:.2f}%")
     
     if direction == 'long':
-        # For long positions
+        # For long positions after resistance break
         
-        # SL: Just below range low with small buffer (0.3-0.5%)
-        buffer = 0.003 if range_width < 0.05 else 0.005
-        exit_levels['sl'] = range_low * (1 - buffer)
+        # SL: Just below the previous resistance (now support) with buffer
+        buffer = 0.003  # 0.3% buffer
+        exit_levels['sl'] = range_high * (1 - buffer)
         
-        # TP1: At or slightly below range high
-        exit_levels['tp1'] = range_high * 0.995  # Just below resistance
+        # Alternative: SL at range midpoint for tighter stop
+        range_mid = (range_high + range_low) / 2
+        if exit_levels['sl'] < range_mid:
+            exit_levels['sl'] = range_mid
+            log(f"📊 Using range midpoint as SL for better R:R")
         
-        # TP2: Based on range width
-        if range_width < 0.03:  # Tight range
-            exit_levels['tp2'] = range_high * 1.015  # 1.5% above
-        elif range_width < 0.05:  # Normal range
-            exit_levels['tp2'] = range_high * 1.02   # 2% above
-        else:  # Wide range
-            exit_levels['tp2'] = range_high * 1.03   # 3% above
-        
-        # TP3: For runners
-        exit_levels['tp3'] = range_high * 1.05
+        # TP levels based on range width projection
+        exit_levels['tp1'] = entry_price + (range_width * 1.0)   # 1x range width
+        exit_levels['tp2'] = entry_price + (range_width * 1.618) # 1.618x (Fibonacci)
+        exit_levels['tp3'] = entry_price + (range_width * 2.618) # 2.618x (Fibonacci)
         
     else:  # short
-        # For short positions
+        # For short positions after support break
         
-        # SL: Just above range high with small buffer
-        buffer = 0.003 if range_width < 0.05 else 0.005
-        exit_levels['sl'] = range_high * (1 + buffer)
+        # SL: Just above the previous support (now resistance) with buffer
+        buffer = 0.003  # 0.3% buffer
+        exit_levels['sl'] = range_low * (1 + buffer)
         
-        # TP1: At or slightly above range low
-        exit_levels['tp1'] = range_low * 1.005  # Just above support
+        # Alternative: SL at range midpoint for tighter stop
+        range_mid = (range_high + range_low) / 2
+        if exit_levels['sl'] > range_mid:
+            exit_levels['sl'] = range_mid
+            log(f"📊 Using range midpoint as SL for better R:R")
         
-        # TP2: Based on range width
-        if range_width < 0.03:  # Tight range
-            exit_levels['tp2'] = range_low * 0.985  # 1.5% below
-        elif range_width < 0.05:  # Normal range
-            exit_levels['tp2'] = range_low * 0.98   # 2% below
-        else:  # Wide range
-            exit_levels['tp2'] = range_low * 0.97   # 3% below
-        
-        # TP3: For runners
-        exit_levels['tp3'] = range_low * 0.95
+        # TP levels based on range width projection
+        exit_levels['tp1'] = entry_price - (range_width * 1.0)   # 1x range width
+        exit_levels['tp2'] = entry_price - (range_width * 1.618) # 1.618x (Fibonacci)
+        exit_levels['tp3'] = entry_price - (range_width * 2.618) # 2.618x (Fibonacci)
+    
+    # Calculate risk:reward ratios
+    risk = abs(exit_levels['sl'] - entry_price)
+    reward1 = abs(exit_levels['tp1'] - entry_price)
+    rr1 = reward1 / risk if risk > 0 else 0
     
     # Log the calculated levels
     log(f"📊 Range-based exit levels calculated:")
-    log(f"   Range: {range_low:.8f} - {range_high:.8f} ({range_width*100:.2f}% width)")
+    log(f"   Direction: {direction}")
     log(f"   Entry: {entry_price:.8f}")
     log(f"   SL: {exit_levels['sl']:.8f} ({abs((exit_levels['sl'] - entry_price) / entry_price) * 100:.2f}% risk)")
-    log(f"   TP1: {exit_levels['tp1']:.8f} ({abs((exit_levels['tp1'] - entry_price) / entry_price) * 100:.2f}% target)")
-    log(f"   TP2: {exit_levels['tp2']:.8f} ({abs((exit_levels['tp2'] - entry_price) / entry_price) * 100:.2f}% target)")
+    log(f"   TP1: {exit_levels['tp1']:.8f} ({abs((exit_levels['tp1'] - entry_price) / entry_price) * 100:.2f}% | R:R {rr1:.2f})")
+    log(f"   TP2: {exit_levels['tp2']:.8f} ({abs((exit_levels['tp2'] - entry_price) / entry_price) * 100:.2f}%)")
+    log(f"   TP3: {exit_levels['tp3']:.8f} ({abs((exit_levels['tp3'] - entry_price) / entry_price) * 100:.2f}%)")
     
     return exit_levels
 
