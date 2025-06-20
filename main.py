@@ -780,6 +780,26 @@ async def process_break_signal(break_signal, trend_context):
     if not range_levels:
         log(f"❌ Failed to calculate range-based levels for {symbol}")
         return
+
+    # Validate risk/reward ratio
+    sl_distance = abs((range_levels['sl'] - price) / price)
+    tp1_distance = abs((range_levels['tp1'] - price) / price)
+    risk_reward = tp1_distance / sl_distance if sl_distance > 0 else 0
+    
+    # Skip if risk/reward is poor
+    if risk_reward < 1.5:
+        log(f"⚠️ Skipping {symbol}: Poor R:R ratio {risk_reward:.2f}")
+        return
+    
+    # Adjust risk based on SL distance
+    base_risk = 0.06  # 6% for Intraday
+    if sl_distance > 0.02:  # If SL is more than 2%
+        # Scale down risk to maintain reasonable position size
+        adjusted_risk = base_risk * (0.02 / sl_distance)
+        adjusted_risk = max(adjusted_risk, 0.03)  # Minimum 3% risk
+        log(f"📊 Adjusting risk from {base_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL at {sl_distance*100:.2f}%")
+    else:
+        adjusted_risk = base_risk
     
     # Execute trade with range-based levels
     trade = await execute_trade_if_valid({
@@ -810,6 +830,12 @@ async def process_break_signal(break_signal, trend_context):
         # Calculate actual percentages
         sl_pct = abs((trade['sl'] - trade['entry']) / trade['entry']) * 100
         tp1_pct = abs((trade['tp1'] - trade['entry']) / trade['entry']) * 100
+        actual_risk_pct = calculate_actual_risk_percentage(
+            trade['entry'],
+            trade['sl'],
+            trade['qty'],
+            account_balance  # You'll need to get this
+        )
         
         # Send notification
         msg = format_trade_signal(
@@ -824,7 +850,7 @@ async def process_break_signal(break_signal, trend_context):
             direction=direction,
             trailing_pct=trade.get('trailing_pct', 1.0),
             leverage=DEFAULT_LEVERAGE,
-            risk_pct=6.0,
+            risk_pct=actual_risk_pct,,
             confidence=confidence,
             sl_pct=sl_pct,
             tp1_pct=tp1_pct
@@ -834,6 +860,7 @@ async def process_break_signal(break_signal, trend_context):
         msg += f"\n\n🎯 <b>RANGE BREAK SIGNAL</b>\n"
         msg += f"Direction: {direction}\n"
         msg += f"Confidence: {break_signal['confidence']*100:.1f}%\n"
+        msg += f"\n💰 <b>Actual Risk:</b> {actual_risk_pct:.2f}% of balance"
         
         if range_details.get('range_high') and range_details.get('range_low'):
             msg += f"\n📊 <b>Range Analysis:</b>\n"
