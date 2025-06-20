@@ -495,6 +495,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     trailing_multiplier = signal_data.get('trailing_multiplier', 1.0)
     tp1_multiplier = signal_data.get('tp1_multiplier', 1.0)
     custom_exit_tranches = signal_data.get('exit_tranches', None)
+    override_sl = signal_data.get('override_sl')
+    override_tp1 = signal_data.get('override_tp1')
+    override_tp2 = signal_data.get('override_tp2')
+    override_tp3 = signal_data.get('override_tp3')
     
     # Detect stealth accumulation
     stealth_data = detect_stealth_accumulation_advanced(
@@ -552,6 +556,28 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             sl, tp1, sl_pct = sl_tp_result[:3]
             trailing_pct = sl_pct * 0.5  # Default trailing percentage
             tp1_pct = sl_pct * 2.0      # Default TP percentage
+
+        if override_sl is not None:
+            original_sl = sl
+            sl = override_sl
+            sl_pct = abs((sl - entry_price) / entry_price) * 100
+            log(f"📊 Range Break: Overriding SL from {original_sl:.8f} to {sl:.8f}")
+            
+        if override_tp1 is not None:
+            original_tp1 = tp1
+            tp1 = override_tp1
+            tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
+            log(f"📊 Range Break: Overriding TP1 from {original_tp1:.8f} to {tp1:.8f}")
+            
+        if override_tp2 is not None:
+            tp2_price = override_tp2
+            tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
+            log(f"📊 Range Break: Setting TP2 at {tp2_price:.8f}")
+            
+        if override_tp3 is not None:
+            tp3_price = override_tp3
+            tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
+            log(f"📊 Range Break: Setting TP3 at {tp3_price:.8f}")
 
         # ADD THIS: Apply range-based adjustments
         if range_break_details and range_break_confidence > 0.6:
@@ -775,18 +801,23 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         EXECUTION_STATES[exec_id]["stage"] = "tp_placed"
         
         # Step 11: Set up additional TP levels for bigger moves
-        tp2_price = None
-        tp2_pct = None
-        if trade_type in ["Intraday", "Swing"]:
-            tp2_pct = tp1_pct * 1.8
-            if direction.lower() == "long":
-                tp2_price = round(executed_entry * (1 + tp2_pct / 100), 6)
-            else:
-                tp2_price = round(executed_entry * (1 - tp2_pct / 100), 6)
-            
-            log(f"🎯 Setting stretched TP2 at {tp2_price} ({tp2_pct:.2f}%) for potential pump")
+        if tp2_price is None:  # Only set if not already overridden
+            tp2_price = None
+            tp2_pct = None
+            if trade_type in ["Intraday", "Swing"]:
+                tp2_pct = tp1_pct * 1.8
+                if direction.lower() == "long":
+                    tp2_price = round(executed_entry * (1 + tp2_pct / 100), 6)
+                else:
+                    tp2_price = round(executed_entry * (1 - tp2_pct / 100), 6)
+                
+                log(f"🎯 Setting stretched TP2 at {tp2_price} ({tp2_pct:.2f}%) for potential pump")
         
         EXECUTION_STATES[exec_id]["success"] = True
+
+        if 'tp3_price' not in locals():
+            tp3_price = None
+            tp3_pct = None
         
         # Step 12: Log trade details
         indicator_scores = signal_data.get("indicator_scores", {})
@@ -818,6 +849,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "sl": sl,
             "tp1": tp1,
             "tp2": tp2_price,
+            "tp3": tp3_price,
             "qty": qty,
             "type": trade_type,
             "direction": direction,
@@ -825,6 +857,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "sl_pct": sl_pct,
             "tp1_pct": tp1_pct,
             "tp2_pct": tp2_pct,
+            "tp3_pct": tp3_pct if 'tp3_pct' in locals() else None,
             "trailing_pct": trailing_pct,  # Now properly defined
             "indicator_scores": indicator_scores,
             "used_indicators": used_indicators,
