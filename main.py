@@ -720,14 +720,16 @@ async def process_break_signal(break_signal, trend_context):
     if symbol in active_trades or symbol in active_signals:
         return
     
-    # Similar logic to pump signal but for breaks
+    # Get candles
     candles_by_tf = {
         tf: list(live_candles[symbol][str(tf)]) for tf in TIMEFRAMES
         if str(tf) in live_candles[symbol]
     }
     
-    base_score = 6.0 + (break_signal['confidence'] * 1.0)
+    # Base score for range breaks
+    base_score = 7.0 + (break_signal['confidence'] * 2.0)  # Score 7-9
     
+    # Build indicator scores
     indicator_scores = {}
     for reason, data in break_signal['reasons'].items():
         if isinstance(data, dict):
@@ -735,31 +737,33 @@ async def process_break_signal(break_signal, trend_context):
         else:
             indicator_scores[f"break_{reason}"] = 1.0
     
-    # Calculate SL/TP
+    # Setup trade parameters
     price = break_signal['current_price']
-    trade_type = "Scalp"
+    trade_type = "Intraday"  # Range breaks are typically intraday trades
     direction = break_signal['direction']
-    confidence = min(break_signal['confidence'] * 100, 90)
+    confidence = min(break_signal['confidence'] * 100, 95)
     
-    # FIXED: Get all values from calculate_dynamic_sl_tp
-    result = calculate_dynamic_sl_tp(
-        candles_by_tf, price, trade_type, direction, base_score, confidence, "volatile", trend_context
-    )
+    # Get range details from the break signal
+    range_details = break_signal.get('reasons', {})
     
-    if len(result) >= 5:
-        sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
-    else:
-        # Fallback values
-        if direction == "Long":
-            sl = price * 0.98
-            tp1 = price * 1.015
-        else:
-            sl = price * 1.02
-            tp1 = price * 0.985
-        sl_pct = 2.0
-        tp1_pct = 1.5
-        trailing_pct = 0.5
+    # Ensure we have the range boundaries in the details
+    if 'range_high' not in range_details and 'resistance' in range_details:
+        range_details['range_high'] = range_details['resistance']
+    if 'range_low' not in range_details and 'support' in range_details:
+        range_details['range_low'] = range_details['support']
     
+    # Calculate range-based SL/TP levels
+    range_levels = calculate_range_based_exit_levels({
+        'direction': direction.lower(),
+        'entry_price': price,
+        'range_break_details': range_details
+    })
+    
+    if not range_levels:
+        log(f"❌ Failed to calculate range-based levels for {symbol}")
+        return
+    
+    # Execute trade with range-based levels
     trade = await execute_trade_if_valid({
         "symbol": symbol,
         "price": price,
@@ -770,14 +774,26 @@ async def process_break_signal(break_signal, trend_context):
         "candles": candles_by_tf,
         "indicator_scores": indicator_scores,
         "used_indicators": list(break_signal['reasons'].keys()),
-        "tf_scores": {"break_detector": base_score},
+        "tf_scores": {"range_break": base_score},
         "regime": "volatile",
-        "market_type": get_symbol_category(symbol)
+        "market_type": get_symbol_category(symbol),
+        # Pass the range-based SL/TP
+        "override_sl": range_levels['sl'],
+        "override_tp1": range_levels['tp1'],
+        "override_tp2": range_levels.get('tp2'),
+        "override_tp3": range_levels.get('tp3'),
+        "range_break_details": range_details,
+        "exit_strategy": "range_break",
+        "trailing_multiplier": 1.2,  # Wider trailing for range breaks
+        "exit_tranches": [0.33, 0.33, 0.34]  # Even distribution
     })
     
-    # Send Telegram notification if trade was executed
     if trade:
-        # FIXED: Use actual trade values and include all parameters
+        # Calculate actual percentages
+        sl_pct = abs((trade['sl'] - trade['entry']) / trade['entry']) * 100
+        tp1_pct = abs((trade['tp1'] - trade['entry']) / trade['entry']) * 100
+        
+        # Send notification
         msg = format_trade_signal(
             symbol=symbol,
             score=base_score,
@@ -788,17 +804,29 @@ async def process_break_signal(break_signal, trend_context):
             tp1=trade['tp1'],
             trade_type=trade_type,
             direction=direction,
-            trailing_pct=trade.get('trailing_pct', trailing_pct),
+            trailing_pct=trade.get('trailing_pct', 1.0),
             leverage=DEFAULT_LEVERAGE,
             risk_pct=6.0,
             confidence=confidence,
-            sl_pct=trade.get('sl_pct', sl_pct),      # FIXED: Add sl_pct
-            tp1_pct=trade.get('tp1_pct', tp1_pct)    # FIXED: Add tp1_pct
+            sl_pct=sl_pct,
+            tp1_pct=tp1_pct
         )
+        
+        # Add range break specific info
         msg += f"\n\n🎯 <b>RANGE BREAK SIGNAL</b>\n"
         msg += f"Direction: {direction}\n"
         msg += f"Confidence: {break_signal['confidence']*100:.1f}%\n"
-        msg += f"Triggers: {', '.join(break_signal['reasons'].keys())}"
+        
+        if range_details.get('range_high') and range_details.get('range_low'):
+            msg += f"\n📊 <b>Range Analysis:</b>\n"
+            msg += f"• Support: {range_details['range_low']:.8f}\n"
+            msg += f"• Resistance: {range_details['range_high']:.8f}\n"
+            msg += f"• Width: {((range_details['range_high'] - range_details['range_low']) / range_details['range_low'] * 100):.2f}%\n"
+        
+        msg += f"\n📍 <b>Exit Strategy:</b>\n"
+        msg += f"• SL at {'resistance' if direction == 'Long' else 'support'} level\n"
+        msg += f"• TP based on range width projection\n"
+        msg += f"• Trailing stop after TP1"
         
         await send_telegram_message(msg)
         
@@ -806,7 +834,8 @@ async def process_break_signal(break_signal, trend_context):
         active_signals[symbol] = {
             'score': base_score,
             'score_history': [base_score],
-            'range_break': True
+            'range_break': True,
+            'range_levels': range_levels
         }
         
         track_active_trade(
@@ -815,16 +844,16 @@ async def process_break_signal(break_signal, trend_context):
             initial_score=base_score,
             entry_price=trade['entry'],
             direction=direction,
-            trailing_pct=trade.get("trailing_pct", trailing_pct),
-            tp1_target=trade.get("tp1"),
-            tp1_pct=trade.get('tp1_pct', tp1_pct),
+            trailing_pct=trade.get("trailing_pct", 1.0),
+            tp1_target=trade['tp1'],
+            tp1_pct=tp1_pct,
             tp2=trade.get("tp2"),
-            sl=trade.get("sl"),
-            qty=trade.get("qty"),
-            sl_order_id=trade.get("sl_order_id"),
+            sl=trade['sl'],
+            qty=trade['qty'],
+            sl_order_id=trade.get('sl_order_id'),
             exit_tranches=trade.get("exit_tranches"),
             has_pump_potential=False,
-            range_break_details=break_signal.get('reasons', {})
+            range_break_details=range_details
         )
 
 
