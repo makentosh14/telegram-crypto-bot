@@ -145,8 +145,16 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
     Combines original logic with position_manager.py improvements
     """
     try:
+        # Calculate SL distance
+        sl_distance_pct = abs((sl_price - price) / price)
+        
+        # Validate SL distance
+        if sl_distance_pct > 0.05:  # More than 5% SL
+            log(f"⚠️ SL distance too large ({sl_distance_pct*100:.2f}%), reducing position size")
+            risk_pct = (risk_pct or 0.06) * (0.02 / sl_distance_pct)  # Scale down risk
         # Use enhanced risk calculation if available
         if risk_pct is None:
+            
             try:
                 position_size, risk_amount, leverage = await calculate_position_size(
                     symbol=symbol,
@@ -169,19 +177,41 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
                 log(f"⚠️ Enhanced position sizing failed, using fallback: {e}", level="WARN")
         
         # Fallback to original calculation
-        leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
-        max_risk = risk_pct or (0.09 if trade_type == "Scalp" else 0.06 if trade_type == "Intraday" else 0.03)
-        
-        risk_amount = account_balance * max_risk
-        position_value = risk_amount * leverage
-        raw_qty = position_value / price
-        
-        log(f"📊 Position sizing for {symbol}:")
-        log(f"  Price: {price}, SL: {sl_price}, Distance: {abs(price - sl_price) / price:.2%}")
-        log(f"  Risk: ${risk_amount:.2f}, Leverage: {leverage}x")
-        log(f"  Final Size: {raw_qty} units")
-        
-        return calculate_quantity(symbol, raw_qty)
+        else:
+            # Calculate position size with proper risk management
+            leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
+            
+            # Calculate risk amount
+            risk_amount = account_balance * risk_pct
+            
+            # Calculate risk per unit (distance from entry to SL)
+            risk_per_unit = abs(price - sl_price)
+            
+            # Calculate position size: Risk Amount / Risk per Unit
+            position_size = risk_amount / risk_per_unit
+            
+            # Apply leverage
+            if market_type == "linear":
+                position_size = position_size * leverage
+            
+            # Log the calculation
+            log(f"📊 Position sizing for {symbol}:")
+            log(f"   Account Balance: ${account_balance:.2f}")
+            log(f"   Risk %: {risk_pct*100:.2f}%")
+            log(f"   Risk Amount: ${risk_amount:.2f}")
+            log(f"   Entry: {price:.8f}, SL: {sl_price:.8f}")
+            log(f"   SL Distance: {sl_distance_pct*100:.2f}%")
+            log(f"   Risk per Unit: {risk_per_unit:.8f}")
+            log(f"   Position Size: {position_size:.8f} units")
+            log(f"   Leverage: {leverage}x")
+            
+            # Validate the position size
+            position_value = position_size * price
+            if position_value > account_balance * 10:  # Safety check
+                log(f"⚠️ Position value ${position_value:.2f} too large, capping at 10x balance")
+                position_size = (account_balance * 10) / price
+            
+            return round_qty(symbol, position_size)
         
     except Exception as e:
         log(f"❌ Error calculating position size: {e}", level="ERROR")
@@ -542,6 +572,21 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
         
         EXECUTION_STATES[exec_id]["stage"] = "balance_checked"
+
+        position_size_needs_recalc = False
+    
+        if override_sl is not None:
+            original_sl = sl
+            sl = override_sl
+            sl_pct = abs((sl - entry_price) / entry_price) * 100
+            position_size_needs_recalc = True  # Flag for recalculation
+            log(f"📊 Range Break: Overriding SL from {original_sl:.8f} to {sl:.8f}")
+        
+        if override_tp1 is not None:
+            original_tp1 = tp1
+            tp1 = override_tp1
+            tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
+            log(f"📊 Range Break: Overriding TP1 from {original_tp1:.8f} to {tp1:.8f}")
         
         # Step 2: Calculate SL/TP levels using enhanced calculation
         sl_tp_result = calculate_dynamic_sl_tp(
@@ -680,6 +725,36 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
         
         # Step 3: Calculate position size using enhanced method
+        if position_size_needs_recalc:
+        # Recalculate position size with the new SL
+        log(f"📊 Recalculating position size with override SL...")
+        
+        # Calculate actual risk distance
+        risk_distance_pct = abs((sl - entry_price) / entry_price)
+        
+        # Adjust max risk based on the distance
+        if risk_distance_pct > 0.02:  # If SL is more than 2% away
+            # Reduce risk to maintain reasonable position size
+            adjusted_risk = max_risk * (0.02 / risk_distance_pct)
+            adjusted_risk = max(adjusted_risk, 0.02)  # Minimum 2% risk
+            log(f"📊 Adjusting risk from {max_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL distance")
+        else:
+            adjusted_risk = max_risk
+        
+        qty = await calculate_enhanced_quantity(
+            symbol=symbol,
+            price=entry_price,
+            sl_price=sl,
+            account_balance=account_balance,
+            candles_by_tf=candles_by_tf,
+            trade_type=trade_type,
+            strategy=strategy,
+            confidence=confidence,
+            risk_pct=adjusted_risk,
+            market_type=category
+        )
+    else:
+        # Original calculation
         qty = await calculate_enhanced_quantity(
             symbol=symbol,
             price=entry_price,
@@ -896,6 +971,23 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         )
         
         return None
+def calculate_actual_risk_percentage(entry_price, sl_price, position_size, account_balance):
+    """
+    Calculate the actual risk percentage based on position size and SL distance
+    
+    Returns:
+        float: Actual risk as percentage of account balance
+    """
+    # Calculate risk per unit
+    risk_per_unit = abs(entry_price - sl_price)
+    
+    # Calculate total risk
+    total_risk = risk_per_unit * position_size
+    
+    # Calculate as percentage of balance
+    risk_percentage = (total_risk / account_balance) * 100
+    
+    return risk_percentage
 
 async def process_trade_result(trade_data, result_type, pnl_value=None):
     """
