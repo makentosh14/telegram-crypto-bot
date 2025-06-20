@@ -726,47 +726,47 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         
         # Step 3: Calculate position size using enhanced method
         if position_size_needs_recalc:
-        # Recalculate position size with the new SL
-        log(f"📊 Recalculating position size with override SL...")
+            # Recalculate position size with the new SL
+            log(f"📊 Recalculating position size with override SL...")
         
-        # Calculate actual risk distance
-        risk_distance_pct = abs((sl - entry_price) / entry_price)
+            # Calculate actual risk distance
+            risk_distance_pct = abs((sl - entry_price) / entry_price)
         
-        # Adjust max risk based on the distance
-        if risk_distance_pct > 0.02:  # If SL is more than 2% away
-            # Reduce risk to maintain reasonable position size
-            adjusted_risk = max_risk * (0.02 / risk_distance_pct)
-            adjusted_risk = max(adjusted_risk, 0.02)  # Minimum 2% risk
-            log(f"📊 Adjusting risk from {max_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL distance")
+            # Adjust max risk based on the distance
+            if risk_distance_pct > 0.02:  # If SL is more than 2% away
+                # Reduce risk to maintain reasonable position size
+                adjusted_risk = max_risk * (0.02 / risk_distance_pct)
+                adjusted_risk = max(adjusted_risk, 0.02)  # Minimum 2% risk
+                log(f"📊 Adjusting risk from {max_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL distance")
+            else:
+                adjusted_risk = max_risk
+        
+            qty = await calculate_enhanced_quantity(
+                symbol=symbol,
+                price=entry_price,
+                sl_price=sl,
+                account_balance=account_balance,
+                candles_by_tf=candles_by_tf,
+                trade_type=trade_type,
+                strategy=strategy,
+                confidence=confidence,
+                risk_pct=adjusted_risk,
+                market_type=category
+            )
         else:
-            adjusted_risk = max_risk
-        
-        qty = await calculate_enhanced_quantity(
-            symbol=symbol,
-            price=entry_price,
-            sl_price=sl,
-            account_balance=account_balance,
-            candles_by_tf=candles_by_tf,
-            trade_type=trade_type,
-            strategy=strategy,
-            confidence=confidence,
-            risk_pct=adjusted_risk,
-            market_type=category
-        )
-    else:
-        # Original calculation
-        qty = await calculate_enhanced_quantity(
-            symbol=symbol,
-            price=entry_price,
-            sl_price=sl,
-            account_balance=account_balance,
-            candles_by_tf=candles_by_tf,
-            trade_type=trade_type,
-            strategy=strategy,
-            confidence=confidence,
-            risk_pct=max_risk,
-            market_type=category
-        )
+            # Original calculation
+            qty = await calculate_enhanced_quantity(
+                symbol=symbol,
+                price=entry_price,
+                sl_price=sl,
+                account_balance=account_balance,
+                candles_by_tf=candles_by_tf,
+                trade_type=trade_type,
+                strategy=strategy,
+                confidence=confidence,
+                risk_pct=max_risk,
+                market_type=category
+            )
         
         if qty <= 0:
             log(f"⚠️ Skipped {symbol}: Quantity too small or risk limit reached.")
