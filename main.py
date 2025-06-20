@@ -501,14 +501,32 @@ async def scan_for_breaks_and_pumps(symbols: List[str], live_candles: Dict,
             # Get current regime
             regime = trend_context.get('regime', 'trending')
             
-            # Check for imminent break (includes both dumps and pumps)
-            break_imminent, direction, confidence, reasons = range_break_detector.detect_imminent_break(
-                symbol, candles_by_tf, regime
+            # Check for range breakout
+            breakout_detected, direction, confidence, details = range_break_detector.detect_range_breakout(
+                symbol, candles_by_tf.get('5', []), '5', trend_context
             )
             
-            if break_imminent:
-                # Check if it's a pump signal
-                if direction == "Long" and any(k in reasons for k in ['stealth_accumulation', 'smart_money', 'pump_pattern']):
+            if breakout_detected:
+                # Ensure range boundaries are in the reasons
+                reasons = {
+                    'range_high': details.get('range_high'),
+                    'range_low': details.get('range_low'),
+                    'range_width_pct': details.get('range_width_pct'),
+                    'breakout_confidence': confidence
+                }
+                
+                # Add other detection reasons
+                if details.get('stealth_score', 0) > 0.3:
+                    reasons['stealth_accumulation'] = {'strength': details['stealth_score']}
+                if details.get('volume_analysis', {}).get('composite_score', 0) > 0.5:
+                    reasons['volume_strength'] = {'strength': details['volume_analysis']['composite_score']}
+                
+                # Check if it's a pump signal (strong upward break with accumulation)
+                if direction == "Long" and (
+                    details.get('stealth_score', 0) > 0.5 or 
+                    details.get('pre_breakout', False) or
+                    confidence > 0.8
+                ):
                     potential_pumps.append({
                         'symbol': symbol,
                         'confidence': confidence,
