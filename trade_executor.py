@@ -142,7 +142,6 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
                                     risk_pct=None, market_type="linear"):
     """
     Enhanced position sizing using advanced risk manager
-    Combines original logic with position_manager.py improvements
     """
     try:
         # Calculate SL distance
@@ -152,66 +151,47 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
         if sl_distance_pct > 0.05:  # More than 5% SL
             log(f"⚠️ SL distance too large ({sl_distance_pct*100:.2f}%), reducing position size")
             risk_pct = (risk_pct or 0.06) * (0.02 / sl_distance_pct)  # Scale down risk
-        # Use enhanced risk calculation if available
-        if risk_pct is None:
-            
-            try:
-                position_size, risk_amount, leverage = await calculate_position_size(
-                    symbol=symbol,
-                    candles_by_tf=candles_by_tf,
-                    account_balance=account_balance,
-                    entry_price=price,
-                    stop_loss=sl_price,
-                    trade_type=trade_type,
-                    strategy=strategy,
-                    confidence=confidence,
-                    market_type=market_type
-                )
-                
-                # Register the trade risk
-                register_trade_risk(symbol, risk_amount / account_balance, strategy)
-                
-                return round_qty(symbol, position_size)
-                
-            except Exception as e:
-                log(f"⚠️ Enhanced position sizing failed, using fallback: {e}", level="WARN")
         
-        # Fallback to original calculation
-        else:
-            # Calculate position size with proper risk management
-            leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
-            
-            # Calculate risk amount
-            risk_amount = account_balance * risk_pct
-            
-            # Calculate risk per unit (distance from entry to SL)
-            risk_per_unit = abs(price - sl_price)
-            
-            # Calculate position size: Risk Amount / Risk per Unit
-            position_size = risk_amount / risk_per_unit
-            
-            # Apply leverage
-            if market_type == "linear":
-                position_size = position_size * leverage
-            
-            # Log the calculation
-            log(f"📊 Position sizing for {symbol}:")
-            log(f"   Account Balance: ${account_balance:.2f}")
-            log(f"   Risk %: {risk_pct*100:.2f}%")
-            log(f"   Risk Amount: ${risk_amount:.2f}")
-            log(f"   Entry: {price:.8f}, SL: {sl_price:.8f}")
-            log(f"   SL Distance: {sl_distance_pct*100:.2f}%")
-            log(f"   Risk per Unit: {risk_per_unit:.8f}")
-            log(f"   Position Size: {position_size:.8f} units")
-            log(f"   Leverage: {leverage}x")
-            
-            # Validate the position size
-            position_value = position_size * price
-            if position_value > account_balance * 10:  # Safety check
-                log(f"⚠️ Position value ${position_value:.2f} too large, capping at 10x balance")
-                position_size = (account_balance * 10) / price
-            
-            return round_qty(symbol, position_size)
+        # ALWAYS use the passed risk_pct (remove the dynamic calculation)
+        if risk_pct is None:
+            # Default fixed risks if not provided
+            FIXED_RISK_PERCENTAGES = {
+                "Scalp": 0.05,
+                "Intraday": 0.035,
+                "Swing": 0.02
+            }
+            risk_pct = FIXED_RISK_PERCENTAGES.get(trade_type, 0.035)
+            log(f"⚠️ No risk_pct provided, using fixed default for {trade_type}: {risk_pct*100:.1f}%")
+        
+        # Calculate position size with fixed risk
+        leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
+        
+        # Calculate risk amount
+        risk_amount = account_balance * risk_pct
+        
+        # Calculate risk per unit (distance from entry to SL)
+        risk_per_unit = abs(price - sl_price)
+        
+        # Calculate position size: Risk Amount / Risk per Unit
+        position_size = risk_amount / risk_per_unit
+        
+        # Apply leverage
+        if market_type == "linear":
+            position_size = position_size * leverage
+        
+        # Log the calculation
+        log(f"📊 FIXED Position sizing for {symbol}:")
+        log(f"   Trade Type: {trade_type}")
+        log(f"   Account Balance: ${account_balance:.2f}")
+        log(f"   FIXED Risk %: {risk_pct*100:.2f}%")
+        log(f"   Risk Amount: ${risk_amount:.2f}")
+        log(f"   Entry: {price:.8f}, SL: {sl_price:.8f}")
+        log(f"   SL Distance: {sl_distance_pct*100:.2f}%")
+        log(f"   Risk per Unit: {risk_per_unit:.8f}")
+        log(f"   Position Size: {position_size:.8f} units")
+        log(f"   Leverage: {leverage}x")
+        
+        return round_qty(symbol, position_size)
         
     except Exception as e:
         log(f"❌ Error calculating position size: {e}", level="ERROR")
