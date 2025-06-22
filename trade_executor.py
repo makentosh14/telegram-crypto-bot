@@ -588,141 +588,74 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
             log(f"📊 Range Break: Overriding TP1 from {original_tp1:.8f} to {tp1:.8f}")
         
-        # Step 2: Calculate SL/TP levels using enhanced calculation
-        sl_tp_result = calculate_dynamic_sl_tp(
-            candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
-        )
-        
-        # Ensure we have at least 5 values
-        if len(sl_tp_result) >= 5:
-            sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+        # Step 2: Calculate SL/TP levels - Check for overrides first
+        if signal_data.get('override_sl') and signal_data.get('override_tp1'):
+            # Use the override values directly for range break trades
+            sl = signal_data['override_sl']
+            tp1 = signal_data['override_tp1']
+            sl_pct = signal_data.get('override_sl_pct', abs((sl - entry_price) / entry_price * 100))
+            tp1_pct = signal_data.get('override_tp1_pct', abs((tp1 - entry_price) / entry_price * 100))
+            trailing_pct = signal_data.get('override_trailing_pct', sl_pct * 0.5)
+    
+            # Get additional TP levels if provided
+            tp2_price = signal_data.get('override_tp2')
+            tp3_price = signal_data.get('override_tp3')
+    
+            if tp2_price:
+                tp2_pct = abs((tp2_price - entry_price) / entry_price * 100)
+            else:
+                tp2_pct = tp1_pct * 1.8
+                if direction.lower() == "long":
+                    tp2_price = entry_price * (1 + tp2_pct / 100)
+                else:
+                    tp2_price = entry_price * (1 - tp2_pct / 100)
+    
+            if tp3_price:
+                tp3_pct = abs((tp3_price - entry_price) / entry_price * 100)
+            else:
+                tp3_pct = tp1_pct * 2.5
+                if direction.lower() == "long":
+                    tp3_price = entry_price * (1 + tp3_pct / 100)
+                else:
+                    tp3_price = entry_price * (1 - tp3_pct / 100)
+    
+            log(f"📊 Using override SL/TP values for {symbol}:")
+            log(f"   Direction: {direction}")
+            log(f"   Entry: {entry_price:.8f}")
+            log(f"   SL: {sl:.8f} ({sl_pct:.2f}%)")
+            log(f"   TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
+            log(f"   TP2: {tp2_price:.8f} ({tp2_pct:.2f}%)")
+            log(f"   Trailing: {trailing_pct:.2f}%")
+    
+            EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
+    
         else:
-            # Fallback if function returns fewer values
-            sl, tp1, sl_pct = sl_tp_result[:3]
-            trailing_pct = sl_pct * 0.5  # Default trailing percentage
-            tp1_pct = sl_pct * 2.0      # Default TP percentage
-
-        if override_sl is not None:
-            original_sl = sl
-            sl = override_sl
-            sl_pct = abs((sl - entry_price) / entry_price) * 100
-            log(f"📊 Range Break: Overriding SL from {original_sl:.8f} to {sl:.8f}")
-            
-        if override_tp1 is not None:
-            original_tp1 = tp1
-            tp1 = override_tp1
-            tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
-            log(f"📊 Range Break: Overriding TP1 from {original_tp1:.8f} to {tp1:.8f}")
-            
-        if override_tp2 is not None:
-            tp2_price = override_tp2
-            tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
-            log(f"📊 Range Break: Setting TP2 at {tp2_price:.8f}")
-            
-        if override_tp3 is not None:
-            tp3_price = override_tp3
-            tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
-            log(f"📊 Range Break: Setting TP3 at {tp3_price:.8f}")
-
-        # ADD THIS: Apply range-based adjustments
-        if range_break_details and range_break_confidence > 0.6:
-            log(f"📊 Applying range-based exit levels for {symbol}")
-    
-            # Calculate range-based levels
-            range_levels = calculate_range_based_exit_levels({
-                'direction': direction,
-                'entry_price': entry_price,
-                'range_break_details': range_break_details
-            })
-    
-            if range_levels:
-                # Apply range-based SL with validation
-                if range_levels.get('sl'):
-                    range_sl = range_levels['sl']
-            
-                    # Validate SL is on correct side of entry
-                    sl_valid = False
-                    if direction.lower() == 'long':
-                        # For longs, SL must be below entry
-                        if range_sl < entry_price:
-                            # Check if distance is reasonable (not more than 5%)
-                            sl_distance = (entry_price - range_sl) / entry_price
-                            if 0.005 <= sl_distance <= 0.05:  # Between 0.5% and 5%
-                                sl = range_sl
-                                sl_pct = sl_distance * 100
-                                sl_valid = True
-                                log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-                    else:  # short
-                        # For shorts, SL must be above entry
-                        if range_sl > entry_price:
-                            # Check if distance is reasonable
-                            sl_distance = (range_sl - entry_price) / entry_price
-                            if 0.005 <= sl_distance <= 0.05:  # Between 0.5% and 5%
-                                sl = range_sl
-                                sl_pct = sl_distance * 100
-                                sl_valid = True
-                                log(f"✅ Using range-based SL: {sl:.8f} ({sl_pct:.2f}%)")
-            
-                    if not sl_valid:
-                        log(f"⚠️ Range SL {range_sl:.8f} not suitable for entry {entry_price:.8f}, keeping calculated SL")
-        
-                # Always use range-based TP levels if available
-                if range_levels.get('tp1'):
-                    tp1 = range_levels['tp1']
-                    tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
-                    log(f"✅ Using range-based TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
-            
-                    # Set additional TP levels
-                    if range_levels.get('tp2'):
-                        tp2_price = range_levels['tp2']
-                        tp2_pct = abs((tp2_price - entry_price) / entry_price) * 100
-                        log(f"✅ Setting range-based TP2: {tp2_price:.8f} ({tp2_pct:.2f}%)")
-                
-                    if range_levels.get('tp3'):
-                        tp3_price = range_levels['tp3']
-                        tp3_pct = abs((tp3_price - entry_price) / entry_price) * 100
-                        log(f"✅ Setting range-based TP3: {tp3_price:.8f} ({tp3_pct:.2f}%)")
-        
-        # Adjust trailing percentage for range breaks
-        if exit_strategy in ["pump_optimized", "breakout"]:
-            # Use wider trailing for range breaks
-            trailing_pct = min(trailing_pct * trailing_multiplier, 2.0)
-            log(f"📈 Adjusted trailing for range break: {trailing_pct:.2f}%")
-    
-        # Apply exit strategy multipliers
-        if exit_strategy == "pump_optimized":
-            tp1_pct *= tp1_multiplier
-            trailing_pct *= trailing_multiplier
-            log(f"🚀 Pump optimized: TP1 {tp1_pct:.2f}%, Trailing {trailing_pct:.2f}%")
-        elif exit_strategy == "breakout":
-            trailing_pct *= trailing_multiplier
-            log(f"📈 Breakout optimized: Trailing {trailing_pct:.2f}%")
-        elif exit_strategy == "patient":
-            trailing_pct *= trailing_multiplier
-            log(f"⏳ Patient strategy: Trailing {trailing_pct:.2f}%")
-        
-        # Apply trailing multiplier if using patient exit strategy
-        if exit_strategy == "patient":
-            trailing_pct *= trailing_multiplier
-        
-        EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
-        
-        # Step 3: Pre-trade validation (moved after SL/TP calculation)
-        final_valid, final_reason = await pre_trade_validator.final_validation(
-            symbol=symbol,
-            direction=direction,
-            entry_price=entry_price,
-            sl_price=sl,
-            tp_price=tp1
-        )
-        
-        if not final_valid:
-            log(f"❌ Pre-trade validation failed for {symbol}: {final_reason}")
-            await send_telegram_message(
-                f"❌ Trade cancelled for {symbol}\n"
-                f"Reason: {final_reason}"
+            # Original SL/TP calculation using dynamic method
+            sl_tp_result = calculate_dynamic_sl_tp(
+                candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
             )
-            return None
+    
+            # Ensure we have at least 5 values
+            if len(sl_tp_result) >= 5:
+                sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+            else:
+                # Fallback if function returns fewer values
+                sl, tp1, sl_pct = sl_tp_result[:3]
+                trailing_pct = sl_pct * 0.5  # Default trailing percentage
+                tp1_pct = sl_pct * 2.0      # Default TP percentage
+    
+            # Calculate additional TP levels
+            tp2_pct = tp1_pct * 1.8
+            tp3_pct = tp1_pct * 2.5
+    
+            if direction.lower() == "long":
+                tp2_price = entry_price * (1 + tp2_pct / 100)
+                tp3_price = entry_price * (1 + tp3_pct / 100)
+            else:
+                tp2_price = entry_price * (1 - tp2_pct / 100)
+                tp3_price = entry_price * (1 - tp3_pct / 100)
+    
+            EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
         
         # Step 3: Calculate position size using enhanced method
         if position_size_needs_recalc:
