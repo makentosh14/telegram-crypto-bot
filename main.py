@@ -70,6 +70,13 @@ MIN_SCALP_SCORE = 9
 MIN_INTRADAY_SCORE = 10
 MIN_SWING_SCORE = 11
 
+# FIXED RISK PERCENTAGES - Add this after the existing thresholds
+FIXED_RISK_PERCENTAGES = {
+    "Scalp": 0.05,      # 5% risk for scalps
+    "Intraday": 0.035,  # 3.5% risk for intraday  
+    "Swing": 0.02       # 2% risk for swing trades
+}
+
 def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
     """
     Enhanced validation for swing trades to reduce false signals
@@ -630,6 +637,9 @@ async def process_pump_signal(pump_signal, trend_context):
     
     # For pump signals, use Scalp parameters
     trade_type = "Scalp"
+
+    # ADD THIS - Use fixed risk for pump signals
+    pump_risk = FIXED_RISK_PERCENTAGES["Scalp"]  # 5% for scalps
     
     # Get fixed percentages from active_trade_scanner
     from active_trade_scanner import FIXED_PERCENTAGES
@@ -676,6 +686,7 @@ async def process_pump_signal(pump_signal, trend_context):
         "override_sl_pct": sl_pct,
         "override_tp1_pct": tp1_pct,
         "override_trailing_pct": trailing_pct,
+        "max_risk": pump_risk,
         **exit_strategy_params,
         "market_type": get_symbol_category(symbol)
     })
@@ -792,6 +803,9 @@ async def process_break_signal(break_signal, trend_context):
     trade_type = "Intraday"  # Range breaks are typically intraday trades
     direction = break_signal['direction']
     confidence = min(break_signal['confidence'] * 100, 95)
+
+    # ADD THIS - Use fixed risk for range breaks
+    break_risk = FIXED_RISK_PERCENTAGES[trade_type]  # Get risk based on trade type
     
     # Get range details from the break signal
     range_details = break_signal.get('reasons', {})
@@ -866,6 +880,7 @@ async def process_break_signal(break_signal, trend_context):
         "override_sl_pct": sl_pct,
         "override_tp1_pct": tp1_pct,
         "override_trailing_pct": trailing_pct,
+        "max_risk": break_risk,
         "range_break_details": range_details,
         "exit_strategy": "range_break",
         "trailing_multiplier": 1.2,
@@ -1115,29 +1130,11 @@ async def scan_for_new_signals(symbols,trend_context):
             indicator_scores["pump_potential"] = 1.0
             used_indicators.append("pump_potential")
 
-        # Calculate risk percentage
-        market_season = trend_context.get("altseason", "no")
+       # Use FIXED risk percentages - NO adjustments
+        risk_pct = FIXED_RISK_PERCENTAGES.get(trade_type, 0.035)
+        log(f"💰 Using FIXED risk for {trade_type}: {risk_pct*100:.1f}%")
 
-        if trade_type == "Scalp":
-            base_risk = 0.07 if market_season == "confirmed" else 0.09 if market_season == "strong_altseason" else 0.05
-        elif trade_type == "Intraday":
-            base_risk = 0.05 if market_season == "confirmed" else 0.06 if market_season == "strong_altseason" else 0.035
-        else:  # Swing
-            base_risk = 0.03 if market_season == "confirmed" else 0.04 if market_season == "strong_altseason" else 0.02
-
-        if use_altseason_mode:
-            base_risk *= ALTSEASON_MODE["risk_multiplier"]
-            log(f"💰 Altseason risk multiplier applied: {base_risk:.2f}%")
-           
-        # Determine strategy type for risk manager
-        strategy = "core_strategy"
-        if tf_scores.get("mean_reversion"):
-            strategy = "mean_reversion"
-        elif tf_scores.get("breakout_sniper"):
-            strategy = "breakout_sniper"
-        
-        # Get dynamic risk percentage based on confidence, strategy, and past performance
-        risk_pct = base_risk
+        # Remove all the market_season and altseason risk adjustments
 
         tf_breakdown = ", ".join(f"{k}m: {v:.1f}" for k, v in tf_scores.items())
         log(f"📊 [{i}/{len(symbols)}] {symbol} | Score: {score:.2f} | Type: {trade_type} | Dir: {direction} | Conf: {confidence:.1f}% | TFs: {tf_breakdown}")
@@ -1511,8 +1508,11 @@ async def scan_for_new_signals(symbols,trend_context):
                 log_signal(symbol)
                 track_signal(symbol, rev_score)
 
+                # Use FIXED risk for mean reversion (always Scalp)
+                mr_risk = FIXED_RISK_PERCENTAGES["Scalp"]  # 5% for scalps
+        
                 result = calculate_dynamic_sl_tp(
-                    candles_by_tf, price, trade_type, direction, score, confidence, regime
+                    candles_by_tf, price, "Scalp", rev_dir, rev_score, rev_conf, regime
                 )
                 sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
 
@@ -1529,7 +1529,8 @@ async def scan_for_new_signals(symbols,trend_context):
                     "used_indicators": list(rev_reasons.keys()),
                     "tf_scores": {"mean_reversion": rev_score},
                     "regime": regime,
-                    "always_allow_swing": False  # Mean Reversion doesn't use ALWAYS_ALLOW_SWING
+                    "always_allow_swing": False,
+                    "max_risk": mr_risk  # ADD THIS - Pass fixed risk
                 })
 
                 msg = format_trade_signal(
@@ -1576,8 +1577,11 @@ async def scan_for_new_signals(symbols,trend_context):
                 log_signal(symbol)
                 track_signal(symbol, bo_score)
 
+                # Use FIXED risk for breakout sniper (always Scalp)
+                bo_risk = FIXED_RISK_PERCENTAGES["Scalp"]  # 5% for scalps
+        
                 result = calculate_dynamic_sl_tp(
-                    candles_by_tf, price, trade_type, direction, score, confidence, regime
+                    candles_by_tf, price, "Scalp", bo_dir, bo_score, bo_conf, regime
                 )
                 sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
 
@@ -1598,7 +1602,8 @@ async def scan_for_new_signals(symbols,trend_context):
                     "tf_scores": {"breakout_sniper": bo_score},
                     "regime": regime,
                     "pump_potential": bo_pump_potential,
-                    "always_allow_swing": False  # Breakout Sniper doesn't use ALWAYS_ALLOW_SWING
+                    "always_allow_swing": False,
+                    "max_risk": bo_risk  # ADD THIS - Pass fixed risk
                 })
 
                 msg = format_trade_signal(
