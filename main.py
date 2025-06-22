@@ -613,12 +613,6 @@ async def process_pump_signal(pump_signal, trend_context):
     
     # Calculate optimal entry based on range position
     price = pump_signal['current_price']
-    if details.get('range_low') and details.get('range_high'):
-        # Adjust entry for better risk/reward
-        range_position = (price - details['range_low']) / (details['range_high'] - details['range_low'])
-        if range_position < 0.3:  # Near support - ideal entry
-            base_score += 0.2
-            indicator_scores['optimal_entry'] = 1.0
     
     # Enhanced exit strategy for pumps
     exit_strategy_params = {
@@ -631,27 +625,41 @@ async def process_pump_signal(pump_signal, trend_context):
     # Calculate confidence
     confidence = min(pump_signal['confidence'] * 100, 95)
     
-    # Calculate SL/TP - FIXED: Ensure we get all values
-    result = calculate_dynamic_sl_tp(
-        candles_by_tf, price, "Scalp", "Long", base_score, confidence, "volatile", trend_context
-    )
+    # FIXED: Use the imported FIXED_PERCENTAGES from config
+    from config import MIN_SCALP_SCORE, MIN_INTRADAY_SCORE
     
-    # FIXED: Properly unpack all values
-    if len(result) >= 5:
-        sl, tp1, sl_pct, trailing_pct, tp1_pct = result[:5]
+    # For pump signals, use Scalp parameters
+    trade_type = "Scalp"
+    
+    # Get fixed percentages from active_trade_scanner
+    from active_trade_scanner import FIXED_PERCENTAGES
+    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
+    
+    # Calculate SL/TP with fixed percentages
+    sl_pct = fixed_params["sl_pct"]
+    tp1_pct = fixed_params["tp1_pct"]
+    trailing_pct = fixed_params["trailing_pct"]
+    
+    # Calculate actual prices
+    if direction == "Long":
+        sl = price * (1 - sl_pct/100)
+        tp1 = price * (1 + tp1_pct/100)
     else:
-        # Fallback values
-        sl = price * 0.98  # 2% SL
-        tp1 = price * 1.015  # 1.5% TP
-        sl_pct = 2.0
-        tp1_pct = 1.5
-        trailing_pct = 0.5
+        sl = price * (1 + sl_pct/100)
+        tp1 = price * (1 - tp1_pct/100)
     
-    # Execute trade with enhanced parameters
+    log(f"🎯 Pump signal SL/TP calculation:")
+    log(f"   Trade Type: {trade_type}")
+    log(f"   Entry: {price:.8f}")
+    log(f"   SL: {sl:.8f} ({sl_pct}%)")
+    log(f"   TP1: {tp1:.8f} ({tp1_pct}%)")
+    log(f"   Trailing: {trailing_pct}%")
+    
+    # Execute trade with fixed SL/TP override
     trade = await execute_trade_if_valid({
         "symbol": symbol,
         "price": price,
-        "trade_type": "Scalp",  # Pumps usually start as scalps
+        "trade_type": trade_type,
         "direction": "Long",
         "score": base_score,
         "confidence": confidence,
@@ -663,28 +671,48 @@ async def process_pump_signal(pump_signal, trend_context):
         "pump_potential": True,
         "range_break_details": details,
         "range_break_confidence": pump_signal['confidence'],
+        "override_sl": sl,  # Pass calculated SL
+        "override_tp1": tp1,  # Pass calculated TP1
+        "override_sl_pct": sl_pct,
+        "override_tp1_pct": tp1_pct,
+        "override_trailing_pct": trailing_pct,
         **exit_strategy_params,
         "market_type": get_symbol_category(symbol)
     })
     
     if trade:
-        # FIXED: Format and send the Telegram message with all required parameters
+        # Verify SL was placed
+        if not trade.get('sl_order_id'):
+            log(f"⚠️ Warning: SL order ID missing for {symbol}", level="WARN")
+            # Try to place SL manually
+            from bybit_api import place_stop_loss_with_retry
+            sl_result = await place_stop_loss_with_retry(
+                symbol=symbol,
+                direction="long",
+                qty=trade['qty'],
+                sl_price=trade['sl']
+            )
+            if sl_result.get("retCode") == 0:
+                trade['sl_order_id'] = sl_result.get("result", {}).get("orderId")
+                log(f"✅ SL placed manually for {symbol}")
+        
+        # Format and send the Telegram message
         msg = format_trade_signal(
             symbol=symbol,
             score=base_score,
             tf_scores={"range_break_pump": base_score},
             trend=trend_context,
-            entry_price=trade['entry'],  # Use actual executed price
-            sl=trade['sl'],              # Use actual SL from trade
-            tp1=trade['tp1'],            # Use actual TP1 from trade
-            trade_type="Scalp",
+            entry_price=trade['entry'],
+            sl=trade['sl'],
+            tp1=trade['tp1'],
+            trade_type=trade_type,
             direction="Long",
-            trailing_pct=trade.get('trailing_pct', trailing_pct),
+            trailing_pct=trailing_pct,
             leverage=DEFAULT_LEVERAGE,
             risk_pct=6.0,
             confidence=confidence,
-            sl_pct=trade.get('sl_pct', sl_pct),      # FIXED: Add sl_pct
-            tp1_pct=trade.get('tp1_pct', tp1_pct)    # FIXED: Add tp1_pct
+            sl_pct=sl_pct,
+            tp1_pct=tp1_pct
         )
         
         # Add pump-specific information
@@ -695,7 +723,7 @@ async def process_pump_signal(pump_signal, trend_context):
             msg += f"\n📊 <b>Range Analysis:</b>\n"
             msg += f"• High: {details['range_high']:.8f}\n"
             msg += f"• Low: {details['range_low']:.8f}\n"
-            msg += f"• Width: {details['range_width_pct']:.2f}%\n"
+            msg += f"• Width: {details.get('range_width_pct', 0):.2f}%\n"
         
         if details.get('buildup_patterns'):
             msg += f"\n🎯 <b>Patterns:</b> {', '.join(details['buildup_patterns'])}"
@@ -714,13 +742,13 @@ async def process_pump_signal(pump_signal, trend_context):
         # Track the active trade with all parameters
         track_active_trade(
             symbol=symbol,
-            trade_type="Scalp",
+            trade_type=trade_type,
             initial_score=base_score,
             entry_price=trade['entry'],
             direction="Long",
-            trailing_pct=trade.get("trailing_pct", trailing_pct),
+            trailing_pct=trailing_pct,
             tp1_target=trade.get("tp1"),
-            tp1_pct=trade.get('tp1_pct', tp1_pct),
+            tp1_pct=tp1_pct,
             tp2=trade.get("tp2"),
             sl=trade.get("sl"),
             qty=trade.get("qty"),
@@ -729,6 +757,10 @@ async def process_pump_signal(pump_signal, trend_context):
             has_pump_potential=True,
             range_break_details=details
         )
+        
+        log(f"✅ Pump trade executed for {symbol} with SL: {trade['sl']}, TP1: {trade['tp1']}")
+    else:
+        log(f"❌ Trade execution failed for pump signal {symbol}")
 
 async def process_break_signal(break_signal, trend_context):
     """Process a range break signal into a trade"""
@@ -770,38 +802,50 @@ async def process_break_signal(break_signal, trend_context):
     if 'range_low' not in range_details and 'support' in range_details:
         range_details['range_low'] = range_details['support']
     
-    # Calculate range-based SL/TP levels
-    range_levels = calculate_range_based_exit_levels({
-        'direction': direction.lower(),
-        'entry_price': price,
-        'range_break_details': range_details
-    })
+    # FIXED: Use fixed percentages for range breaks
+    from active_trade_scanner import FIXED_PERCENTAGES
+    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
     
-    if not range_levels:
-        log(f"❌ Failed to calculate range-based levels for {symbol}")
-        return
-
+    sl_pct = fixed_params["sl_pct"]
+    tp1_pct = fixed_params["tp1_pct"]
+    trailing_pct = fixed_params["trailing_pct"]
+    
+    # Calculate SL/TP based on direction
+    if direction == "Long":
+        sl = price * (1 - sl_pct/100)
+        tp1 = price * (1 + tp1_pct/100)
+    else:  # Short
+        sl = price * (1 + sl_pct/100)
+        tp1 = price * (1 - tp1_pct/100)
+    
+    # Calculate additional TP levels
+    tp2_pct = tp1_pct * 1.8
+    tp3_pct = tp1_pct * 2.5
+    
+    if direction == "Long":
+        tp2 = price * (1 + tp2_pct/100)
+        tp3 = price * (1 + tp3_pct/100)
+    else:
+        tp2 = price * (1 - tp2_pct/100)
+        tp3 = price * (1 - tp3_pct/100)
+    
+    log(f"🎯 Range break SL/TP calculation:")
+    log(f"   Trade Type: {trade_type}")
+    log(f"   Direction: {direction}")
+    log(f"   Entry: {price:.8f}")
+    log(f"   SL: {sl:.8f} ({sl_pct}%)")
+    log(f"   TP1: {tp1:.8f} ({tp1_pct}%)")
+    log(f"   TP2: {tp2:.8f} ({tp2_pct}%)")
+    log(f"   Trailing: {trailing_pct}%")
+    
     # Validate risk/reward ratio
-    sl_distance = abs((range_levels['sl'] - price) / price)
-    tp1_distance = abs((range_levels['tp1'] - price) / price)
+    sl_distance = abs((sl - price) / price)
+    tp1_distance = abs((tp1 - price) / price)
     risk_reward = tp1_distance / sl_distance if sl_distance > 0 else 0
     
-    # Skip if risk/reward is poor
-    if risk_reward < 1.5:
-        log(f"⚠️ Skipping {symbol}: Poor R:R ratio {risk_reward:.2f}")
-        return
+    log(f"   Risk/Reward: {risk_reward:.2f}")
     
-    # Adjust risk based on SL distance
-    base_risk = 0.06  # 6% for Intraday
-    if sl_distance > 0.02:  # If SL is more than 2%
-        # Scale down risk to maintain reasonable position size
-        adjusted_risk = base_risk * (0.02 / sl_distance)
-        adjusted_risk = max(adjusted_risk, 0.03)  # Minimum 3% risk
-        log(f"📊 Adjusting risk from {base_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL at {sl_distance*100:.2f}%")
-    else:
-        adjusted_risk = base_risk
-    
-    # Execute trade with range-based levels
+    # Execute trade with fixed SL/TP
     trade = await execute_trade_if_valid({
         "symbol": symbol,
         "price": price,
@@ -815,27 +859,34 @@ async def process_break_signal(break_signal, trend_context):
         "tf_scores": {"range_break": base_score},
         "regime": "volatile",
         "market_type": get_symbol_category(symbol),
-        # Pass the range-based SL/TP
-        "override_sl": range_levels['sl'],
-        "override_tp1": range_levels['tp1'],
-        "override_tp2": range_levels.get('tp2'),
-        "override_tp3": range_levels.get('tp3'),
+        "override_sl": sl,
+        "override_tp1": tp1,
+        "override_tp2": tp2,
+        "override_tp3": tp3,
+        "override_sl_pct": sl_pct,
+        "override_tp1_pct": tp1_pct,
+        "override_trailing_pct": trailing_pct,
         "range_break_details": range_details,
         "exit_strategy": "range_break",
-        "trailing_multiplier": 1.2,  # Wider trailing for range breaks
-        "exit_tranches": [0.33, 0.33, 0.34]  # Even distribution
+        "trailing_multiplier": 1.2,
+        "exit_tranches": [0.33, 0.33, 0.34]
     })
     
     if trade:
-        # Calculate actual percentages
-        sl_pct = abs((trade['sl'] - trade['entry']) / trade['entry']) * 100
-        tp1_pct = abs((trade['tp1'] - trade['entry']) / trade['entry']) * 100
-        actual_risk_pct = calculate_actual_risk_percentage(
-            trade['entry'],
-            trade['sl'],
-            trade['qty'],
-            account_balance  # You'll need to get this
-        )
+        # Verify SL was placed
+        if not trade.get('sl_order_id'):
+            log(f"⚠️ Warning: SL order ID missing for {symbol}", level="WARN")
+            # Try to place SL manually
+            from bybit_api import place_stop_loss_with_retry
+            sl_result = await place_stop_loss_with_retry(
+                symbol=symbol,
+                direction=direction.lower(),
+                qty=trade['qty'],
+                sl_price=trade['sl']
+            )
+            if sl_result.get("retCode") == 0:
+                trade['sl_order_id'] = sl_result.get("result", {}).get("orderId")
+                log(f"✅ SL placed manually for {symbol}")
         
         # Send notification
         msg = format_trade_signal(
@@ -848,9 +899,9 @@ async def process_break_signal(break_signal, trend_context):
             tp1=trade['tp1'],
             trade_type=trade_type,
             direction=direction,
-            trailing_pct=trade.get('trailing_pct', 1.0),
+            trailing_pct=trailing_pct,
             leverage=DEFAULT_LEVERAGE,
-            risk_pct=actual_risk_pct,
+            risk_pct=6.0,
             confidence=confidence,
             sl_pct=sl_pct,
             tp1_pct=tp1_pct
@@ -860,7 +911,7 @@ async def process_break_signal(break_signal, trend_context):
         msg += f"\n\n🎯 <b>RANGE BREAK SIGNAL</b>\n"
         msg += f"Direction: {direction}\n"
         msg += f"Confidence: {break_signal['confidence']*100:.1f}%\n"
-        msg += f"\n💰 <b>Actual Risk:</b> {actual_risk_pct:.2f}% of balance"
+        msg += f"Risk/Reward: {risk_reward:.2f}\n"
         
         if range_details.get('range_high') and range_details.get('range_low'):
             msg += f"\n📊 <b>Range Analysis:</b>\n"
@@ -869,9 +920,9 @@ async def process_break_signal(break_signal, trend_context):
             msg += f"• Width: {((range_details['range_high'] - range_details['range_low']) / range_details['range_low'] * 100):.2f}%\n"
         
         msg += f"\n📍 <b>Exit Strategy:</b>\n"
-        msg += f"• SL at {'resistance' if direction == 'Long' else 'support'} level\n"
-        msg += f"• TP based on range width projection\n"
-        msg += f"• Trailing stop after TP1"
+        msg += f"• SL: {sl:.8f} ({sl_pct}%)\n"
+        msg += f"• TP1: {tp1:.8f} ({tp1_pct}%)\n"
+        msg += f"• Trailing stop: {trailing_pct}% after TP1"
         
         await send_telegram_message(msg)
         
@@ -880,7 +931,7 @@ async def process_break_signal(break_signal, trend_context):
             'score': base_score,
             'score_history': [base_score],
             'range_break': True,
-            'range_levels': range_levels
+            'range_levels': range_details
         }
         
         track_active_trade(
@@ -889,7 +940,7 @@ async def process_break_signal(break_signal, trend_context):
             initial_score=base_score,
             entry_price=trade['entry'],
             direction=direction,
-            trailing_pct=trade.get("trailing_pct", 1.0),
+            trailing_pct=trailing_pct,
             tp1_target=trade['tp1'],
             tp1_pct=tp1_pct,
             tp2=trade.get("tp2"),
@@ -900,6 +951,10 @@ async def process_break_signal(break_signal, trend_context):
             has_pump_potential=False,
             range_break_details=range_details
         )
+        
+        log(f"✅ Range break trade executed for {symbol} with SL: {trade['sl']}, TP1: {trade['tp1']}")
+    else:
+        log(f"❌ Trade execution failed for range break {symbol}")
 
 
 async def scan_for_new_signals(symbols,trend_context):
