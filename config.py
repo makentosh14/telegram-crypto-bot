@@ -129,3 +129,12 @@ ALTSEASON_MODE = {
 }
 
 NORMAL_MAX_POSITIONS = 10
+
+# DCA (Dollar Cost Averaging) Settings
+ENABLE_DCA = True  # Master switch for DCA strategy
+DCA_MAX_RISK_MULTIPLIER = 2.0  # Maximum total risk after all DCAs (2x original)
+DCA_COOLDOWN_MINUTES = 5  # Minimum time between DCA additions
+
+# DCA Risk Limits
+DCA_MAX_BALANCE_USAGE = 0.15  # Maximum 15% of balance for all DCA positions
+DCA_DAILY_LIMIT = 5  # Maximum DCA operations per day
