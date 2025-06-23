@@ -1,5 +1,5 @@
 """
-Enhanced Trade Executor - Combines the best of trade_executor.py and position_manager.py
+Enhanced Trade Executor - Fixed SL Reference Error
 Handles position sizing, execution and risk management with advanced features
 """
 import asyncio
@@ -115,18 +115,6 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
             confidence=confidence,
             regime=regime
         )
-
-        # Check for altseason mode
-        if trend_context:
-            altseason = trend_context.get("altseason", False)
-            use_altseason_mode = ALTSEASON_MODE["enabled"] and altseason
-        
-            if use_altseason_mode:
-                # Apply altseason multipliers
-                sl_pct *= ALTSEASON_MODE["sl_multiplier"]  # Wider stops
-                tp1_pct *= ALTSEASON_MODE["tp_multiplier"]  # Bigger targets
-            
-                log(f"🚀 Altseason SL/TP adjustment - SL: {sl_pct:.2f}%, TP: {tp1_pct:.2f}%")
                 
         if len(result) >= 5:
             return result[:5]
@@ -555,19 +543,6 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         position_size_needs_recalc = False
     
-        if override_sl is not None:
-            original_sl = sl
-            sl = override_sl
-            sl_pct = abs((sl - entry_price) / entry_price) * 100
-            position_size_needs_recalc = True  # Flag for recalculation
-            log(f"📊 Range Break: Overriding SL from {original_sl:.8f} to {sl:.8f}")
-        
-        if override_tp1 is not None:
-            original_tp1 = tp1
-            tp1 = override_tp1
-            tp1_pct = abs((tp1 - entry_price) / entry_price) * 100
-            log(f"📊 Range Break: Overriding TP1 from {original_tp1:.8f} to {tp1:.8f}")
-        
         # Step 2: Calculate SL/TP levels - Check for overrides first
         if signal_data.get('override_sl') and signal_data.get('override_tp1'):
             # Use the override values directly for range break trades
@@ -884,6 +859,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         )
         
         return None
+
 def calculate_actual_risk_percentage(entry_price, sl_price, position_size, account_balance):
     """
     Calculate the actual risk percentage based on position size and SL distance
@@ -943,4 +919,3 @@ async def execute_twap_slice(symbol, category, side, slice_qty, entries):
                 entries.append(price)
     except Exception as e:
         log(f"❌ TWAP Slice Error: {e}", level="ERROR")
-
