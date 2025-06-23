@@ -463,6 +463,10 @@ def track_active_trade(symbol, trade_type, initial_score, entry_price=None, dire
         "exit_score": False,
         "tp1_hit_cycle": 0,
         "max_score": initial_score,
+        "dca_enabled": True,
+        "dca_count": 0,
+        "original_qty": qty,
+        "dca_history": [],
         "entry_time": datetime.utcnow(),
         "last_score_update": datetime.utcnow()
     }
@@ -1101,6 +1105,39 @@ async def monitor_trades(live_candles):
     if any(t.get("cycles", 0) > 0 for t in active_trades.values()):
         save_active_trades()
 
+async def check_dca_safety(symbol, trade, add_size, account_balance):
+    """
+    Safety checks before executing DCA
+    
+    Returns:
+        bool: True if safe to proceed
+    """
+    # Check 1: Total position size limit
+    current_qty = trade.get("qty", 0)
+    new_total_qty = current_qty + add_size
+    
+    # Don't let position get too large relative to account
+    position_value = new_total_qty * trade.get("entry_price", 0)
+    if position_value > account_balance * 0.5:  # 50% of account max
+        log(f"⚠️ DCA blocked: Position would be too large relative to account")
+        return False
+    
+    # Check 2: Daily DCA limit
+    from datetime import datetime, timedelta
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    daily_dca_count = 0
+    for sym, data in dca_manager.dca_history.items():
+        for dca in data.get("dca_history", []):
+            if datetime.fromisoformat(dca["timestamp"]) > today_start:
+                daily_dca_count += 1
+    
+    if daily_dca_count >= DCA_DAILY_LIMIT:
+        log(f"⚠️ DCA blocked: Daily limit reached ({daily_dca_count}/{DCA_DAILY_LIMIT})")
+        return False
+    
+    return True
+
 async def check_reentry_opportunities(live_candles):
     """Check exited symbols for reentry opportunities"""
     from score import score_symbol, determine_direction, calculate_confidence
@@ -1190,6 +1227,16 @@ def check_sl_hit(trade, current_price, direction):
         return True
     elif direction == "short" and current_price >= sl_price:
         return True
+
+    # In handle_trailing_sl_exit function, add:
+    if trade.get("dca_count", 0) > 0:
+        # Log DCA result
+        dca_manager.dca_history[symbol] = {
+            "dca_count": trade["dca_count"],
+            "final_result": "win" if profit_pct > 0 else "loss",
+            "final_pnl": profit_pct,
+            "dca_history": trade.get("dca_history", [])
+        }
         
     return False
 
@@ -1206,6 +1253,16 @@ def check_trailing_sl_hit(trade, current_price, direction):
         return True
     elif direction == "short" and current_price >= trailing_sl * (1 + buffer):
         return True
+
+    # In handle_trailing_sl_exit function, add:
+    if trade.get("dca_count", 0) > 0:
+        # Log DCA result
+        dca_manager.dca_history[symbol] = {
+            "dca_count": trade["dca_count"],
+            "final_result": "win" if profit_pct > 0 else "loss",
+            "final_pnl": profit_pct,
+            "dca_history": trade.get("dca_history", [])
+        }
         
     return False
 
@@ -1235,6 +1292,16 @@ async def handle_tp1_hit(symbol, trade, current_price):
     # Move SL to breakeven
     entry_price = trade.get("entry_price")
     sl_updated = await update_stop_loss_order(symbol, trade, entry_price)
+
+    # In handle_trailing_sl_exit function, add:
+    if trade.get("dca_count", 0) > 0:
+        # Log DCA result
+        dca_manager.dca_history[symbol] = {
+            "dca_count": trade["dca_count"],
+            "final_result": "win" if profit_pct > 0 else "loss",
+            "final_pnl": profit_pct,
+            "dca_history": trade.get("dca_history", [])
+        }
     
     # Send notification
     await send_telegram_message(
@@ -1272,6 +1339,16 @@ async def handle_trailing_stop(symbol, trade, current_price, direction):
         improvement = ((current_trailing_sl - new_sl) / current_trailing_sl) * 100
         if improvement >= 0.1:
             should_update = True
+
+    # In handle_trailing_sl_exit function, add:
+    if trade.get("dca_count", 0) > 0:
+        # Log DCA result
+        dca_manager.dca_history[symbol] = {
+            "dca_count": trade["dca_count"],
+            "final_result": "win" if profit_pct > 0 else "loss",
+            "final_pnl": profit_pct,
+            "dca_history": trade.get("dca_history", [])
+        }
     
     if should_update:
         sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
