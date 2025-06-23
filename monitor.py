@@ -28,6 +28,7 @@ from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
 from exit_manager import should_trail_stop, adjust_profit_protection, should_exit_by_time, detect_momentum_surge, calculate_exit_tranches
 from sl_tp_utils import evaluate_score_exit
+from dca_manager import dca_manager
 
 
 # FIXED PERCENTAGES for SL/TP - Add this after the imports
@@ -1035,6 +1036,28 @@ async def monitor_trades(live_candles):
                 tp1_hit = check_tp1_hit(trade, current_price, candles_by_tf.get('1', []))
                 if tp1_hit:
                     await handle_tp1_hit(symbol, trade, current_price)
+
+            # Check for DCA opportunity (only if not in profit)
+            if not trade.get("tp1_hit"):
+            # Get account balance for DCA calculation
+                balance = await get_account_balance()
+    
+                if await dca_manager.check_dca_opportunity(symbol, trade, current_price):
+                    # Execute DCA
+                    updated_trade = await dca_manager.execute_dca_add(
+                        symbol=symbol,
+                        trade=trade,
+                        current_price=current_price,
+                        account_balance=balance
+                    )
+        
+                    if updated_trade:
+                        # Update the trade in active_trades
+                        active_trades[symbol] = updated_trade
+                        save_active_trades()
+            
+                        # Mark as modified for saving
+                        trade["modified"] = True
             
             # 4. Handle trailing stop after TP1
             elif trade.get("tp1_hit") and trade.get("trailing_pct"):
