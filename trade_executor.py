@@ -920,11 +920,12 @@ async def emergency_close_position(symbol, market_type="linear"):
         log(f"❌ Error in emergency close: {e}", level="ERROR")
         return False
 
-# Export main functions
 __all__ = [
     'execute_trade',
+    'execute_trade_if_valid',  # Added missing function
     'get_account_balance',
     'calculate_enhanced_quantity',
+    'calculate_dynamic_sl_tp',  # Added for compatibility
     'execute_market_entry',
     'execute_twap_entry',
     'place_stop_loss_order',
