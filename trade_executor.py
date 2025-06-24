@@ -469,185 +469,6 @@ async def cancel_all_orders(symbol, market_type="linear"):
         log(traceback.format_exc(), level="ERROR")
         return False
 
-async def execute_trade_if_valid(signal_data, use_twap=True):
-    """
-    Master function to execute a complete trade setup with FIXED position sizing
-    
-    Args:
-        signal_data: Dictionary containing trade setup details
-        use_twap: Whether to use TWAP for entry (default True)
-        
-    Returns:
-        dict or None: Trade details if executed successfully, None otherwise
-    """
-    # Start by loading risk state
-    load_risk_state()
-    
-    # Reset daily risk tracking if needed
-    reset_daily_risk()
-    
-    # Check if trading is allowed based on drawdown limits
-    if not check_trading_allowed():
-        log(f"🛑 Trading paused due to drawdown limits - trade blocked", level="WARN")
-        await send_telegram_message("🛑 <b>Trade Blocked</b>: Trading paused due to drawdown limits")
-        return None
-    
-    # Extract trade details
-    symbol = signal_data["symbol"]
-    category = signal_data.get("market_type", "linear")
-    trade_type = signal_data.get("trade_type", "Intraday")
-    direction = signal_data.get("direction", "Long").strip().lower()
-    regime = signal_data.get("regime", "trending")
-    score = signal_data.get("score", 0)
-    confidence = signal_data.get("confidence", 60)
-    entry_price = float(signal_data.get("price", 1.0))
-    candles_by_tf = signal_data.get("candles", {})
-    
-    # Determine strategy type
-    strategy = "core_strategy"
-    if "mean_reversion" in signal_data.get("tf_scores", {}):
-        strategy = "mean_reversion"
-    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
-        strategy = "breakout_sniper"
-    
-    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type} ({strategy})")
-    
-    # Execution state tracking
-    exec_id = f"{symbol}_{int(time.time())}"
-    EXECUTION_STATES[exec_id] = {"stage": "started", "success": False}
-    
-    try:
-        # Step 1: Get account balance with retry
-        account_balance = await get_account_balance()
-        if account_balance <= 0:
-            log(f"❌ Invalid account balance: {account_balance} USDT", level="ERROR")
-            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Invalid account balance.")
-            return None
-        
-        # Step 2: Calculate SL/TP levels
-        sl_tp_result = calculate_dynamic_sl_tp(
-            candles_by_tf=candles_by_tf,
-            price=entry_price,
-            trade_type=trade_type,
-            direction=direction,
-            score=score,
-            confidence=confidence,
-            regime=regime
-        )
-        
-        if len(sl_tp_result) < 5:
-            log(f"❌ Invalid SL/TP calculation result", level="ERROR")
-            return None
-            
-        sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
-        
-        EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
-        
-        # Step 3: Calculate position size using FIXED method
-        qty = await calculate_enhanced_quantity(
-            symbol=symbol,
-            price=entry_price,
-            sl_price=sl_price,
-            account_balance=account_balance,
-            candles_by_tf=candles_by_tf,
-            trade_type=trade_type,
-            strategy=strategy,
-            confidence=confidence,
-            market_type=category
-        )
-        
-        if qty <= 0:
-            log(f"⚠️ Skipped {symbol}: Quantity too small or risk limit reached.")
-            return None
-        
-        EXECUTION_STATES[exec_id]["stage"] = "quantity_calculated"
-        
-        # Step 4: Set leverage and cancel existing orders
-        if category == "linear":
-            await set_leverage(symbol, DEFAULT_LEVERAGE, category)
-            await cancel_all_orders(symbol, category)
-        
-        # Step 5: Execute entry
-        if use_twap and qty >= 3:  # Use TWAP for larger positions
-            entry_result = await execute_twap_entry(symbol, direction, qty, category)
-        else:
-            entry_result = await execute_market_entry(symbol, direction, qty, category)
-        
-        if not entry_result:
-            log(f"❌ Entry execution failed for {symbol}", level="ERROR")
-            return None
-        
-        avg_entry_price = entry_result["avg_price"]
-        executed_qty = entry_result["executed_qty"]
-        
-        EXECUTION_STATES[exec_id]["stage"] = "entry_executed"
-        EXECUTION_STATES[exec_id]["success"] = True
-        
-        log(f"✅ {symbol} entry executed: {executed_qty} at {avg_entry_price}")
-        
-        # Step 6: Place protective orders (SL/TP)
-        sl_order_id = None
-        tp1_order_id = None
-        
-        # Place stop loss
-        if sl_price > 0:
-            sl_order_id = await place_stop_loss_order(symbol, direction, executed_qty, sl_price, category)
-        
-        # Place take profit
-        if tp1_price > 0:
-            tp1_order_id = await place_take_profit_order(symbol, direction, executed_qty, tp1_price, category)
-        
-        # Log successful execution
-        log(f"🎯 Trade setup complete for {symbol}")
-        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP: {tp1_price}")
-        log(f"   Quantity: {executed_qty} | Risk: {((abs(avg_entry_price - sl_price) * executed_qty) / account_balance) * 100:.2f}%")
-        
-        # Return trade details
-        trade_details = {
-            "symbol": symbol,
-            "direction": direction,
-            "trade_type": trade_type,
-            "entry_price": avg_entry_price,
-            "qty": executed_qty,
-            "sl_price": sl_price,
-            "tp1_price": tp1_price,
-            "sl_order_id": sl_order_id,
-            "tp1_order_id": tp1_order_id,
-            "strategy": strategy,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
-            "execution_type": "TWAP" if use_twap and qty >= 3 else "Market"
-        }
-        
-        # Log trade execution
-        write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
-        
-        # Send telegram notification
-        await send_telegram_message(
-            f"✅ <b>Trade Executed</b>\n"
-            f"Symbol: <b>{symbol}</b>\n"
-            f"Direction: <b>{direction.upper()}</b>\n"
-            f"Entry: <b>{avg_entry_price}</b>\n"
-            f"Quantity: <b>{executed_qty}</b>\n"
-            f"SL: <b>{sl_price}</b> | TP: <b>{tp1_price}</b>"
-        )
-        
-        return trade_details
-        
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
-        log(f"Stack trace: {error_trace}", level="ERROR")
-        
-        EXECUTION_STATES[exec_id]["stage"] = "error"
-        EXECUTION_STATES[exec_id]["error"] = str(e)
-        
-        await send_telegram_message(
-            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
-        )
-        
-        return None
-
 async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
     """Enhanced stop loss order placement"""
     try:
@@ -920,8 +741,242 @@ async def emergency_close_position(symbol, market_type="linear"):
         log(f"❌ Error in emergency close: {e}", level="ERROR")
         return False
 
+async def execute_trade_if_valid(signal_data, max_risk=0.06):
+    """
+    Enhanced trade execution combining the best of both systems
+    Main function that orchestrates the complete trade setup
+    
+    Args:
+        signal_data: Dictionary containing trade setup details
+        max_risk: Maximum risk percentage (default 6%)
+        
+    Returns:
+        dict or None: Trade details if executed successfully, None otherwise
+    """
+    # Load risk state and check trading permissions
+    load_risk_state()
+    reset_daily_risk()
+    
+    # Check if trading is allowed based on drawdown limits
+    if not check_trading_allowed():
+        log(f"🛑 Trading paused due to drawdown limits - trade blocked", level="WARN")
+        await send_telegram_message("🛑 <b>Trade Blocked</b>: Trading paused due to drawdown limits")
+        return None
+    
+    # Extract trade details
+    symbol = signal_data["symbol"]
+    category = signal_data.get("market_type", "linear")
+    trade_type = signal_data.get("trade_type", "Intraday")
+    direction = signal_data.get("direction", "Long").strip().lower()
+    regime = signal_data.get("regime", "trending")
+    score = signal_data.get("score", 0)
+    confidence = signal_data.get("confidence", 60)
+    entry_price = float(signal_data.get("price", 1.0))
+    candles_by_tf = signal_data.get("candles", {})
+    
+    # Handle override SL/TP if provided
+    override_sl = signal_data.get("override_sl")
+    override_tp1 = signal_data.get("override_tp1")
+    override_sl_pct = signal_data.get("override_sl_pct")
+    override_tp1_pct = signal_data.get("override_tp1_pct")
+    override_trailing_pct = signal_data.get("override_trailing_pct")
+    
+    # Use provided max_risk or get from signal_data
+    if "max_risk" in signal_data:
+        max_risk = signal_data["max_risk"]
+    
+    # Determine strategy type
+    strategy = "core_strategy"
+    if "mean_reversion" in signal_data.get("tf_scores", {}):
+        strategy = "mean_reversion"
+    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
+        strategy = "breakout_sniper"
+    elif "range_break" in signal_data.get("tf_scores", {}):
+        strategy = "range_break"
+    elif "pump_" in str(signal_data.get("indicator_scores", {})):
+        strategy = "pump_detector"
+    
+    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type} ({strategy})")
+    
+    # Execution state tracking
+    exec_id = f"{symbol}_{int(time.time())}"
+    EXECUTION_STATES[exec_id] = {"stage": "started", "success": False}
+    
+    try:
+        # Step 1: Get account balance with retry
+        account_balance = await get_account_balance()
+        if account_balance <= 0:
+            log(f"❌ Invalid account balance: {account_balance} USDT", level="ERROR")
+            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Invalid account balance.")
+            return None
+        
+        # Step 2: Calculate SL/TP levels (with potential overrides)
+        if override_sl and override_tp1:
+            # Use provided override values
+            sl_price = override_sl
+            tp1_price = override_tp1
+            sl_pct = override_sl_pct or abs((sl_price - entry_price) / entry_price)
+            tp1_pct = override_tp1_pct or abs((tp1_price - entry_price) / entry_price)
+            trailing_pct = override_trailing_pct or 0.005
+            
+            log(f"📊 Using override SL/TP:")
+            log(f"   Entry: {entry_price} | SL: {sl_price} | TP1: {tp1_price}")
+            log(f"   SL%: {sl_pct*100:.2f}% | TP1%: {tp1_pct*100:.2f}% | Trailing: {trailing_pct*100:.2f}%")
+            
+            sl_tp_result = [sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct]
+        else:
+            # Calculate dynamic SL/TP
+            sl_tp_result = calculate_dynamic_sl_tp(
+                candles_by_tf=candles_by_tf,
+                price=entry_price,
+                trade_type=trade_type,
+                direction=direction,
+                score=score,
+                confidence=confidence,
+                regime=regime
+            )
+        
+        if len(sl_tp_result) < 5:
+            log(f"❌ Invalid SL/TP calculation result", level="ERROR")
+            return None
+            
+        sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+        
+        EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
+        
+        # Step 3: Calculate position size using FIXED method
+        qty = await calculate_enhanced_quantity(
+            symbol=symbol,
+            price=entry_price,
+            sl_price=sl_price,
+            account_balance=account_balance,
+            candles_by_tf=candles_by_tf,
+            trade_type=trade_type,
+            strategy=strategy,
+            confidence=confidence,
+            risk_pct=max_risk,
+            market_type=category
+        )
+        
+        if qty <= 0:
+            log(f"⚠️ Skipped {symbol}: Quantity too small or risk limit reached.")
+            return None
+        
+        EXECUTION_STATES[exec_id]["stage"] = "quantity_calculated"
+        
+        # Step 4: Validate trade preconditions
+        if not await validate_trade_preconditions(symbol, direction, qty, account_balance, category):
+            log(f"❌ Trade validation failed for {symbol}", level="ERROR")
+            return None
+        
+        # Step 5: Set leverage and cancel existing orders
+        if category == "linear":
+            await set_leverage(symbol, DEFAULT_LEVERAGE, category)
+            await cancel_all_orders(symbol, category)
+        
+        # Step 6: Execute entry (prefer TWAP for larger positions)
+        if qty >= 3:  # Use TWAP for larger positions
+            entry_result = await execute_twap_entry(symbol, direction, qty, category)
+        else:
+            entry_result = await execute_market_entry(symbol, direction, qty, category)
+        
+        if not entry_result:
+            log(f"❌ Entry execution failed for {symbol}", level="ERROR")
+            return None
+        
+        avg_entry_price = entry_result["avg_price"]
+        executed_qty = entry_result["executed_qty"]
+        
+        EXECUTION_STATES[exec_id]["stage"] = "entry_executed"
+        EXECUTION_STATES[exec_id]["success"] = True
+        
+        log(f"✅ {symbol} entry executed: {executed_qty} at {avg_entry_price}")
+        
+        # Step 7: Place protective orders (SL/TP)
+        sl_order_id = None
+        tp1_order_id = None
+        
+        # Place stop loss
+        if sl_price > 0:
+            sl_order_id = await place_stop_loss_order(symbol, direction, executed_qty, sl_price, category)
+        
+        # Place take profit
+        if tp1_price > 0:
+            tp1_order_id = await place_take_profit_order(symbol, direction, executed_qty, tp1_price, category)
+        
+        # Calculate actual risk
+        actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
+        
+        # Log successful execution
+        log(f"🎯 Trade setup complete for {symbol}")
+        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP: {tp1_price}")
+        log(f"   Quantity: {executed_qty} | Risk: {actual_risk:.2f}%")
+        
+        # Return comprehensive trade details
+        trade_details = {
+            "symbol": symbol,
+            "direction": direction,
+            "trade_type": trade_type,
+            "entry_price": avg_entry_price,
+            "qty": executed_qty,
+            "original_qty": executed_qty,  # For DCA tracking
+            "sl_price": sl_price,
+            "tp1_price": tp1_price,
+            "sl_pct": sl_pct,
+            "tp1_pct": tp1_pct,
+            "trailing_pct": trailing_pct,
+            "sl_order_id": sl_order_id,
+            "tp1_order_id": tp1_order_id,
+            "strategy": strategy,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
+            "execution_type": "TWAP" if qty >= 3 else "Market",
+            "actual_risk_pct": actual_risk,
+            "confidence": confidence,
+            "score": score,
+            "regime": regime,
+            "indicator_scores": signal_data.get("indicator_scores", {}),
+            "used_indicators": signal_data.get("used_indicators", []),
+            "market_type": category,
+            "range_break_details": signal_data.get("range_break_details"),
+            "exit_strategy": signal_data.get("exit_strategy", "standard"),
+            "trailing_multiplier": signal_data.get("trailing_multiplier", 1.0),
+            "exit_tranches": signal_data.get("exit_tranches", [0.4, 0.3, 0.3])
+        }
+        
+        # Log trade execution
+        write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
+        
+        # Send telegram notification
+        await send_telegram_message(
+            f"✅ <b>Trade Executed</b>\n"
+            f"Symbol: <b>{symbol}</b>\n"
+            f"Direction: <b>{direction.upper()}</b>\n"
+            f"Strategy: <b>{strategy}</b>\n"
+            f"Entry: <b>{avg_entry_price}</b>\n"
+            f"Quantity: <b>{executed_qty}</b>\n"
+            f"SL: <b>{sl_price}</b> | TP: <b>{tp1_price}</b>\n"
+            f"Risk: <b>{actual_risk:.2f}%</b>"
+        )
+        
+        return trade_details
+        
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
+        log(f"Stack trace: {error_trace}", level="ERROR")
+        
+        EXECUTION_STATES[exec_id]["stage"] = "error"
+        EXECUTION_STATES[exec_id]["error"] = str(e)
+        
+        await send_telegram_message(
+            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
+        )
+        
+        return None
+
+# Export main functions
 __all__ = [
-    'execute_trade',
     'execute_trade_if_valid',  # Added missing function
     'get_account_balance',
     'calculate_enhanced_quantity',
