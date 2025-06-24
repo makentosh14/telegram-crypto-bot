@@ -469,7 +469,7 @@ async def cancel_all_orders(symbol, market_type="linear"):
         log(traceback.format_exc(), level="ERROR")
         return False
 
-async def execute_trade(signal_data, use_twap=True):
+async def execute_trade_if_valid(signal_data, use_twap=True):
     """
     Master function to execute a complete trade setup with FIXED position sizing
     
