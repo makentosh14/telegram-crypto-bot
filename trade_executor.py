@@ -536,7 +536,8 @@ async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="l
         log(traceback.format_exc(), level="ERROR")
         return None
 
-async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
+# Note: Removed exchange trailing stop functions - monitor.py handles trailing
+# Remove the place_trailing_stop_order function as it conflicts with monitor
     """Enhanced take profit order placement"""
     try:
         side = "Sell" if direction.lower() == "long" else "Buy"
@@ -938,15 +939,86 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
                 tp2_order_id = await place_take_profit_order(symbol, direction, tp2_qty, tp2_price, category)
                 log(f"📊 TP2 order placed: {tp2_qty} units (70% of position) at {tp2_price}")
         
-        log(f"✅ Protective orders placed: SL={sl_order_id}, TP1={tp1_order_id}, TP2={tp2_order_id}")
+async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
+    """Enhanced take profit order placement"""
+    try:
+        side = "Sell" if direction.lower() == "long" else "Buy"
+        
+        log(f"💰 Placing TP order for {symbol}: {side} at {tp_price}")
+        
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": market_type,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Limit",
+            "qty": str(qty),
+            "price": str(tp_price),
+            "timeInForce": "GTC",
+            "reduceOnly": True
+        })
+        
+        if result.get("retCode") == 0:
+            order_id = result.get("result", {}).get("orderId")
+            log(f"✅ TP order placed: {order_id}")
+            return order_id
+        else:
+            log(f"❌ Failed to place TP order: {result.get('retMsg')}", level="ERROR")
+            return None
+            
+    except Exception as e:
+        log(f"❌ Error placing TP order: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        return None
+        
+        # Step 8: Register trade with monitor system
+        # This is crucial - the monitor needs to track this trade for TP1 and trailing
+        try:
+            from monitor import track_active_trade
+            
+            # Calculate TP1 target for monitor
+            trade_type = signal_data.get("trade_type", "Intraday")
+            risk_percentages = {
+                "Scalp": {"tp1_pct": 1.2, "trailing_pct": 0.4},
+                "Intraday": {"tp1_pct": 2.0, "trailing_pct": 1.0}, 
+                "Swing": {"tp1_pct": 5.0, "trailing_pct": 1.5}
+            }
+            
+            params = risk_percentages.get(trade_type, risk_percentages["Intraday"])
+            
+            if direction.lower() == "long":
+                tp1_target = avg_entry_price * (1 + params["tp1_pct"]/100)
+            else:
+                tp1_target = avg_entry_price * (1 - params["tp1_pct"]/100)
+            
+            # Register with monitor for TP1 detection and trailing
+            track_active_trade(
+                symbol=symbol,
+                trade_type=trade_type,
+                initial_score=score,
+                entry_price=avg_entry_price,
+                direction=direction,
+                trailing_pct=params["trailing_pct"],
+                tp1_target=tp1_target,
+                tp1_pct=params["tp1_pct"],
+                sl=sl_price,
+                sl_order_id=sl_order_id,
+                qty=executed_qty
+            )
+            
+            log(f"✅ Trade registered with monitor: TP1={tp1_target:.6f}, Trailing={params['trailing_pct']}%")
+            
+        except Exception as e:
+            log(f"⚠️ Failed to register with monitor: {e}", level="WARN")
+            # Trade still executed, just monitor integration failed
         
         # Calculate actual risk
         actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
         
         # Log successful execution
         log(f"🎯 Trade setup complete for {symbol}")
-        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP: {tp1_price}")
+        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP1 Target: {tp1_target:.6f}")
         log(f"   Quantity: {executed_qty} | Risk: {actual_risk:.2f}%")
+        log(f"   Monitor will handle: TP1 detection → Partial exit → Trailing SL")
         
         # Return comprehensive trade details
         trade_details = {
@@ -957,13 +1029,12 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "qty": executed_qty,
             "original_qty": executed_qty,  # For DCA tracking
             "sl_price": sl_price,
-            "tp1_price": tp1_price,
+            "tp1_price": tp1_target,  # Use calculated TP1 target
             "sl_pct": sl_pct,
-            "tp1_pct": tp1_pct,
-            "trailing_pct": trailing_pct,
+            "tp1_pct": params["tp1_pct"],
+            "trailing_pct": params["trailing_pct"],
             "sl_order_id": sl_order_id,
-            "tp1_order_id": tp1_order_id,
-            "tp2_order_id": tp2_order_id,
+            "monitor_managed": True,  # Flag that monitor handles TP/trailing
             "strategy": strategy,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
@@ -984,7 +1055,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         # Log trade execution
         write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
         
-        # Send telegram notification
+        # Send telegram notification with WARNING about monitor
         await send_telegram_message(
             f"✅ <b>Trade Executed</b>\n"
             f"Symbol: <b>{symbol}</b>\n"
@@ -994,8 +1065,9 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             f"Quantity: <b>{executed_qty}</b>\n"
             f"SL: <b>{sl_price}</b>\n"
             f"TP1: <b>{tp1_price}</b> (30% exit)\n"
-            f"TP2: <b>{tp2_price if 'tp2_price' in locals() else 'Monitor'}</b> (70% exit)\n"
-            f"Risk: <b>{actual_risk:.2f}%</b>"
+            f"🔄 <b>Exchange Trailing Stop</b>: 70% trails by {trailing_pct:.1f}%\n"
+            f"Risk: <b>{actual_risk:.2f}%</b>\n"
+            f"⚠️ <b>DISABLE monitor.py</b> to avoid conflicts!"
         )
         
         return trade_details
