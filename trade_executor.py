@@ -914,17 +914,16 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         
         log(f"✅ {symbol} entry executed: {executed_qty} at {avg_entry_price}")
         
-        # Step 7: Place protective orders (SL/TP)
+        # Step 7: Place protective orders (SL only - let monitor handle TP)
         sl_order_id = None
-        tp1_order_id = None
+        # tp1_order_id = None  # Removed - let monitor handle partial exits
         
         # Place stop loss
         if sl_price > 0:
             sl_order_id = await place_stop_loss_order(symbol, direction, executed_qty, sl_price, category)
         
-        # Place take profit
-        if tp1_price > 0:
-            tp1_order_id = await place_take_profit_order(symbol, direction, executed_qty, tp1_price, category)
+        # Don't place TP orders - let monitor.py handle partial exits at TP levels
+        log(f"ℹ️ Skipping TP order placement - monitor.py will handle partial exits")
         
         # Calculate actual risk
         actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
@@ -948,7 +947,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "tp1_pct": tp1_pct,
             "trailing_pct": trailing_pct,
             "sl_order_id": sl_order_id,
-            "tp1_order_id": tp1_order_id,
+            # "tp1_order_id": tp1_order_id,  # Removed - no TP orders placed
             "strategy": strategy,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
@@ -978,7 +977,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             f"Entry: <b>{avg_entry_price}</b>\n"
             f"Quantity: <b>{executed_qty}</b>\n"
             f"SL: <b>{sl_price}</b> | TP: <b>{tp1_price}</b>\n"
-            f"Risk: <b>{actual_risk:.2f}%</b>"
+            f"Risk: <b>{actual_risk:.2f}%</b>\n"
+            f"ℹ️ <i>Monitor will handle partial exits</i>"
         )
         
         return trade_details
