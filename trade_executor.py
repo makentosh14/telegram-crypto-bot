@@ -101,6 +101,18 @@ async def get_account_balance():
         
         return 0
 
+async def get_symbol_price(symbol, category="linear"):
+    try:
+        resp = await signed_request("GET", "/v5/market/tickers", {
+            "category": category,
+            "symbol": symbol
+        })
+        if resp.get("retCode") == 0:
+            return float(resp["result"]["list"][0]["lastPrice"])
+    except:
+        pass
+    return 0
+
 def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending", trend_context=None):
     """
     Use only enhanced SL/TP logic from sl_tp_utils. Fail if unavailable.
@@ -155,7 +167,7 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
         leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
         
         # Calculate risk amount
-        risk_amount = account_balance * risk_pct
+        risk_amount = account_balance * risk_pct * 0.97  # Apply 3% buffer for fees/margin
         
         # Calculate risk per unit (distance from entry to SL)
         risk_per_unit = abs(price - sl_price)
@@ -272,6 +284,14 @@ async def execute_market_entry(symbol, direction, qty, category="linear"):
         side = "Buy" if direction.lower() == "long" else "Sell"
         
         log(f"📤 Sending market order: {side} {qty} {symbol}")
+
+        # Calculate notional size to ensure it meets Bybit's min requirement
+        min_notional_usdt = 5.0  # can be adjusted per exchange min rules
+        notional = qty * await get_symbol_price(symbol)
+
+        if notional < min_notional_usdt:
+            log(f"⚠️ Notional value too low: ${notional:.2f}. Skipping order.")
+            return None
         
         result = await signed_request("POST", "/v5/order/create", {
             "category": category,
