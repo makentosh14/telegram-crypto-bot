@@ -939,38 +939,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             if tp2_qty > 0:
                 tp2_order_id = await place_take_profit_order(symbol, direction, tp2_qty, tp2_price, category)
                 log(f"📊 TP2 order placed: {tp2_qty} units (70% of position) at {tp2_price}")
-        
-async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
-    """Enhanced take profit order placement"""
-    try:
-        side = "Sell" if direction.lower() == "long" else "Buy"
-        
-        log(f"💰 Placing TP order for {symbol}: {side} at {tp_price}")
-        
-        result = await signed_request("POST", "/v5/order/create", {
-            "category": market_type,
-            "symbol": symbol,
-            "side": side,
-            "orderType": "Limit",
-            "qty": str(qty),
-            "price": str(tp_price),
-            "timeInForce": "GTC",
-            "reduceOnly": True
-        })
-        
-        if result.get("retCode") == 0:
-            order_id = result.get("result", {}).get("orderId")
-            log(f"✅ TP order placed: {order_id}")
-            return order_id
-        else:
-            log(f"❌ Failed to place TP order: {result.get('retMsg')}", level="ERROR")
-            return None
-            
-    except Exception as e:
-        log(f"❌ Error placing TP order: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
-        return None
-        
+
         # Step 8: Register trade with monitor system
         # This is crucial - the monitor needs to track this trade for TP1 and trailing
         try:
@@ -1085,6 +1054,37 @@ async def place_take_profit_order(symbol, direction, qty, tp_price, market_type=
             f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
         )
         
+        return None
+        
+async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
+    """Enhanced take profit order placement"""
+    try:
+        side = "Sell" if direction.lower() == "long" else "Buy"
+        
+        log(f"💰 Placing TP order for {symbol}: {side} at {tp_price}")
+        
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": market_type,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Limit",
+            "qty": str(qty),
+            "price": str(tp_price),
+            "timeInForce": "GTC",
+            "reduceOnly": True
+        })
+        
+        if result.get("retCode") == 0:
+            order_id = result.get("result", {}).get("orderId")
+            log(f"✅ TP order placed: {order_id}")
+            return order_id
+        else:
+            log(f"❌ Failed to place TP order: {result.get('retMsg')}", level="ERROR")
+            return None
+            
+    except Exception as e:
+        log(f"❌ Error placing TP order: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
         return None
 
 # Export main functions
