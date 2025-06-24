@@ -701,7 +701,7 @@ async def process_pump_signal(pump_signal, trend_context):
                 symbol=symbol,
                 direction="long",
                 qty=trade['qty'],
-                sl_price=trade['sl']
+                sl_price=trade['sl_price']
             )
             if sl_result.get("retCode") == 0:
                 trade['sl_order_id'] = sl_result.get("result", {}).get("orderId")
@@ -713,9 +713,9 @@ async def process_pump_signal(pump_signal, trend_context):
             score=base_score,
             tf_scores={"range_break_pump": base_score},
             trend=trend_context,
-            entry_price=trade['entry'],
-            sl=trade['sl'],
-            tp1=trade['tp1'],
+            entry_price=trade['entry_price'],
+            sl=trade['sl_price'],
+            tp1=trade['tp1_price'],
             trade_type=trade_type,
             direction="Long",
             trailing_pct=trailing_pct,
@@ -755,13 +755,13 @@ async def process_pump_signal(pump_signal, trend_context):
             symbol=symbol,
             trade_type=trade_type,
             initial_score=base_score,
-            entry_price=trade['entry'],
+            entry_price=trade['entry_price'],
             direction="Long",
             trailing_pct=trailing_pct,
-            tp1_target=trade.get("tp1"),
+            tp1_target=trade.get("tp1_price"),
             tp1_pct=tp1_pct,
-            tp2=trade.get("tp2"),
-            sl=trade.get("sl"),
+            tp2=trade.get("tp2_price"),
+            sl=trade.get("sl_price"),
             qty=trade.get("qty"),
             sl_order_id=trade.get("sl_order_id"),
             exit_tranches=trade.get("exit_tranches"),
@@ -769,7 +769,7 @@ async def process_pump_signal(pump_signal, trend_context):
             range_break_details=details
         )
         
-        log(f"✅ Pump trade executed for {symbol} with SL: {trade['sl']}, TP1: {trade['tp1']}")
+        log(f"✅ Pump trade executed for {symbol} with SL: {trade['sl_price']}, TP1: {trade['tp1_price']}")
     else:
         log(f"❌ Trade execution failed for pump signal {symbol}")
 
@@ -909,9 +909,9 @@ async def process_break_signal(break_signal, trend_context):
             score=base_score,
             tf_scores={"range_break": base_score},
             trend=trend_context,
-            entry_price=trade['entry'],
-            sl=trade['sl'],
-            tp1=trade['tp1'],
+            entry_price=trade['entry_price'],
+            sl=trade['sl_price'],
+            tp1=trade['tp1_price'],
             trade_type=trade_type,
             direction=direction,
             trailing_pct=trailing_pct,
@@ -953,13 +953,13 @@ async def process_break_signal(break_signal, trend_context):
             symbol=symbol,
             trade_type=trade_type,
             initial_score=base_score,
-            entry_price=trade['entry'],
+            entry_price=trade['entry_price'],
             direction=direction,
             trailing_pct=trailing_pct,
-            tp1_target=trade['tp1'],
+            tp1_target=trade['tp1_price'],
             tp1_pct=tp1_pct,
-            tp2=trade.get("tp2"),
-            sl=trade['sl'],
+            tp2=trade.get("tp2_price"),
+            sl=trade['sl_price'],
             qty=trade['qty'],
             sl_order_id=trade.get('sl_order_id'),
             exit_tranches=trade.get("exit_tranches"),
@@ -967,7 +967,7 @@ async def process_break_signal(break_signal, trend_context):
             range_break_details=range_details
         )
         
-        log(f"✅ Range break trade executed for {symbol} with SL: {trade['sl']}, TP1: {trade['tp1']}")
+        log(f"✅ Range break trade executed for {symbol} with SL: {trade['sl_price']}, TP1: {trade['tp1_price']}")
     else:
         log(f"❌ Trade execution failed for range break {symbol}")
 
@@ -1358,21 +1358,21 @@ async def scan_for_new_signals(symbols,trend_context):
             }
 
             if trade:
-                log(f"🛒 Trade placed successfully for {symbol} at {trade['entry']}")
-                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry']} | SL: {trade['sl']} | TP1: {trade['tp1']}")
+                log(f"🛒 Trade placed successfully for {symbol} at {trade['entry_price']}")
+                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry_price']} | SL: {trade['sl_price']} | TP1: {trade['tp1']}")
 
             
                 track_active_trade(
                     symbol=symbol,
                     trade_type=trade_type,
                     initial_score=score,
-                    entry_price=trade['entry'],
+                    entry_price=trade['entry_price'],
                     direction=direction,
                     trailing_pct=trade.get("trailing_pct"),
-                    tp1_target=trade.get("tp1"),  # Store the actual TP1 price
+                    tp1_target=trade.get("tp1_price"),  # Store the actual TP1 price
                     tp1_pct=tp1_pct,             # Store the TP1 percentage used
-                    tp2=trade.get("tp2"),  # Now including TP2 for bigger targets
-                    sl=trade.get("sl"),
+                    tp2=trade.get("tp2_price"),  # Now including TP2 for bigger targets
+                    sl=trade.get("sl_price"),
                     qty=trade.get("qty"),
                     sl_order_id=trade.get("sl_order_id"),
                     exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
@@ -1561,10 +1561,10 @@ async def scan_for_new_signals(symbols,trend_context):
                         entry_price=price,
                         direction=rev_dir,
                         trailing_pct=trailing_pct,
-                        tp1_target=mr_trade.get("tp1"),
+                        tp1_target=mr_trade.get("tp1_price"),
                         tp1_pct=tp1_pct,
-                        tp2=mr_trade.get("tp2"),  # Now including TP2
-                        sl=mr_trade.get("sl"),
+                        tp2=mr_trade.get("tp2_price"),  # Now including TP2
+                        sl=mr_trade.get("sl_price"),
                         qty=mr_trade.get("qty"),
                         sl_order_id=mr_trade.get("sl_order_id"),
                         exit_tranches=mr_trade.get("exit_tranches")
@@ -1639,10 +1639,10 @@ async def scan_for_new_signals(symbols,trend_context):
                         entry_price=price,
                         direction=bo_dir,
                         trailing_pct=trailing_pct,
-                        tp1_target=bo_trade.get("tp1"),
+                        tp1_target=bo_trade.get("tp1_price"),
                         tp1_pct=tp1_pct,
-                        tp2=bo_trade.get("tp2"),  # Now including TP2
-                        sl=bo_trade.get("sl"),
+                        tp2=bo_trade.get("tp2_price"),  # Now including TP2
+                        sl=bo_trade.get("sl_price"),
                         qty=bo_trade.get("qty"),
                         sl_order_id=bo_trade.get("sl_order_id"),
                         exit_tranches=bo_trade.get("exit_tranches"),
