@@ -149,7 +149,7 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
                                     candles_by_tf, trade_type, strategy, confidence,
                                     risk_pct=None, market_type="linear"):
     """
-    FIXED - Calculate position size with proper balance validation and margin requirements
+    FIXED - Calculate position size with much smaller, safer risk percentages
     
     Args:
         symbol: Trading symbol 
@@ -176,14 +176,17 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
             log(f"❌ Entry price equals SL price: {price}", level="ERROR")
             return 0
         
-        # Use fixed risk percentages based on trade type if not provided
+        # FIXED: Use much smaller, safer risk percentages
         if risk_pct is None:
             risk_map = {
-                "Scalp": 0.03,    # 3%
-                "Intraday": 0.06, # 6% 
-                "Swing": 0.04     # 4%
+                "Scalp": 0.02,    # 2% - much smaller than before
+                "Intraday": 0.03, # 3% - much smaller than before
+                "Swing": 0.025    # 2.5% - much smaller than before
             }
-            risk_pct = risk_map.get(trade_type, 0.06)
+            risk_pct = risk_map.get(trade_type, 0.03)
+        
+        # SAFETY CAP: Never risk more than 5% regardless of what's passed
+        risk_pct = min(risk_pct, 0.05)
         
         # Calculate SL distance percentage
         sl_distance_pct = abs((price - sl_price) / price)
@@ -191,20 +194,21 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
         # Set leverage based on market type
         leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
         
-        log(f"📊 FIXED Position sizing for {symbol}:")
+        log(f"📊 SAFE Position sizing for {symbol}:")
         log(f"   Trade Type: {trade_type}")
         log(f"   Account Balance: ${account_balance:.2f}")
-        log(f"   FIXED Risk %: {risk_pct*100:.2f}%")
+        log(f"   SAFE Risk %: {risk_pct*100:.2f}%")
         log(f"   Entry: {price:.8f}, SL: {sl_price:.8f}")
         log(f"   SL Distance: {sl_distance_pct*100:.2f}%")
         log(f"   Leverage: {leverage}x")
         
-        # FIXED: Calculate risk amount with safety buffer for fees and margin
-        safety_buffer = 0.85  # Use only 85% of available balance to account for fees/margin
+        # FIXED: Much more conservative calculation
+        # Use only 50% of balance for safety buffer (not 85%)
+        safety_buffer = 0.50  # Use only 50% of available balance
         usable_balance = account_balance * safety_buffer
         risk_amount = usable_balance * risk_pct
         
-        log(f"   Usable Balance (85%): ${usable_balance:.2f}")
+        log(f"   Usable Balance (50%): ${usable_balance:.2f}")
         log(f"   Risk Amount: ${risk_amount:.2f}")
         
         # Calculate risk per unit (absolute dollar amount per unit)
@@ -215,7 +219,7 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
         position_size = risk_amount / risk_per_unit
         log(f"   Calculated Position Size: {position_size:.8f} units")
         
-        # FIXED: For futures, check required margin instead of applying leverage to position size
+        # FIXED: For futures, ensure required margin is very conservative
         if market_type == "linear":
             # Calculate required margin for this position
             position_value = position_size * price
@@ -224,12 +228,14 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
             log(f"   Position Value: ${position_value:.2f}")
             log(f"   Required Margin: ${required_margin:.2f}")
             
-            # Ensure we have enough margin available
-            if required_margin > usable_balance:
-                # Reduce position size to fit available margin
-                max_position_value = usable_balance * leverage
+            # SAFETY CHECK: Never use more than 20% of balance for margin
+            max_allowed_margin = account_balance * 0.20  # Only 20% of total balance
+            
+            if required_margin > max_allowed_margin:
+                # Drastically reduce position size to fit conservative margin limit
+                max_position_value = max_allowed_margin * leverage
                 position_size = max_position_value / price
-                log(f"   ⚠️ Reduced position size to fit margin: {position_size:.8f} units")
+                log(f"   ⚠️ SAFETY: Reduced position size to fit 20% margin limit: {position_size:.8f} units")
                 
                 # Recalculate final values
                 position_value = position_size * price
@@ -250,16 +256,29 @@ async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance,
             log(f"⚠️ Position size {rounded_qty} below minimum {min_qty}", level="WARN")
             return 0
         
-        # Final validation - ensure we're not risking too much
+        # FINAL SAFETY CHECK - ensure we're not risking too much
         final_risk_amount = rounded_qty * risk_per_unit
         final_risk_pct = final_risk_amount / account_balance
         
-        if final_risk_pct > 0.15:  # Never risk more than 15% of account
-            log(f"⚠️ Final risk too high: {final_risk_pct*100:.1f}%, capping at 15%", level="WARN")
-            max_risk_amount = account_balance * 0.15
+        if final_risk_pct > 0.08:  # Never risk more than 8% of account
+            log(f"⚠️ Final risk too high: {final_risk_pct*100:.1f}%, capping at 8%", level="WARN")
+            max_risk_amount = account_balance * 0.08
             rounded_qty = round_qty(symbol, max_risk_amount / risk_per_unit)
         
-        log(f"   Final Position Size: {rounded_qty:.8f} units")
+        # ABSOLUTE FINAL CHECK: Position value should never exceed 30% of account
+        final_position_value = rounded_qty * price
+        final_margin_required = final_position_value / leverage if market_type == "linear" else final_position_value
+        
+        if final_margin_required > account_balance * 0.30:
+            log(f"⚠️ Position too large: ${final_margin_required:.2f} > 30% of ${account_balance:.2f}", level="WARN")
+            max_margin = account_balance * 0.30
+            max_position_value = max_margin * leverage if market_type == "linear" else max_margin
+            rounded_qty = round_qty(symbol, max_position_value / price)
+        
+        log(f"   FINAL Position Size: {rounded_qty:.8f} units")
+        log(f"   FINAL Margin Required: ${(rounded_qty * price / leverage if market_type == 'linear' else rounded_qty * price):.2f}")
+        log(f"   FINAL Risk Amount: ${rounded_qty * risk_per_unit:.2f}")
+        log(f"   FINAL Risk %: {(rounded_qty * risk_per_unit / account_balance)*100:.2f}%")
         
         return rounded_qty
         
@@ -468,6 +487,9 @@ async def cancel_all_orders(symbol, market_type="linear"):
         log(f"❌ Error cancelling orders: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
         return False
+
+# Note: execute_trade function removed - only execute_trade_if_valid is needed
+# The main.py and other modules use execute_trade_if_valid exclusively
 
 async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
     """Enhanced stop loss order placement"""
@@ -977,6 +999,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
 # Export main functions
 __all__ = [
+    'execute_trade',
     'execute_trade_if_valid',  # Added missing function
     'get_account_balance',
     'calculate_enhanced_quantity',
