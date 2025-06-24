@@ -12,7 +12,7 @@ MAX_RISK_PER_TRADE = 0.05      # 5% maximum risk per trade
 MIN_RISK_PER_TRADE = 0.005     # 0.5% minimum risk per trade
 RISK_FREE_RATE = 0.04          # 4% annualized (for Kelly calculations)
 MAX_DAILY_RISK = 0.10          # 10% maximum daily risk
-MAX_DRAWDOWN_PAUSE = 0.15      # 15% drawdown triggers trading pause
+MAX_DRAWDOWN_PAUSE = 1.0      # 15% drawdown triggers trading pause
 
 # Volatility bands for adjusting position size
 VOLATILITY_BANDS = {
