@@ -20,6 +20,7 @@ from pre_trade_validator import pre_trade_validator
 from stealth_detector import detect_stealth_accumulation_advanced
 from range_break_detector import range_break_detector
 from exit_manager import calculate_range_based_exit_levels
+from monitor import track_active_trade
 
 # Enhanced imports from position_manager.py
 from risk_manager import (
@@ -968,122 +969,6 @@ async def place_take_profit_order(symbol, direction, qty, tp_price, market_type=
     except Exception as e:
         log(f"❌ Error placing TP order: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
-        return None
-        
-        # Step 8: Register trade with monitor system
-        # This is crucial - the monitor needs to track this trade for TP1 and trailing
-        try:
-            from monitor import track_active_trade
-            
-            # Calculate TP1 target for monitor
-            trade_type = signal_data.get("trade_type", "Intraday")
-            risk_percentages = {
-                "Scalp": {"tp1_pct": 1.2, "trailing_pct": 0.4},
-                "Intraday": {"tp1_pct": 2.0, "trailing_pct": 1.0}, 
-                "Swing": {"tp1_pct": 5.0, "trailing_pct": 1.5}
-            }
-            
-            params = risk_percentages.get(trade_type, risk_percentages["Intraday"])
-            
-            if direction.lower() == "long":
-                tp1_target = avg_entry_price * (1 + params["tp1_pct"]/100)
-            else:
-                tp1_target = avg_entry_price * (1 - params["tp1_pct"]/100)
-            
-            # Register with monitor for TP1 detection and trailing
-            track_active_trade(
-                symbol=symbol,
-                trade_type=trade_type,
-                initial_score=score,
-                entry_price=avg_entry_price,
-                direction=direction,
-                trailing_pct=params["trailing_pct"],
-                tp1_target=tp1_target,
-                tp1_pct=params["tp1_pct"],
-                sl=sl_price,
-                sl_order_id=sl_order_id,
-                qty=executed_qty
-            )
-            
-            log(f"✅ Trade registered with monitor: TP1={tp1_target:.6f}, Trailing={params['trailing_pct']}%")
-            
-        except Exception as e:
-            log(f"⚠️ Failed to register with monitor: {e}", level="WARN")
-            # Trade still executed, just monitor integration failed
-        
-        # Calculate actual risk
-        actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
-        
-        # Log successful execution
-        log(f"🎯 Trade setup complete for {symbol}")
-        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP1 Target: {tp1_target:.6f}")
-        log(f"   Quantity: {executed_qty} | Risk: {actual_risk:.2f}%")
-        log(f"   Monitor will handle: TP1 detection → Partial exit → Trailing SL")
-        
-        # Return comprehensive trade details
-        trade_details = {
-            "symbol": symbol,
-            "direction": direction,
-            "trade_type": trade_type,
-            "entry_price": avg_entry_price,
-            "qty": executed_qty,
-            "original_qty": executed_qty,  # For DCA tracking
-            "sl_price": sl_price,
-            "tp1_price": tp1_target,  # Use calculated TP1 target
-            "sl_pct": sl_pct,
-            "tp1_pct": params["tp1_pct"],
-            "trailing_pct": params["trailing_pct"],
-            "sl_order_id": sl_order_id,
-            "monitor_managed": True,  # Flag that monitor handles TP/trailing
-            "strategy": strategy,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
-            "execution_type": "TWAP" if qty >= 3 else "Market",
-            "actual_risk_pct": actual_risk,
-            "confidence": confidence,
-            "score": score,
-            "regime": regime,
-            "indicator_scores": signal_data.get("indicator_scores", {}),
-            "used_indicators": signal_data.get("used_indicators", []),
-            "market_type": category,
-            "range_break_details": signal_data.get("range_break_details"),
-            "exit_strategy": signal_data.get("exit_strategy", "standard"),
-            "trailing_multiplier": signal_data.get("trailing_multiplier", 1.0),
-            "exit_tranches": signal_data.get("exit_tranches", [0.4, 0.3, 0.3])
-        }
-        
-        # Log trade execution
-        write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
-        
-        # Send telegram notification with WARNING about monitor
-        await send_telegram_message(
-            f"✅ <b>Trade Executed</b>\n"
-            f"Symbol: <b>{symbol}</b>\n"
-            f"Direction: <b>{direction.upper()}</b>\n"
-            f"Strategy: <b>{strategy}</b>\n"
-            f"Entry: <b>{avg_entry_price}</b>\n"
-            f"Quantity: <b>{executed_qty}</b>\n"
-            f"SL: <b>{sl_price}</b>\n"
-            f"TP1: <b>{tp1_price}</b> (30% exit)\n"
-            f"🔄 <b>Exchange Trailing Stop</b>: 70% trails by {trailing_pct:.1f}%\n"
-            f"Risk: <b>{actual_risk:.2f}%</b>\n"
-            f"⚠️ <b>DISABLE monitor.py</b> to avoid conflicts!"
-        )
-        
-        return trade_details
-        
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
-        log(f"Stack trace: {error_trace}", level="ERROR")
-        
-        EXECUTION_STATES[exec_id]["stage"] = "error"
-        EXECUTION_STATES[exec_id]["error"] = str(e)
-        
-        await send_telegram_message(
-            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
-        )
-        
         return None
 
 # Export main functions
