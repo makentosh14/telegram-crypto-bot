@@ -914,16 +914,31 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         
         log(f"✅ {symbol} entry executed: {executed_qty} at {avg_entry_price}")
         
-        # Step 7: Place protective orders (SL only - let monitor handle TP)
+        # Step 7: Place protective orders (SL + Partial TP Orders)
         sl_order_id = None
-        # tp1_order_id = None  # Removed - let monitor handle partial exits
+        tp1_order_id = None
+        tp2_order_id = None
         
         # Place stop loss
         if sl_price > 0:
             sl_order_id = await place_stop_loss_order(symbol, direction, executed_qty, sl_price, category)
         
-        # Don't place TP orders - let monitor.py handle partial exits at TP levels
-        log(f"ℹ️ Skipping TP order placement - monitor.py will handle partial exits")
+        # Place PARTIAL TP orders instead of letting monitor handle it
+        if tp1_price > 0:
+            # TP1: Exit 30% of position
+            tp1_qty = round_qty(symbol, executed_qty * 0.30)
+            if tp1_qty > 0:
+                tp1_order_id = await place_take_profit_order(symbol, direction, tp1_qty, tp1_price, category)
+                log(f"📊 TP1 order placed: {tp1_qty} units (30% of position) at {tp1_price}")
+            
+            # TP2: Exit remaining 70% at higher level
+            tp2_price = tp1_price * 1.5 if direction.lower() == "long" else tp1_price * 0.5
+            tp2_qty = executed_qty - tp1_qty
+            if tp2_qty > 0:
+                tp2_order_id = await place_take_profit_order(symbol, direction, tp2_qty, tp2_price, category)
+                log(f"📊 TP2 order placed: {tp2_qty} units (70% of position) at {tp2_price}")
+        
+        log(f"✅ Protective orders placed: SL={sl_order_id}, TP1={tp1_order_id}, TP2={tp2_order_id}")
         
         # Calculate actual risk
         actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
@@ -947,7 +962,8 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             "tp1_pct": tp1_pct,
             "trailing_pct": trailing_pct,
             "sl_order_id": sl_order_id,
-            # "tp1_order_id": tp1_order_id,  # Removed - no TP orders placed
+            "tp1_order_id": tp1_order_id,
+            "tp2_order_id": tp2_order_id,
             "strategy": strategy,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
@@ -976,9 +992,10 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             f"Strategy: <b>{strategy}</b>\n"
             f"Entry: <b>{avg_entry_price}</b>\n"
             f"Quantity: <b>{executed_qty}</b>\n"
-            f"SL: <b>{sl_price}</b> | TP: <b>{tp1_price}</b>\n"
-            f"Risk: <b>{actual_risk:.2f}%</b>\n"
-            f"ℹ️ <i>Monitor will handle partial exits</i>"
+            f"SL: <b>{sl_price}</b>\n"
+            f"TP1: <b>{tp1_price}</b> (30% exit)\n"
+            f"TP2: <b>{tp2_price if 'tp2_price' in locals() else 'Monitor'}</b> (70% exit)\n"
+            f"Risk: <b>{actual_risk:.2f}%</b>"
         )
         
         return trade_details
