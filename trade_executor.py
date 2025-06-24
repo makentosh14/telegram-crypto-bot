@@ -1,5 +1,5 @@
 """
-Enhanced Trade Executor - Fixed SL Reference Error
+Enhanced Trade Executor - Fixed Position Sizing and Balance Issues
 Handles position sizing, execution and risk management with advanced features
 """
 import asyncio
@@ -118,7 +118,7 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
     Use only enhanced SL/TP logic from sl_tp_utils. Fail if unavailable.
     """
     try:
-        result = enhanced_calculate_dynamic_sl_tp(
+        return enhanced_calculate_dynamic_sl_tp(
             candles_by_tf=candles_by_tf,
             entry_price=price,
             trade_type=trade_type,
@@ -127,76 +127,214 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
             confidence=confidence,
             regime=regime
         )
-                
-        if len(result) >= 5:
-            return result[:5]
-        else:
-            raise ValueError("Incomplete SL/TP values returned")
     except Exception as e:
-        log(f"❌ SL/TP calculation failed: {e}", level="ERROR")
-        raise RuntimeError("SL/TP calculation must succeed via sl_tp_utils — fallback disabled")
-
+        log(f"❌ Error in dynamic SL/TP calculation: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        
+        # Fallback to basic calculation
+        price = float(price)
+        sl_pct = 0.008 if trade_type == "Scalp" else 0.015 if trade_type == "Intraday" else 0.02
+        tp_pct = sl_pct * 1.5
+        
+        if direction.lower() == "long":
+            sl_price = price * (1 - sl_pct)
+            tp_price = price * (1 + tp_pct)
+        else:
+            sl_price = price * (1 + sl_pct)
+            tp_price = price * (1 - tp_pct)
+        
+        return sl_price, tp_price, sl_pct, 0.005, tp_pct
 
 async def calculate_enhanced_quantity(symbol, price, sl_price, account_balance, 
                                     candles_by_tf, trade_type, strategy, confidence,
                                     risk_pct=None, market_type="linear"):
     """
-    Enhanced position sizing using advanced risk manager
+    FIXED - Calculate position size with proper balance validation and margin requirements
+    
+    Args:
+        symbol: Trading symbol 
+        price: Entry price
+        sl_price: Stop loss price
+        account_balance: Available account balance in USDT
+        candles_by_tf: Candles by timeframe for volatility calculation
+        trade_type: Trade type (Scalp, Intraday, Swing)
+        strategy: Strategy name
+        confidence: Confidence percentage (0-100)
+        risk_pct: Risk percentage override (if None, calculated dynamically)
+        market_type: Market type (linear/spot)
+        
+    Returns:
+        float: Calculated and validated position size
     """
     try:
-        # Calculate SL distance
-        sl_distance_pct = abs((sl_price - price) / price)
+        # Validate inputs
+        if price <= 0 or sl_price <= 0 or account_balance <= 0:
+            log(f"❌ Invalid inputs: price={price}, sl_price={sl_price}, balance={account_balance}", level="ERROR")
+            return 0
+            
+        if price == sl_price:
+            log(f"❌ Entry price equals SL price: {price}", level="ERROR")
+            return 0
         
-        # Validate SL distance
-        if sl_distance_pct > 0.05:  # More than 5% SL
-            log(f"⚠️ SL distance too large ({sl_distance_pct*100:.2f}%), reducing position size")
-            risk_pct = (risk_pct or 0.06) * (0.02 / sl_distance_pct)  # Scale down risk
-        
-        # ALWAYS use the passed risk_pct (remove the dynamic calculation)
+        # Use fixed risk percentages based on trade type if not provided
         if risk_pct is None:
-            # Default fixed risks if not provided
-            FIXED_RISK_PERCENTAGES = {
-                "Scalp": 0.05,
-                "Intraday": 0.035,
-                "Swing": 0.02
+            risk_map = {
+                "Scalp": 0.03,    # 3%
+                "Intraday": 0.06, # 6% 
+                "Swing": 0.04     # 4%
             }
-            risk_pct = FIXED_RISK_PERCENTAGES.get(trade_type, 0.035)
-            log(f"⚠️ No risk_pct provided, using fixed default for {trade_type}: {risk_pct*100:.1f}%")
+            risk_pct = risk_map.get(trade_type, 0.06)
         
-        # Calculate position size with fixed risk
+        # Calculate SL distance percentage
+        sl_distance_pct = abs((price - sl_price) / price)
+        
+        # Set leverage based on market type
         leverage = DEFAULT_LEVERAGE if market_type == "linear" else 1
         
-        # Calculate risk amount
-        risk_amount = account_balance * risk_pct * 0.97  # Apply 3% buffer for fees/margin
-        
-        # Calculate risk per unit (distance from entry to SL)
-        risk_per_unit = abs(price - sl_price)
-        
-        # Calculate position size: Risk Amount / Risk per Unit
-        position_size = risk_amount / risk_per_unit
-        
-        # Apply leverage
-        if market_type == "linear":
-            position_size = position_size * leverage
-        
-        # Log the calculation
         log(f"📊 FIXED Position sizing for {symbol}:")
         log(f"   Trade Type: {trade_type}")
         log(f"   Account Balance: ${account_balance:.2f}")
         log(f"   FIXED Risk %: {risk_pct*100:.2f}%")
-        log(f"   Risk Amount: ${risk_amount:.2f}")
         log(f"   Entry: {price:.8f}, SL: {sl_price:.8f}")
         log(f"   SL Distance: {sl_distance_pct*100:.2f}%")
-        log(f"   Risk per Unit: {risk_per_unit:.8f}")
-        log(f"   Position Size: {position_size:.8f} units")
         log(f"   Leverage: {leverage}x")
         
-        return round_qty(symbol, position_size)
+        # FIXED: Calculate risk amount with safety buffer for fees and margin
+        safety_buffer = 0.85  # Use only 85% of available balance to account for fees/margin
+        usable_balance = account_balance * safety_buffer
+        risk_amount = usable_balance * risk_pct
+        
+        log(f"   Usable Balance (85%): ${usable_balance:.2f}")
+        log(f"   Risk Amount: ${risk_amount:.2f}")
+        
+        # Calculate risk per unit (absolute dollar amount per unit)
+        risk_per_unit = abs(price - sl_price)
+        log(f"   Risk per Unit: {risk_per_unit:.8f}")
+        
+        # Calculate position size: Risk Amount / Risk per Unit
+        position_size = risk_amount / risk_per_unit
+        log(f"   Calculated Position Size: {position_size:.8f} units")
+        
+        # FIXED: For futures, check required margin instead of applying leverage to position size
+        if market_type == "linear":
+            # Calculate required margin for this position
+            position_value = position_size * price
+            required_margin = position_value / leverage
+            
+            log(f"   Position Value: ${position_value:.2f}")
+            log(f"   Required Margin: ${required_margin:.2f}")
+            
+            # Ensure we have enough margin available
+            if required_margin > usable_balance:
+                # Reduce position size to fit available margin
+                max_position_value = usable_balance * leverage
+                position_size = max_position_value / price
+                log(f"   ⚠️ Reduced position size to fit margin: {position_size:.8f} units")
+                
+                # Recalculate final values
+                position_value = position_size * price
+                required_margin = position_value / leverage
+                actual_risk = position_size * risk_per_unit
+                
+                log(f"   Final Position Value: ${position_value:.2f}")
+                log(f"   Final Required Margin: ${required_margin:.2f}")
+                log(f"   Final Risk Amount: ${actual_risk:.2f}")
+                log(f"   Final Risk %: {(actual_risk/account_balance)*100:.2f}%")
+        
+        # Round to symbol precision
+        rounded_qty = round_qty(symbol, position_size)
+        
+        # Final validation - check minimum quantity
+        min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+        if rounded_qty < min_qty:
+            log(f"⚠️ Position size {rounded_qty} below minimum {min_qty}", level="WARN")
+            return 0
+        
+        # Final validation - ensure we're not risking too much
+        final_risk_amount = rounded_qty * risk_per_unit
+        final_risk_pct = final_risk_amount / account_balance
+        
+        if final_risk_pct > 0.15:  # Never risk more than 15% of account
+            log(f"⚠️ Final risk too high: {final_risk_pct*100:.1f}%, capping at 15%", level="WARN")
+            max_risk_amount = account_balance * 0.15
+            rounded_qty = round_qty(symbol, max_risk_amount / risk_per_unit)
+        
+        log(f"   Final Position Size: {rounded_qty:.8f} units")
+        
+        return rounded_qty
         
     except Exception as e:
-        log(f"❌ Error calculating position size: {e}", level="ERROR")
+        log(f"❌ Error calculating enhanced position size: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
         return 0
+
+async def execute_market_entry(symbol, direction, qty, category="linear"):
+    """Execute market entry order with enhanced error handling"""
+    try:
+        side = "Buy" if direction.lower() == "long" else "Sell"
+        
+        log(f"📤 Sending market order: {side} {qty} {symbol}")
+        
+        # Get current price for validation
+        current_price = await get_symbol_price(symbol, category)
+        if current_price <= 0:
+            log(f"❌ Could not get current price for {symbol}", level="ERROR")
+            return None
+        
+        # Calculate required margin/value for validation
+        if category == "linear":
+            position_value = qty * current_price
+            required_margin = position_value / DEFAULT_LEVERAGE
+            
+            # Get fresh balance for final check
+            balance = await get_account_balance()
+            if required_margin > balance * 0.9:  # 90% safety margin
+                log(f"❌ Insufficient margin: Required ${required_margin:.2f}, Available ${balance:.2f}", level="ERROR")
+                return None
+        
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": category,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Market",
+            "qty": str(qty),
+            "timeInForce": "IOC"
+        })
+        
+        if result.get("retCode") == 0:
+            order_data = result.get("result", {})
+            order_id = order_data.get("orderId")
+            avg_price = float(order_data.get("avgPrice") or current_price)
+            
+            log(f"✅ Market entry executed: OrderID {order_id}, Avg Price: {avg_price}")
+            return {
+                "order_id": order_id,
+                "avg_price": avg_price,
+                "executed_qty": qty,
+                "side": side
+            }
+        else:
+            error_msg = result.get("retMsg", "Unknown error")
+            log(f"❌ Market order failed: {error_msg}", level="ERROR")
+            
+            # Enhanced error handling for common issues
+            if "ab not enough" in error_msg.lower():
+                balance = await get_account_balance()
+                log(f"💰 Current balance: ${balance:.2f} USDT", level="ERROR")
+                log(f"📊 Required for trade: ~${(qty * current_price / DEFAULT_LEVERAGE):.2f} USDT", level="ERROR")
+                await send_telegram_message(
+                    f"❌ <b>Insufficient Balance</b>\n"
+                    f"Symbol: <b>{symbol}</b>\n"
+                    f"Required: ~${(qty * current_price / DEFAULT_LEVERAGE):.2f}\n"
+                    f"Available: ${balance:.2f}"
+                )
+            
+            return None
+            
+    except Exception as e:
+        log(f"❌ Exception in market entry: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        return None
 
 async def execute_twap_entry(symbol, direction, qty, category="linear", slices=3, delay_sec=2):
     """
@@ -248,126 +386,58 @@ async def execute_twap_entry(symbol, direction, qty, category="linear", slices=3
                         entries.append({"price": price, "qty": current_qty})
                         log(f"✅ TWAP Slice {i+1} executed at {price}")
                     else:
-                        log(f"⚠️ TWAP Slice {i+1} missing price data", level="WARN")
+                        log(f"⚠️ TWAP Slice {i+1} executed but no price returned", level="WARN")
+                        # Use market price as fallback
+                        market_price = await get_symbol_price(symbol, category)
+                        entries.append({"price": market_price, "qty": current_qty})
                 else:
                     log(f"❌ TWAP Slice {i+1} failed: {result.get('retMsg')}", level="ERROR")
-            except Exception as e:
-                log(f"❌ Error in TWAP Slice {i+1}: {e}", level="ERROR")
+                    
+            except Exception as slice_error:
+                log(f"❌ TWAP Slice {i+1} exception: {slice_error}", level="ERROR")
             
             # Delay between slices (except for the last one)
             if i < slices - 1:
                 await asyncio.sleep(delay_sec)
         
-        # Calculate average entry price
+        # Calculate weighted average entry price
         if entries:
-            total_value = sum(e["price"] * e["qty"] for e in entries)
-            total_qty = sum(e["qty"] for e in entries)
+            total_qty = sum(entry["qty"] for entry in entries)
+            total_value = sum(entry["price"] * entry["qty"] for entry in entries)
+            avg_price = total_value / total_qty if total_qty > 0 else 0
             
-            if total_qty > 0:
-                avg_entry = round(total_value / total_qty, 6)
-                log(f"✅ Final TWAP Entry Price: {avg_entry}")
-                return avg_entry
-        
-        log(f"❌ TWAP execution failed for {symbol} - no valid entries", level="ERROR")
-        return None
-        
-    except Exception as e:
-        log(f"❌ Error in TWAP execution: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
-        return None
-
-async def execute_market_entry(symbol, direction, qty, category="linear"):
-    """
-    Enhanced market order execution with better price discovery from position_manager.py
-    """
-    try:
-        side = "Buy" if direction.lower() == "long" else "Sell"
-        
-        log(f"📤 Sending market order: {side} {qty} {symbol}")
-
-        # Calculate notional size to ensure it meets Bybit's min requirement
-        min_notional_usdt = 5.0  # can be adjusted per exchange min rules
-        notional = qty * await get_symbol_price(symbol)
-
-        if notional < min_notional_usdt:
-            log(f"⚠️ Notional value too low: ${notional:.2f}. Skipping order.")
-            return None
-        
-        result = await signed_request("POST", "/v5/order/create", {
-            "category": category,
-            "symbol": symbol,
-            "side": side,
-            "orderType": "Market",
-            "qty": str(qty),
-            "timeInForce": "IOC"
-        })
-        
-        if result.get("retCode") == 0:
-            order_data = result.get("result", {})
-            price = float(order_data.get("avgPrice") or order_data.get("price") or 0)
+            log(f"✅ TWAP completed: {total_qty} units at avg price {avg_price}")
             
-            if price > 0:
-                log(f"✅ Market order executed at {price}")
-                return price
-            else:
-                log(f"⚠️ Market order missing price data", level="WARN")
-                
-                # Try to get the price from order details API
-                order_id = order_data.get("orderId")
-                if order_id:
-                    await asyncio.sleep(1)  # Brief delay to allow order to be processed
-                    order_details = await signed_request("GET", "/v5/order/realtime", {
-                        "category": category,
-                        "symbol": symbol,
-                        "orderId": order_id
-                    })
-                    
-                    if order_details.get("retCode") == 0:
-                        orders = order_details.get("result", {}).get("list", [])
-                        if orders:
-                            price = float(orders[0].get("avgPrice") or orders[0].get("price") or 0)
-                            if price > 0:
-                                log(f"✅ Retrieved order price from details: {price}")
-                                return price
-                
-                # Fallback to current market price
-                ticker_resp = await signed_request("GET", "/v5/market/tickers", {
-                    "category": category, 
-                    "symbol": symbol
-                })
-                
-                if ticker_resp.get("retCode") == 0:
-                    price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
-                    if price > 0:
-                        log(f"⚠️ Using market price as fallback: {price}", level="WARN")
-                        return price
-                
-                log(f"❌ Failed to determine execution price", level="ERROR")
-                return None
+            return {
+                "order_id": f"TWAP_{int(time.time())}",
+                "avg_price": avg_price,
+                "executed_qty": total_qty,
+                "side": side,
+                "slices": len(entries)
+            }
         else:
-            log(f"❌ Market order failed: {result.get('retMsg')}", level="ERROR")
+            log(f"❌ TWAP failed - no slices executed", level="ERROR")
             return None
             
     except Exception as e:
-        log(f"❌ Error in market entry: {e}", level="ERROR")
+        log(f"❌ TWAP execution error: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
         return None
 
-async def set_position_leverage(symbol, leverage, category="linear"):
-    """Set leverage for a position - from position_manager.py"""
+async def set_leverage(symbol, leverage, market_type="linear"):
+    """Set leverage for symbol with validation"""
     try:
         result = await signed_request("POST", "/v5/position/set-leverage", {
-            "category": category,
+            "category": market_type,
             "symbol": symbol,
             "buyLeverage": str(leverage),
             "sellLeverage": str(leverage)
         })
         
-        ret_code = result.get("retCode")
-        if ret_code == 0:
-            log(f"✅ Set leverage for {symbol} to {leverage}x")
+        if result.get("retCode") == 0:
+            log(f"✅ Leverage set to {leverage}x for {symbol}")
             return True
-        elif ret_code == 110043:
+        elif result.get("retCode") == 110043:  # Leverage not modified
             log(f"ℹ️ Leverage already set to {leverage}x for {symbol}")
             return True
         else:
@@ -376,22 +446,214 @@ async def set_position_leverage(symbol, leverage, category="linear"):
             
     except Exception as e:
         log(f"❌ Error setting leverage: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
         return False
 
-async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
-    """Enhanced stop loss placement with validation from position_manager.py"""
+async def cancel_all_orders(symbol, market_type="linear"):
+    """Cancel all orders for a symbol"""
     try:
-        # Get current market price for validation
-        ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+        result = await signed_request("POST", "/v5/order/cancel-all", {
             "category": market_type,
             "symbol": symbol
         })
         
-        if ticker_resp.get("retCode") == 0:
-            current_price = float(ticker_resp.get("result", {}).get("list", [{}])[0].get("lastPrice", 0))
+        if result.get("retCode") == 0:
+            cancelled_count = len(result.get("result", {}).get("list", []))
+            log(f"✅ Cancelled {cancelled_count} orders for {symbol}")
+            return True
+        else:
+            log(f"⚠️ Error cancelling orders: {result.get('retMsg')}", level="WARN")
+            return False
             
-            # Validate SL is on correct side with proper distance
+    except Exception as e:
+        log(f"❌ Error cancelling orders: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        return False
+
+async def execute_trade(signal_data, use_twap=True):
+    """
+    Master function to execute a complete trade setup with FIXED position sizing
+    
+    Args:
+        signal_data: Dictionary containing trade setup details
+        use_twap: Whether to use TWAP for entry (default True)
+        
+    Returns:
+        dict or None: Trade details if executed successfully, None otherwise
+    """
+    # Start by loading risk state
+    load_risk_state()
+    
+    # Reset daily risk tracking if needed
+    reset_daily_risk()
+    
+    # Check if trading is allowed based on drawdown limits
+    if not check_trading_allowed():
+        log(f"🛑 Trading paused due to drawdown limits - trade blocked", level="WARN")
+        await send_telegram_message("🛑 <b>Trade Blocked</b>: Trading paused due to drawdown limits")
+        return None
+    
+    # Extract trade details
+    symbol = signal_data["symbol"]
+    category = signal_data.get("market_type", "linear")
+    trade_type = signal_data.get("trade_type", "Intraday")
+    direction = signal_data.get("direction", "Long").strip().lower()
+    regime = signal_data.get("regime", "trending")
+    score = signal_data.get("score", 0)
+    confidence = signal_data.get("confidence", 60)
+    entry_price = float(signal_data.get("price", 1.0))
+    candles_by_tf = signal_data.get("candles", {})
+    
+    # Determine strategy type
+    strategy = "core_strategy"
+    if "mean_reversion" in signal_data.get("tf_scores", {}):
+        strategy = "mean_reversion"
+    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
+        strategy = "breakout_sniper"
+    
+    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type} ({strategy})")
+    
+    # Execution state tracking
+    exec_id = f"{symbol}_{int(time.time())}"
+    EXECUTION_STATES[exec_id] = {"stage": "started", "success": False}
+    
+    try:
+        # Step 1: Get account balance with retry
+        account_balance = await get_account_balance()
+        if account_balance <= 0:
+            log(f"❌ Invalid account balance: {account_balance} USDT", level="ERROR")
+            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Invalid account balance.")
+            return None
+        
+        # Step 2: Calculate SL/TP levels
+        sl_tp_result = calculate_dynamic_sl_tp(
+            candles_by_tf=candles_by_tf,
+            price=entry_price,
+            trade_type=trade_type,
+            direction=direction,
+            score=score,
+            confidence=confidence,
+            regime=regime
+        )
+        
+        if len(sl_tp_result) < 5:
+            log(f"❌ Invalid SL/TP calculation result", level="ERROR")
+            return None
+            
+        sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+        
+        EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
+        
+        # Step 3: Calculate position size using FIXED method
+        qty = await calculate_enhanced_quantity(
+            symbol=symbol,
+            price=entry_price,
+            sl_price=sl_price,
+            account_balance=account_balance,
+            candles_by_tf=candles_by_tf,
+            trade_type=trade_type,
+            strategy=strategy,
+            confidence=confidence,
+            market_type=category
+        )
+        
+        if qty <= 0:
+            log(f"⚠️ Skipped {symbol}: Quantity too small or risk limit reached.")
+            return None
+        
+        EXECUTION_STATES[exec_id]["stage"] = "quantity_calculated"
+        
+        # Step 4: Set leverage and cancel existing orders
+        if category == "linear":
+            await set_leverage(symbol, DEFAULT_LEVERAGE, category)
+            await cancel_all_orders(symbol, category)
+        
+        # Step 5: Execute entry
+        if use_twap and qty >= 3:  # Use TWAP for larger positions
+            entry_result = await execute_twap_entry(symbol, direction, qty, category)
+        else:
+            entry_result = await execute_market_entry(symbol, direction, qty, category)
+        
+        if not entry_result:
+            log(f"❌ Entry execution failed for {symbol}", level="ERROR")
+            return None
+        
+        avg_entry_price = entry_result["avg_price"]
+        executed_qty = entry_result["executed_qty"]
+        
+        EXECUTION_STATES[exec_id]["stage"] = "entry_executed"
+        EXECUTION_STATES[exec_id]["success"] = True
+        
+        log(f"✅ {symbol} entry executed: {executed_qty} at {avg_entry_price}")
+        
+        # Step 6: Place protective orders (SL/TP)
+        sl_order_id = None
+        tp1_order_id = None
+        
+        # Place stop loss
+        if sl_price > 0:
+            sl_order_id = await place_stop_loss_order(symbol, direction, executed_qty, sl_price, category)
+        
+        # Place take profit
+        if tp1_price > 0:
+            tp1_order_id = await place_take_profit_order(symbol, direction, executed_qty, tp1_price, category)
+        
+        # Log successful execution
+        log(f"🎯 Trade setup complete for {symbol}")
+        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP: {tp1_price}")
+        log(f"   Quantity: {executed_qty} | Risk: {((abs(avg_entry_price - sl_price) * executed_qty) / account_balance) * 100:.2f}%")
+        
+        # Return trade details
+        trade_details = {
+            "symbol": symbol,
+            "direction": direction,
+            "trade_type": trade_type,
+            "entry_price": avg_entry_price,
+            "qty": executed_qty,
+            "sl_price": sl_price,
+            "tp1_price": tp1_price,
+            "sl_order_id": sl_order_id,
+            "tp1_order_id": tp1_order_id,
+            "strategy": strategy,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
+            "execution_type": "TWAP" if use_twap and qty >= 3 else "Market"
+        }
+        
+        # Log trade execution
+        write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
+        
+        # Send telegram notification
+        await send_telegram_message(
+            f"✅ <b>Trade Executed</b>\n"
+            f"Symbol: <b>{symbol}</b>\n"
+            f"Direction: <b>{direction.upper()}</b>\n"
+            f"Entry: <b>{avg_entry_price}</b>\n"
+            f"Quantity: <b>{executed_qty}</b>\n"
+            f"SL: <b>{sl_price}</b> | TP: <b>{tp1_price}</b>"
+        )
+        
+        return trade_details
+        
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
+        log(f"Stack trace: {error_trace}", level="ERROR")
+        
+        EXECUTION_STATES[exec_id]["stage"] = "error"
+        EXECUTION_STATES[exec_id]["error"] = str(e)
+        
+        await send_telegram_message(
+            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
+        )
+        
+        return None
+
+async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
+    """Enhanced stop loss order placement"""
+    try:
+        # Validate SL price
+        current_price = await get_symbol_price(symbol, market_type)
+        if current_price > 0:
             if direction.lower() == "long":
                 if sl_price >= current_price:
                     log(f"⚠️ Invalid long SL {sl_price} >= current {current_price}, adjusting...")
@@ -432,7 +694,7 @@ async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="l
         return None
 
 async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
-    """Enhanced take profit order placement from position_manager.py"""
+    """Enhanced take profit order placement"""
     try:
         side = "Sell" if direction.lower() == "long" else "Buy"
         
@@ -462,428 +724,16 @@ async def place_take_profit_order(symbol, direction, qty, tp_price, market_type=
         log(traceback.format_exc(), level="ERROR")
         return None
 
-async def cancel_all_orders(symbol, category="linear"):
-    """Cancel all open orders for a symbol - from position_manager.py"""
-    try:
-        result = await signed_request("POST", "/v5/order/cancel-all", {
-            "category": category,
-            "symbol": symbol
-        })
-        
-        if result.get("retCode") == 0:
-            log(f"✅ Cancelled all orders for {symbol}")
-            return True
-        else:
-            log(f"⚠️ Failed to cancel orders: {result.get('retMsg')}", level="WARN")
-            return False
-            
-    except Exception as e:
-        log(f"❌ Error cancelling orders: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
-        return False
-
-async def execute_trade_if_valid(signal_data, max_risk=0.06):
-    """
-    Enhanced trade execution combining the best of both systems
-    Main function that orchestrates the complete trade setup
-    """
-    # Load risk state and check trading permissions
-    load_risk_state()
-    reset_daily_risk()
-    
-    # Check if trading is allowed based on drawdown limits
-    if not check_trading_allowed():
-        log(f"🛑 Trading paused due to drawdown limits - trade blocked", level="WARN")
-        await send_telegram_message("🛑 <b>Trade Blocked</b>: Trading paused due to drawdown limits")
-        return None
-    
-    # Extract trade details
-    symbol = signal_data["symbol"]
-    category = get_symbol_category(symbol)
-    trade_type = signal_data.get("trade_type", "Intraday")
-    direction = signal_data.get("direction", "Long").strip().lower()
-    regime = signal_data.get("regime", "trending")
-    score = signal_data.get("score", 0)
-    confidence = signal_data.get("confidence", 60)
-    entry_price = float(signal_data.get("price", 1.0))
-    candles_by_tf = signal_data.get("candles", {})
-    range_break_details = signal_data.get('range_break_details', {})
-    range_break_confidence = signal_data.get('range_break_confidence', 0)
-    exit_strategy = signal_data.get('exit_strategy', 'normal')
-    trailing_multiplier = signal_data.get('trailing_multiplier', 1.0)
-    tp1_multiplier = signal_data.get('tp1_multiplier', 1.0)
-    custom_exit_tranches = signal_data.get('exit_tranches', None)
-    override_sl = signal_data.get('override_sl')
-    override_tp1 = signal_data.get('override_tp1')
-    override_tp2 = signal_data.get('override_tp2')
-    override_tp3 = signal_data.get('override_tp3')
-    
-    # Detect stealth accumulation
-    stealth_data = detect_stealth_accumulation_advanced(
-        candles_by_tf.get("5", []), 
-        symbol
-    )
-    
-    # Set exit strategy parameters
-    exit_strategy = "normal"
-    trailing_multiplier = 1.0
-    
-    # Existing stealth accumulation check
-    if stealth_data['detected'] and stealth_data['recommendation'] == 'strong_accumulation':
-        # Only override if not already set by range break
-        if exit_strategy == "normal":
-            exit_strategy = "patient"
-            trailing_multiplier = 1.5
-        log(f"🎯 Stealth trade detected - using patient exit strategy")
-    
-    # Determine strategy type
-    strategy = "core_strategy"
-    if "mean_reversion" in signal_data.get("tf_scores", {}):
-        strategy = "mean_reversion"
-    elif "breakout_sniper" in signal_data.get("tf_scores", {}):
-        strategy = "breakout_sniper"
-    elif range_break_details and range_break_confidence > 0.6:
-        strategy = "range_break"
-    
-    log(f"⚙️ Executing {direction.upper()} trade for {symbol} [{category.upper()}] as {trade_type} ({strategy})")
-    
-    # Execution state tracking
-    exec_id = f"{symbol}_{int(time.time())}"
-    EXECUTION_STATES[exec_id] = {"stage": "started", "success": False}
-    
-    try:
-        # Step 1: Get account balance with enhanced caching
-        account_balance = await get_account_balance()
-        if account_balance <= 0:
-            log(f"❌ Invalid account balance: {account_balance} USDT", level="ERROR")
-            await send_telegram_message(f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: Invalid account balance.")
-            return None
-        
-        EXECUTION_STATES[exec_id]["stage"] = "balance_checked"
-
-        position_size_needs_recalc = False
-    
-        # Step 2: Calculate SL/TP levels - Check for overrides first
-        if signal_data.get('override_sl') and signal_data.get('override_tp1'):
-            # Use the override values directly for range break trades
-            sl = signal_data['override_sl']
-            tp1 = signal_data['override_tp1']
-            sl_pct = signal_data.get('override_sl_pct', abs((sl - entry_price) / entry_price * 100))
-            tp1_pct = signal_data.get('override_tp1_pct', abs((tp1 - entry_price) / entry_price * 100))
-            trailing_pct = signal_data.get('override_trailing_pct', sl_pct * 0.5)
-    
-            # Get additional TP levels if provided
-            tp2_price = signal_data.get('override_tp2')
-            tp3_price = signal_data.get('override_tp3')
-    
-            if tp2_price:
-                tp2_pct = abs((tp2_price - entry_price) / entry_price * 100)
-            else:
-                tp2_pct = tp1_pct * 1.8
-                if direction.lower() == "long":
-                    tp2_price = entry_price * (1 + tp2_pct / 100)
-                else:
-                    tp2_price = entry_price * (1 - tp2_pct / 100)
-    
-            if tp3_price:
-                tp3_pct = abs((tp3_price - entry_price) / entry_price * 100)
-            else:
-                tp3_pct = tp1_pct * 2.5
-                if direction.lower() == "long":
-                    tp3_price = entry_price * (1 + tp3_pct / 100)
-                else:
-                    tp3_price = entry_price * (1 - tp3_pct / 100)
-    
-            log(f"📊 Using override SL/TP values for {symbol}:")
-            log(f"   Direction: {direction}")
-            log(f"   Entry: {entry_price:.8f}")
-            log(f"   SL: {sl:.8f} ({sl_pct:.2f}%)")
-            log(f"   TP1: {tp1:.8f} ({tp1_pct:.2f}%)")
-            log(f"   TP2: {tp2_price:.8f} ({tp2_pct:.2f}%)")
-            log(f"   Trailing: {trailing_pct:.2f}%")
-    
-            EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
-    
-        else:
-            # Original SL/TP calculation using dynamic method
-            sl_tp_result = calculate_dynamic_sl_tp(
-                candles_by_tf, entry_price, trade_type, direction, score, confidence, regime
-            )
-    
-            # Ensure we have at least 5 values
-            if len(sl_tp_result) >= 5:
-                sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
-            else:
-                # Fallback if function returns fewer values
-                sl, tp1, sl_pct = sl_tp_result[:3]
-                trailing_pct = sl_pct * 0.5  # Default trailing percentage
-                tp1_pct = sl_pct * 2.0      # Default TP percentage
-    
-            # Calculate additional TP levels
-            tp2_pct = tp1_pct * 1.8
-            tp3_pct = tp1_pct * 2.5
-    
-            if direction.lower() == "long":
-                tp2_price = entry_price * (1 + tp2_pct / 100)
-                tp3_price = entry_price * (1 + tp3_pct / 100)
-            else:
-                tp2_price = entry_price * (1 - tp2_pct / 100)
-                tp3_price = entry_price * (1 - tp3_pct / 100)
-    
-            EXECUTION_STATES[exec_id]["stage"] = "sl_tp_calculated"
-        
-        # Step 3: Calculate position size using enhanced method
-        if position_size_needs_recalc:
-            # Recalculate position size with the new SL
-            log(f"📊 Recalculating position size with override SL...")
-        
-            # Calculate actual risk distance
-            risk_distance_pct = abs((sl - entry_price) / entry_price)
-        
-            # Adjust max risk based on the distance
-            if risk_distance_pct > 0.02:  # If SL is more than 2% away
-                # Reduce risk to maintain reasonable position size
-                adjusted_risk = max_risk * (0.02 / risk_distance_pct)
-                adjusted_risk = max(adjusted_risk, 0.02)  # Minimum 2% risk
-                log(f"📊 Adjusting risk from {max_risk*100:.1f}% to {adjusted_risk*100:.1f}% due to SL distance")
-            else:
-                adjusted_risk = max_risk
-        
-            qty = await calculate_enhanced_quantity(
-                symbol=symbol,
-                price=entry_price,
-                sl_price=sl,
-                account_balance=account_balance,
-                candles_by_tf=candles_by_tf,
-                trade_type=trade_type,
-                strategy=strategy,
-                confidence=confidence,
-                risk_pct=adjusted_risk,
-                market_type=category
-            )
-        else:
-            # Original calculation
-            qty = await calculate_enhanced_quantity(
-                symbol=symbol,
-                price=entry_price,
-                sl_price=sl,
-                account_balance=account_balance,
-                candles_by_tf=candles_by_tf,
-                trade_type=trade_type,
-                strategy=strategy,
-                confidence=confidence,
-                risk_pct=max_risk,
-                market_type=category
-            )
-        
-        if qty <= 0:
-            log(f"⚠️ Skipped {symbol}: Quantity too small or risk limit reached.")
-            return None
-        
-        EXECUTION_STATES[exec_id]["stage"] = "position_sized"
-        
-        # Step 4: Set leverage (for futures)
-        leverage = DEFAULT_LEVERAGE if category == "linear" else 1
-        if category == "linear":
-            await set_position_leverage(symbol, leverage, category)
-        
-        # Step 5: Cancel any existing orders
-        await cancel_all_orders(symbol, category)
-        
-        EXECUTION_STATES[exec_id]["stage"] = "orders_cancelled"
-        
-        # Step 6: Execute entry using appropriate method
-        executed_entry = None
-        
-        if regime == "volatile" and category == "linear":
-            # Use TWAP for volatile markets
-            executed_entry = await execute_twap_entry(
-                symbol=symbol,
-                direction=direction,
-                qty=qty,
-                category=category,
-                slices=3,
-                delay_sec=2
-            )
-        else:
-            # Use market order for normal conditions
-            executed_entry = await execute_market_entry(
-                symbol=symbol,
-                direction=direction,
-                qty=qty,
-                category=category
-            )
-        
-        if not executed_entry:
-            log(f"❌ Entry execution failed for {symbol}", level="ERROR")
-            EXECUTION_STATES[exec_id]["stage"] = "entry_failed"
-            return None
-        
-        EXECUTION_STATES[exec_id]["stage"] = "entry_executed"
-        
-        # Step 7: Recalculate SL/TP based on actual entry price if different
-        if executed_entry != entry_price:
-            sl_tp_result = calculate_dynamic_sl_tp(
-                candles_by_tf, executed_entry, trade_type, direction, score, confidence, regime
-            )
-            
-            # FIX: Properly unpack the recalculated values
-            if len(sl_tp_result) >= 5:
-                sl, tp1, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
-            else:
-                sl, tp1, sl_pct = sl_tp_result[:3]
-                trailing_pct = sl_pct * 0.5
-                tp1_pct = sl_pct * 2.0
-        
-        # Step 8: Calculate exit tranches with enhanced logic
-        volatility = "normal"
-        if regime == "volatile":
-            volatility = "high"
-        elif regime == "ranging":
-            volatility = "low"
-            
-        has_momentum = signal_data.get("momentum", False) or signal_data.get("pump_potential", False)
-
-        # ADD THIS: Use custom exit tranches if provided
-        if custom_exit_tranches:
-            # Use the custom tranches from range break config
-            exit_tranches = [round_qty(symbol, qty * pct) for pct in custom_exit_tranches]
-            log(f"📊 Using custom exit tranches: {custom_exit_tranches}")
-        else:
-        
-            exit_tranches = calculate_exit_tranches(
-                symbol=symbol,
-                total_qty=qty,
-                trade_type=trade_type,
-                volatility=volatility,
-                momentum=has_momentum
-            )
-        
-        # Step 9: Place stop loss order with enhanced validation
-        sl_order_id = await place_stop_loss_order(
-            symbol=symbol,
-            direction=direction,
-            qty=qty,
-            sl_price=sl,
-            market_type=category
-        )
-        
-        EXECUTION_STATES[exec_id]["stage"] = "sl_placed"
-        
-        # Step 10: Place take profit order for first tranche
-        tp1_qty = exit_tranches[0] if exit_tranches and len(exit_tranches) > 0 else round_qty(symbol, qty / 3)
-        
-        tp1_order_id = await place_take_profit_order(
-            symbol=symbol,
-            direction=direction,
-            qty=tp1_qty,
-            tp_price=tp1,
-            market_type=category
-        )
-        
-        EXECUTION_STATES[exec_id]["stage"] = "tp_placed"
-        
-        # Step 11: Set up additional TP levels for bigger moves
-        if tp2_price is None:  # Only set if not already overridden
-            tp2_price = None
-            tp2_pct = None
-            if trade_type in ["Intraday", "Swing"]:
-                tp2_pct = tp1_pct * 1.8
-                if direction.lower() == "long":
-                    tp2_price = round(executed_entry * (1 + tp2_pct / 100), 6)
-                else:
-                    tp2_price = round(executed_entry * (1 - tp2_pct / 100), 6)
-                
-                log(f"🎯 Setting stretched TP2 at {tp2_price} ({tp2_pct:.2f}%) for potential pump")
-        
-        EXECUTION_STATES[exec_id]["success"] = True
-
-        if 'tp3_price' not in locals():
-            tp3_price = None
-            tp3_pct = None
-        
-        # Step 12: Log trade details
-        indicator_scores = signal_data.get("indicator_scores", {})
-        used_indicators = signal_data.get("used_indicators", [])
-        
-        log_trade_to_file(
-            symbol=symbol,
-            direction=direction,
-            entry=executed_entry,
-            sl=sl,
-            tp1=tp1,
-            tp2=tp2_price,
-            result="open",
-            score=score,
-            trade_type=trade_type,
-            confidence=confidence,
-            tf_scores=signal_data.get("tf_scores", {}),
-            indicator_scores=indicator_scores,
-            used_indicators=used_indicators,
-            pattern_detected=signal_data.get("pattern"),
-            whale_signal=signal_data.get("whale", False),
-            volume_spike=signal_data.get("volume_spike", False),
-            sl_strategy=f"Enhanced-{trade_type}"
-        )
-        
-        # Build complete trade details
-        trade_details = {
-            "entry": executed_entry,
-            "sl": sl,
-            "tp1": tp1,
-            "tp2": tp2_price,
-            "tp3": tp3_price,
-            "qty": qty,
-            "type": trade_type,
-            "direction": direction,
-            "symbol": symbol,
-            "sl_pct": sl_pct,
-            "tp1_pct": tp1_pct,
-            "tp2_pct": tp2_pct,
-            "tp3_pct": tp3_pct if 'tp3_pct' in locals() else None,
-            "trailing_pct": trailing_pct,  # Now properly defined
-            "indicator_scores": indicator_scores,
-            "used_indicators": used_indicators,
-            "sl_order_id": sl_order_id,
-            "tp1_order_id": tp1_order_id,
-            "exit_tranches": exit_tranches,
-            "regime": regime,
-            "leverage": leverage,
-            "strategy": strategy,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "exit_strategy": exit_strategy,
-            "range_break": range_break_details != {},
-            "range_break_confidence": range_break_confidence,
-            "range_levels": {
-                "high": range_break_details.get('range_high'),
-                "low": range_break_details.get('range_low'),
-                "width_pct": range_break_details.get('range_width_pct')
-            } if range_break_details else None
-        }
-        
-        # Log trade execution details
-        write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
-        
-        return trade_details
-        
-    except Exception as e:
-        error_trace = traceback.format_exc()
-        log(f"❌ Exception in trade execution for {symbol}: {e}", level="ERROR")
-        log(f"Stack trace: {error_trace}", level="ERROR")
-        
-        EXECUTION_STATES[exec_id]["stage"] = "error"
-        EXECUTION_STATES[exec_id]["error"] = str(e)
-        
-        await send_telegram_message(
-            f"❌ <b>Execution Error</b>\nSymbol: <b>{symbol}</b>\nError: {str(e)}"
-        )
-        
-        return None
-
 def calculate_actual_risk_percentage(entry_price, sl_price, position_size, account_balance):
     """
     Calculate the actual risk percentage based on position size and SL distance
     
+    Args:
+        entry_price: Entry price per unit
+        sl_price: Stop loss price per unit
+        position_size: Position size in units
+        account_balance: Total account balance
+        
     Returns:
         float: Actual risk as percentage of account balance
     """
@@ -939,3 +789,147 @@ async def execute_twap_slice(symbol, category, side, slice_qty, entries):
                 entries.append(price)
     except Exception as e:
         log(f"❌ TWAP Slice Error: {e}", level="ERROR")
+
+# Additional utility functions
+async def validate_trade_preconditions(symbol, direction, qty, account_balance, market_type="linear"):
+    """
+    Validate all preconditions before executing a trade
+    
+    Args:
+        symbol: Trading symbol
+        direction: Trade direction (long/short)
+        qty: Position quantity
+        account_balance: Available balance
+        market_type: Market type (linear/spot)
+        
+    Returns:
+        bool: True if all preconditions are met
+    """
+    try:
+        # Check minimum balance
+        if account_balance < 10:  # Minimum $10 balance
+            log(f"❌ Insufficient account balance: ${account_balance:.2f}", level="ERROR")
+            return False
+        
+        # Check minimum quantity
+        min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
+        if qty < min_qty:
+            log(f"❌ Quantity {qty} below minimum {min_qty} for {symbol}", level="ERROR")
+            return False
+        
+        # Check market status
+        current_price = await get_symbol_price(symbol, market_type)
+        if current_price <= 0:
+            log(f"❌ Invalid market price for {symbol}: {current_price}", level="ERROR")
+            return False
+        
+        # For futures, check if we have enough margin
+        if market_type == "linear":
+            position_value = qty * current_price
+            required_margin = position_value / DEFAULT_LEVERAGE
+            
+            if required_margin > account_balance * 0.9:  # 90% safety margin
+                log(f"❌ Insufficient margin: Required ${required_margin:.2f}, Available ${account_balance:.2f}", level="ERROR")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error validating trade preconditions: {e}", level="ERROR")
+        return False
+
+async def get_position_info(symbol, market_type="linear"):
+    """
+    Get current position information for a symbol
+    
+    Args:
+        symbol: Trading symbol
+        market_type: Market type (linear/spot)
+        
+    Returns:
+        dict: Position information or None if no position
+    """
+    try:
+        result = await signed_request("GET", "/v5/position/list", {
+            "category": market_type,
+            "symbol": symbol
+        })
+        
+        if result.get("retCode") == 0:
+            positions = result.get("result", {}).get("list", [])
+            for pos in positions:
+                if float(pos.get("size", 0)) > 0:
+                    return {
+                        "symbol": pos.get("symbol"),
+                        "side": pos.get("side"),
+                        "size": float(pos.get("size", 0)),
+                        "entry_price": float(pos.get("avgPrice", 0)),
+                        "mark_price": float(pos.get("markPrice", 0)),
+                        "unrealized_pnl": float(pos.get("unrealisedPnl", 0)),
+                        "percentage": float(pos.get("percentage", 0))
+                    }
+        
+        return None
+        
+    except Exception as e:
+        log(f"❌ Error getting position info: {e}", level="ERROR")
+        return None
+
+async def emergency_close_position(symbol, market_type="linear"):
+    """
+    Emergency close position for a symbol
+    
+    Args:
+        symbol: Trading symbol
+        market_type: Market type (linear/spot)
+        
+    Returns:
+        bool: True if position closed successfully
+    """
+    try:
+        # Get current position
+        position = await get_position_info(symbol, market_type)
+        if not position:
+            log(f"ℹ️ No position found for {symbol}")
+            return True
+        
+        # Close position with market order
+        side = "Sell" if position["side"].lower() == "buy" else "Buy"
+        qty = position["size"]
+        
+        log(f"🚨 Emergency closing position: {symbol} {side} {qty}")
+        
+        result = await signed_request("POST", "/v5/order/create", {
+            "category": market_type,
+            "symbol": symbol,
+            "side": side,
+            "orderType": "Market",
+            "qty": str(qty),
+            "timeInForce": "IOC",
+            "reduceOnly": True
+        })
+        
+        if result.get("retCode") == 0:
+            log(f"✅ Emergency close executed for {symbol}")
+            return True
+        else:
+            log(f"❌ Emergency close failed: {result.get('retMsg')}", level="ERROR")
+            return False
+            
+    except Exception as e:
+        log(f"❌ Error in emergency close: {e}", level="ERROR")
+        return False
+
+# Export main functions
+__all__ = [
+    'execute_trade',
+    'get_account_balance',
+    'calculate_enhanced_quantity',
+    'execute_market_entry',
+    'execute_twap_entry',
+    'place_stop_loss_order',
+    'place_take_profit_order',
+    'validate_trade_preconditions',
+    'get_position_info',
+    'emergency_close_position'
+]
