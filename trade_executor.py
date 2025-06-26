@@ -6,10 +6,11 @@ import traceback
 import json
 from datetime import datetime
 from logger import log, write_log
-from bybit_api import signed_request, place_market_order
+from bybit_api import signed_request, place_market_order, place_stop_loss_with_retry
 from error_handler import send_telegram_message, send_error_to_telegram
 from config import DEFAULT_LEVERAGE
-from symbol_utils import get_symbol_category, round_qty
+from symbol_utils import get_symbol_category
+from symbol_info import round_qty
 from activity_logger import log_trade_to_file
 
 async def get_account_balance():
