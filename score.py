@@ -198,6 +198,11 @@ def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
     # Apply entry quality bonus
     original_score += entry_quality_score
     indicator_scores["entry_quality"] = entry_quality_score
+
+    strong_count = sum(1 for k, v in indicator_scores.items() if abs(v) >= 0.8)
+    if strong_count < 2:
+        log(f"⚠️ {symbol}: Rejected due to insufficient strong indicators ({strong_count})")
+        return 0, tf_scores, trade_type, indicator_scores, list(used_indicators)
     
     # Log enhanced analysis
     log(f"📊 Enhanced scoring for {symbol}:")
