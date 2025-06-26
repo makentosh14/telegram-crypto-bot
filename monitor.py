@@ -64,6 +64,12 @@ SL_CHECK_COOLDOWN = 300  # 5 minutes between SL checks per symbol
 SL_CREATION_COOLDOWN = 60  # 1 minute cooldown after creating SL
 MONITOR_INTERVAL = 5  # Main monitor loop interval
 
+EXIT_TRANCHES = {
+    "Scalp": [0.50, 0.50],        # 50% at TP1, 50% trails
+    "Intraday": [0.50, 0.50],     # 50% at TP1, 50% trails  
+    "Swing": [0.50, 0.50],        # 50% at TP1, 50% trails
+}
+
 
 # NEW IMPORTS for enhanced functionality
 from enhanced_exit import (
@@ -1228,18 +1234,6 @@ def check_sl_hit(trade, current_price, direction):
     elif direction == "short" and current_price >= sl_price:
         return True
 
-    # In handle_trailing_sl_exit function, add:
-    if trade.get("dca_count", 0) > 0:
-        # Log DCA result
-        dca_manager.dca_history[symbol] = {
-            "dca_count": trade["dca_count"],
-            "final_result": "win" if profit_pct > 0 else "loss",
-            "final_pnl": profit_pct,
-            "dca_history": trade.get("dca_history", [])
-        }
-        
-    return False
-
 def check_trailing_sl_hit(trade, current_price, direction):
     """Check if trailing SL has been hit"""
     trailing_sl = trade.get("trailing_sl")
@@ -1267,93 +1261,105 @@ def check_trailing_sl_hit(trade, current_price, direction):
     return False
 
 async def handle_tp1_hit(symbol, trade, current_price):
-    """Handle TP1 hit event"""
-    # Mark TP1 as hit
-    trade["tp1_hit"] = True
-    trade["tp1_hit_cycle"] = trade.get("cycles", 0)
-    trade["tp1_price"] = current_price
-    trade["break_even_triggered"] = True
-    
-    # Get fixed trailing percentage
-    trade_type = trade.get("trade_type", "Intraday")
-    fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
-    trade["trailing_pct"] = fixed_params["trailing_pct"]
-    
-    log(f"🎯 TP1 Hit for {symbol} - Trailing will activate immediately with {trade['trailing_pct']}%")
-    
-    # Execute partial exit (20% for "let winners run")
-    if not trade.get("tp1_partial_exit"):
-        exit_success = await execute_partial_exit_with_retry(symbol, trade, 20)
+    """Handle TP1 hit - Updated for 50% exit"""
+    try:
+        log(f"🎯 TP1 hit detected for {symbol} at {current_price}")
+        
+        # Mark TP1 as hit
+        trade["tp1_hit"] = True
+        trade["tp1_price_actual"] = current_price
+        trade["tp1_hit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Execute 50% partial exit (instead of 30% or 33%)
+        exit_success = await execute_partial_exit(symbol, trade, 50)  # 50% exit
+        
         if exit_success:
             trade["tp1_partial_exit"] = True
+            
+            # Calculate profit at TP1
+            entry_price = trade.get("entry_price")
+            direction = trade.get("direction", "").lower()
+            
+            if direction == "long":
+                profit_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            # Log the 50% exit
+            write_log(f"TP1_50PCT_EXIT: {symbol} | Profit: {profit_pct:.2f}% | Price: {current_price}")
+            
+            # Update auto-reentry tracking if enabled
             if ENABLE_AUTO_REENTRY:
-                await handle_any_exit(symbol, trade, current_price, "TP_Hit")
+                await handle_any_exit(symbol, trade, current_price, "TP1_50PCT")
     
-    # Move SL to breakeven
-    entry_price = trade.get("entry_price")
-    sl_updated = await update_stop_loss_order(symbol, trade, entry_price)
+        # Move SL to breakeven for remaining 50%
+        entry_price = trade.get("entry_price")
+        sl_updated = await update_stop_loss_order(symbol, trade, entry_price)
 
-    # In handle_trailing_sl_exit function, add:
-    if trade.get("dca_count", 0) > 0:
-        # Log DCA result
-        dca_manager.dca_history[symbol] = {
-            "dca_count": trade["dca_count"],
-            "final_result": "win" if profit_pct > 0 else "loss",
-            "final_pnl": profit_pct,
-            "dca_history": trade.get("dca_history", [])
-        }
-    
-    # Send notification
-    await send_telegram_message(
-        f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price}\n"
-        f"💰 20% Partial Exit Executed (80% riding)\n"
-        f"🛡️ SL Moved to Breakeven\n"
-        f"📍 Trailing {trade['trailing_pct']}% activates immediately"
-    )
-    
-    save_active_trades()
+        # Send notification - Updated message
+        await send_telegram_message(
+            f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price}\n"
+            f"💰 50% Position Exited (50% remaining)\n"
+            f"🛡️ SL Moved to Breakeven\n"
+            f"📍 Trailing {trade.get('trailing_pct', 1.0)}% active for remaining 50%"
+        )
+        
+        save_active_trades()
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error handling TP1 hit for {symbol}: {e}", level="ERROR")
+        return False
 
-async def handle_trailing_stop(symbol, trade, current_price, direction):
-    """Handle trailing stop updates"""
-    trailing_pct = trade.get("trailing_pct")
-    current_trailing_sl = trade.get("trailing_sl")
-    
-    # Calculate new trailing stop
-    if direction == "long":
-        new_sl = current_price * (1 - trailing_pct/100)
-    else:
-        new_sl = current_price * (1 + trailing_pct/100)
-    
-    new_sl = round(new_sl, 6)
-    
-    # Only update if improvement is meaningful (0.1%)
-    should_update = False
-    
-    if current_trailing_sl is None:
-        should_update = True
-    elif direction == "long" and new_sl > current_trailing_sl:
-        improvement = ((new_sl - current_trailing_sl) / current_trailing_sl) * 100
-        if improvement >= 0.1:
-            should_update = True
-    elif direction == "short" and new_sl < current_trailing_sl:
-        improvement = ((current_trailing_sl - new_sl) / current_trailing_sl) * 100
-        if improvement >= 0.1:
-            should_update = True
+async def handle_trailing_sl_exit(symbol, trade, current_price):
+    """Handle trailing stop loss exit - Updated message"""
+    try:
+        direction = trade.get("direction", "").lower()
+        entry_price = trade.get("entry_price")
+        
+        # Calculate profit percentage for the full trade
+        if direction == "long":
+            profit_pct = ((current_price - entry_price) / entry_price) * 100
+        else:
+            profit_pct = ((entry_price - current_price) / entry_price) * 100
+        
+        # Mark trade as exited
+        trade["exited"] = True
+        trade["exit_price"] = current_price
+        trade["exit_reason"] = "Trailing_SL_Hit"
+        trade["profit_pct"] = profit_pct
+        trade["modified"] = True
+        
+        # Send notification - Updated for 50/50 strategy
+        await send_telegram_message(
+            f"💔 <b>Trailing SL Hit</b> on <b>{symbol}</b>\n"
+            f"Exit Price: {current_price:.6f}\n"
+            f"Total Profit: {profit_pct:.2f}%\n"
+            f"Strategy: 50% @ TP1 + 50% @ Trailing SL\n"
+            f"Final exit of remaining 50% position"
+        )
+        
+        # Log the exit
+        log(f"💔 Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% total profit)")
+        write_log(f"TRAILING_SL_FINAL_EXIT: {symbol} | Price: {current_price} | Total Profit: {profit_pct:.2f}%")
+        
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error handling trailing SL exit for {symbol}: {e}", level="ERROR")
+        return False
 
-    # In handle_trailing_sl_exit function, add:
-    if trade.get("dca_count", 0) > 0:
-        # Log DCA result
-        dca_manager.dca_history[symbol] = {
-            "dca_count": trade["dca_count"],
-            "final_result": "win" if profit_pct > 0 else "loss",
-            "final_pnl": profit_pct,
-            "dca_history": trade.get("dca_history", [])
-        }
-    
-    if should_update:
-        sl_updated = await update_stop_loss_order(symbol, trade, new_sl)
-        if sl_updated:
-            save_active_trades()
+         # In handle_trailing_sl_exit function, add:
+        if trade.get("dca_count", 0) > 0:
+            # Log DCA result
+            dca_manager.dca_history[symbol] = {
+                "dca_count": trade["dca_count"],
+                "final_result": "win" if profit_pct > 0 else "loss",
+                "final_pnl": profit_pct,
+                "dca_history": trade.get("dca_history", [])
+            }
+        
+        return False
 
 def cleanup_exited_trades():
     """Remove exited trades from active_trades"""
