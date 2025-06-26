@@ -217,15 +217,19 @@ async def verify_position_and_orders(symbol, trade, auto_repair=True):
 
 async def verify_all_positions(frequency_minutes=15):
     """
-    Periodic verification of all active positions
+    Periodic verification of all active positions - FIXED VERSION
     """
-    from monitor import active_trades
-    
     while True:
         try:
             log("🔍 Starting comprehensive position verification")
             
-            for symbol, trade in active_trades.items():
+            # FIX: Create a copy of the dictionary to avoid iteration issues
+            from monitor import active_trades
+            
+            # Create a snapshot of active trades to avoid dictionary changing during iteration
+            trades_snapshot = dict(active_trades)  # Create a copy
+            
+            for symbol, trade in trades_snapshot.items():
                 if trade.get("exited"):
                     continue
                 
