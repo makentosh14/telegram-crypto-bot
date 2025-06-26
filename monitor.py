@@ -1312,8 +1312,56 @@ async def handle_tp1_hit(symbol, trade, current_price):
         log(traceback.format_exc(), level="ERROR")
         return False
 
-async def handle_trailing_sl_hit(symbol, trade, current_price, direction):
-    """Handle trailing stop loss exit - Updated message"""
+async def handle_trailing_stop(symbol, trade, current_price, direction):
+    """Handle trailing stop logic after TP1 hit"""
+    try:
+        # Get trailing percentage from trade or use default
+        trade_type = trade.get("trade_type", "Intraday")
+        trailing_pct = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])["trailing_pct"]
+        
+        # Calculate new trailing stop
+        current_trailing_sl = trade.get("trailing_sl")
+        
+        if direction == "long":
+            new_trailing_sl = current_price * (1 - trailing_pct / 100)
+        else:  # short
+            new_trailing_sl = current_price * (1 + trailing_pct / 100)
+        
+        # Only update if new SL is better than current
+        if current_trailing_sl:
+            if direction == "long" and new_trailing_sl <= current_trailing_sl:
+                return  # Don't update if worse
+            if direction == "short" and new_trailing_sl >= current_trailing_sl:
+                return  # Don't update if worse
+        
+        # Update trailing stop
+        trade["trailing_sl"] = round(new_trailing_sl, 6)
+        trade["modified"] = True
+        
+        # Try to update the actual SL order on exchange
+        try:
+            from bybit_api import update_stop_loss_order
+            sl_updated = await update_stop_loss_order(symbol, trade, new_trailing_sl)
+            if sl_updated:
+                log(f"📈 Trailing SL updated for {symbol}: {new_trailing_sl:.6f}")
+            else:
+                log(f"⚠️ Failed to update trailing SL order for {symbol}")
+        except Exception as e:
+            log(f"⚠️ Error updating SL order for {symbol}: {e}")
+        
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error in handle_trailing_stop for {symbol}: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        return False
+
+
+# Fix 2: Correct the handle_trailing_sl_hit function signature
+# Replace the existing function with this corrected version
+
+async def handle_trailing_sl_hit(symbol, trade, current_price, score, tf_scores, used_list):
+    """Handle trailing stop loss exit - CORRECTED SIGNATURE"""
     try:
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
@@ -1331,35 +1379,59 @@ async def handle_trailing_sl_hit(symbol, trade, current_price, direction):
         trade["profit_pct"] = profit_pct
         trade["modified"] = True
         
+        # Calculate position size for exit
+        position_qty = trade.get("qty", 0)
+        if trade.get("tp1_hit"):
+            # Only 50% remaining after TP1
+            remaining_qty = position_qty * 0.5
+        else:
+            # Full position if somehow TP1 wasn't hit
+            remaining_qty = position_qty
+        
+        # Execute market exit for remaining position
+        try:
+            from bybit_api import place_market_order
+            exit_order = await place_market_order(
+                symbol=symbol,
+                side="Sell" if direction == "long" else "Buy",
+                qty=remaining_qty,
+                reduce_only=True
+            )
+            
+            if exit_order:
+                log(f"✅ Trailing SL exit executed for {symbol}: {remaining_qty} units @ {current_price}")
+            else:
+                log(f"❌ Failed to execute trailing SL exit for {symbol}")
+                
+        except Exception as e:
+            log(f"❌ Error executing trailing SL exit for {symbol}: {e}")
+        
         # Send notification - Updated for 50/50 strategy
         await send_telegram_message(
             f"💔 <b>Trailing SL Hit</b> on <b>{symbol}</b>\n"
             f"Exit Price: {current_price:.6f}\n"
             f"Total Profit: {profit_pct:.2f}%\n"
             f"Strategy: 50% @ TP1 + 50% @ Trailing SL\n"
-            f"Final exit of remaining 50% position"
+            f"Position Size: {remaining_qty} units"
         )
         
-        # Log the exit
-        log(f"💔 Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% total profit)")
-        write_log(f"TRAILING_SL_FINAL_EXIT: {symbol} | Price: {current_price} | Total Profit: {profit_pct:.2f}%")
+        # Log the trade result
+        try:
+            from ai_memory import log_trade_result
+            await log_trade_result(symbol, trade, "Trailing_SL_Hit")
+        except Exception as e:
+            log(f"⚠️ Error logging trade result: {e}")
+        
+        # Remove from active trades
+        if symbol in active_trades:
+            del active_trades[symbol]
+            save_active_trades()
         
         return True
         
     except Exception as e:
-        log(f"❌ Error handling trailing SL exit for {symbol}: {e}", level="ERROR")
-        return False
-
-         # In handle_trailing_sl_exit function, add:
-        if trade.get("dca_count", 0) > 0:
-            # Log DCA result
-            dca_manager.dca_history[symbol] = {
-                "dca_count": trade["dca_count"],
-                "final_result": "win" if profit_pct > 0 else "loss",
-                "final_pnl": profit_pct,
-                "dca_history": trade.get("dca_history", [])
-            }
-        
+        log(f"❌ Error handling trailing SL hit for {symbol}: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
         return False
 
 def cleanup_exited_trades():
