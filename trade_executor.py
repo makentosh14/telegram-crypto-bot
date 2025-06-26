@@ -266,10 +266,12 @@ async def execute_trade_core(
             log(f"⚠️ SL placement failed for {symbol}", level="WARN")
         
         # Step 4: Place Take Profit order
+        tp1_qty = round_qty(symbol, executed_qty * 0.5)
+
         tp1_order_id = await place_take_profit_order(
             symbol=symbol,
             direction=direction,
-            qty=executed_qty,
+            qty=tp1_qty,
             tp_price=tp1_price,
             market_type=category
         )
