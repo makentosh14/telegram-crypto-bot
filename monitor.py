@@ -1112,12 +1112,15 @@ async def monitor_trades(live_candles):
         save_active_trades()
 
 async def get_account_balance():
-    """Get account balance from exchange - Monitor version"""
+    """Updated monitor balance function"""
     try:
         from bybit_api import get_futures_available_balance
-        balance = await get_futures_available_balance()
+        balance = await get_futures_available_balance(
+            force_refresh=False,
+            caller_name="monitor"
+        )
+        
         if balance > 0:
-            log(f"💰 Account balance: {balance} USDT")
             return balance
         else:
             log(f"⚠️ Invalid balance returned: {balance}", level="WARN")
