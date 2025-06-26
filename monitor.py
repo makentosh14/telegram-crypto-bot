@@ -1326,7 +1326,7 @@ async def handle_tp1_hit(symbol, trade, current_price):
         log(f"❌ Error handling TP1 hit for {symbol}: {e}", level="ERROR")
         return False
 
-async def handle_trailing_stop(symbol, trade, current_price, direction):
+async def handle_trailing_sl_hit(symbol, trade, current_price, direction):
     """Handle trailing stop loss exit - Updated message"""
     try:
         direction = trade.get("direction", "").lower()
