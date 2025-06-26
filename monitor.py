@@ -1197,26 +1197,39 @@ def check_trailing_sl_hit(trade, current_price, direction):
     trailing_sl = trade.get("trailing_sl")
     if not trailing_sl:
         return False
-        
+
     # Add small buffer for wicks
     buffer = 0.002  # 0.2%
-    
-    if direction == "long" and current_price <= trailing_sl * (1 - buffer):
-        return True
-    elif direction == "short" and current_price >= trailing_sl * (1 + buffer):
-        return True
 
-    # In handle_trailing_sl_exit function, add:
-    if trade.get("dca_count", 0) > 0:
-        # Log DCA result
-        dca_manager.dca_history[symbol] = {
-            "dca_count": trade["dca_count"],
-            "final_result": "win" if profit_pct > 0 else "loss",
-            "final_pnl": profit_pct,
-            "dca_history": trade.get("dca_history", [])
-        }
-        
-    return False
+    hit = False
+    if direction == "long" and current_price <= trailing_sl * (1 - buffer):
+        hit = True
+    elif direction == "short" and current_price >= trailing_sl * (1 + buffer):
+        hit = True
+
+    if hit:
+        # ✅ Calculate profit_pct before logging it
+        entry_price = trade.get("entry_price", 0)
+        if entry_price:
+            if direction == "long":
+                profit_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                profit_pct = ((entry_price - current_price) / entry_price) * 100
+        else:
+            profit_pct = 0
+
+        # ✅ Log DCA history if DCA was used
+        if trade.get("dca_count", 0) > 0:
+            symbol = trade.get("symbol", "UNKNOWN")
+            dca_manager.dca_history[symbol] = {
+                "dca_count": trade["dca_count"],
+                "final_result": "win" if profit_pct > 0 else "loss",
+                "final_pnl": profit_pct,
+                "dca_history": trade.get("dca_history", [])
+            }
+
+    return hit
+
 
 async def handle_tp1_hit(symbol, trade, current_price):
     """Handle TP1 hit - FIXED VERSION - Only exits 50% of position"""
