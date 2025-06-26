@@ -247,22 +247,51 @@ async def fetch_current_price(symbol):
     return None
 
 async def handle_tp1_detection(symbol, trade, current_price):
-    """Handle TP1 detection in high-frequency scanner - 50% exit"""
+    """Handle TP1 detection in high-frequency scanner - FIXED VERSION - 50% exit only"""
     try:
         log(f"🎯 HF SCANNER: TP1 detected for {symbol} at {current_price}")
+        
+        # Get trade details
+        entry_price = trade.get("entry_price")
+        direction = trade.get("direction", "").lower()
+        total_qty = trade.get("qty", 0)
+        
+        if not entry_price or not direction or total_qty <= 0:
+            log(f"❌ HF SCANNER: Invalid trade data for {symbol}", level="ERROR")
+            return False
+        
+        # Calculate 50% exit quantity
+        exit_qty = total_qty * 0.5
+        from symbol_info import round_qty
+        exit_qty = round_qty(symbol, exit_qty)
+        exit_qty = min(exit_qty, total_qty)
         
         # Execute 50% partial exit
         exit_success = await execute_partial_exit_with_retry(symbol, trade, 50)  # 50% exit
         
         if exit_success:
+            # CRITICAL: Update remaining quantity - Don't mark as fully exited
+            remaining_qty = total_qty - exit_qty
+            trade["qty"] = remaining_qty  # Update to remaining quantity
+            
             trade["tp1_hit"] = True
             trade["tp1_partial_exit"] = True
             trade["tp1_price_actual"] = current_price
+            trade["break_even_triggered"] = True
+            
+            # Track the exit
+            if "exit_tranches_history" not in trade:
+                trade["exit_tranches_history"] = []
+            
+            trade["exit_tranches_history"].append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "percentage": 50,
+                "qty": exit_qty,
+                "price": current_price,
+                "reason": "HF_Scanner_TP1"
+            })
             
             # Calculate profit at TP1
-            entry_price = trade.get("entry_price")
-            direction = trade.get("direction", "").lower()
-            
             if direction == "long":
                 profit_pct = ((current_price - entry_price) / entry_price) * 100
             else:
@@ -272,20 +301,25 @@ async def handle_tp1_detection(symbol, trade, current_price):
             await send_telegram_message(
                 f"🎯 <b>HF Scanner TP1</b> on <b>{symbol}</b>\n"
                 f"Price: {current_price:.6f}\n"
-                f"50% Position Exited\n"
+                f"50% Position Exited ({exit_qty} units)\n"
+                f"50% Remaining ({remaining_qty} units)\n"
                 f"Profit: {profit_pct:.2f}%\n"
-                f"50% remaining for trailing"
+                f"📈 Trailing active for remaining position"
             )
             
             # Log the 50% exit
-            write_log(f"HF_SCANNER_TP1_50PCT: {symbol} | Price: {current_price} | Profit: {profit_pct:.2f}%")
+            write_log(f"HF_SCANNER_TP1_50PCT: {symbol} | Price: {current_price} | Exited: {exit_qty} | Remaining: {remaining_qty} | Profit: {profit_pct:.2f}%")
             
             # Mark for trailing stop management
             trade["trailing_active"] = True
             trade["breakeven_target"] = entry_price
+            trade["trailing_sl"] = entry_price  # Start trailing from breakeven
             
-            log(f"✅ HF SCANNER: 50% TP1 exit completed for {symbol}")
+            log(f"✅ HF SCANNER: 50% TP1 exit completed for {symbol}. Remaining: {remaining_qty}")
             return True
+        else:
+            log(f"❌ HF SCANNER: Failed to execute 50% exit for {symbol}", level="ERROR")
+            return False
             
     except Exception as e:
         log(f"❌ HF SCANNER: Error in TP1 detection for {symbol}: {e}", level="ERROR")
