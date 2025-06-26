@@ -213,7 +213,7 @@ def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
     if divergences_found:
         log(f"   Divergences: {[d['type'] + ' ' + d['indicator'] for d in divergences_found]}")
     
-    return original_score, tf_scores, trade_type, indicator_scores, used_indicators, best_pattern
+    return original_score, tf_scores, trade_type, indicator_scores, used_indicators,
 
 def detect_momentum_strength(candles, lookback=5):
     """Existing momentum detection function remains unchanged"""
