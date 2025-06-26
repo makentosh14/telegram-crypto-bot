@@ -510,94 +510,34 @@ def remove_trade(symbol):
         del active_trades[symbol]
         save_active_trades()
 
-async def execute_partial_exit(symbol, trade, exit_percentage):
-    """Execute a partial exit for the given percentage of position"""
+async def execute_partial_exit_fixed(symbol, trade, exit_qty):
+    """Execute partial exit using market order - FIXED VERSION"""
     try:
         direction = trade.get("direction", "").lower()
-        total_qty = trade.get("qty")
         
-        if not direction or not total_qty or total_qty <= 0:
-            log(f"❌ Cannot execute partial exit for {symbol}: Invalid trade data", level="ERROR")
-            return False
+        # Determine order side for exit
+        if direction == "long":
+            order_side = "Sell"  # Sell to exit long position
+        else:
+            order_side = "Buy"   # Buy to exit short position
         
-        # Calculate exit quantity
-        exit_qty = total_qty * (exit_percentage / 100)
-        
-        # Ensure exit quantity meets minimum requirements
-        from symbol_info import round_qty, symbol_precisions
-        min_qty = symbol_precisions.get(symbol, {}).get("min_qty", 0.001)
-        
-        # Add debug logging for minimum qty
-        log(f"🔍 Partial exit for {symbol}: Min qty={min_qty}, Calculated qty={exit_qty}")
-        
-        exit_qty = max(round_qty(symbol, exit_qty), min_qty)
-        
-        # Don't exit more than we have
-        exit_qty = min(exit_qty, total_qty)
-        
-        # IMPORTANT: Check if exit quantity is below minimum
-        if exit_qty < min_qty:
-            log(f"⚠️ Exit quantity {exit_qty} below minimum {min_qty} for {symbol}. Aborting partial exit.", level="WARN")
-            return False
-        
-        # Execute market order
-        side = "Sell" if direction == "long" else "Buy"
-        
-        log(f"🔍 Executing partial exit for {symbol}: {exit_qty} {side} (min_qty={min_qty})")
-        
+        # Place market order to exit partial position
         result = await place_market_order(
             symbol=symbol,
-            side=side,
-            qty=str(exit_qty),
-            market_type="linear",
-            reduce_only=True
+            side=order_side,
+            qty=exit_qty,
+            order_type="Market"
         )
         
-        if result.get("retCode") == 0:
-            # Update trade record with remaining quantity
-            trade["qty"] = round_qty(symbol, total_qty - exit_qty)
-            
-            # Log the partial exit
-            log(f"🔹 Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
-            write_log(f"PARTIAL EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
-            
-            # Add to exit tranches history
-            if "exit_tranches_history" not in trade:
-                trade["exit_tranches_history"] = []
-            
-            trade["exit_tranches_history"].append({
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                "percentage": exit_percentage,
-                "qty": exit_qty
-            })
-            
-            save_active_trades()
+        if result and result.get("retCode") == 0:
+            log(f"✅ Partial exit order placed successfully for {symbol}: {exit_qty} units")
             return True
         else:
-            error_msg = result.get("retMsg", "Unknown error")
-            log(f"❌ Failed to execute partial exit for {symbol}: {error_msg}", level="ERROR")
-            
-            # Check if error is about minimum quantity
-            if "minimum limit" in error_msg.lower():
-                # Try with minimum quantity instead
-                log(f"🔄 Retrying with minimum quantity {min_qty}")
-                retry_result = await place_market_order(
-                    symbol=symbol,
-                    side=side,
-                    qty=str(min_qty),
-                    market_type="linear",
-                    reduce_only=True
-                )
-                
-                if retry_result.get("retCode") == 0:
-                    log(f"✅ Partial exit with minimum qty for {symbol} executed")
-                    trade["qty"] = round_qty(symbol, total_qty - min_qty)
-                    save_active_trades()
-                    return True
-            
+            log(f"❌ Failed to place partial exit order for {symbol}: {result}", level="ERROR")
             return False
+            
     except Exception as e:
-        log(f"❌ Error during partial exit for {symbol}: {e}", level="ERROR")
+        log(f"❌ Error executing partial exit for {symbol}: {e}", level="ERROR")
         return False
 
 async def update_stop_loss_order(symbol, trade, new_sl_price):
@@ -1279,54 +1219,97 @@ def check_trailing_sl_hit(trade, current_price, direction):
     return False
 
 async def handle_tp1_hit(symbol, trade, current_price):
-    """Handle TP1 hit - Updated for 50% exit"""
+    """Handle TP1 hit - FIXED VERSION - Only exits 50% of position"""
     try:
         log(f"🎯 TP1 hit detected for {symbol} at {current_price}")
         
-        # Mark TP1 as hit
+        # Mark TP1 as hit - BUT DON'T SET EXITED = TRUE
         trade["tp1_hit"] = True
         trade["tp1_price_actual"] = current_price
         trade["tp1_hit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        trade["break_even_triggered"] = True
         
-        # Execute 50% partial exit (instead of 30% or 33%)
-        exit_success = await execute_partial_exit(symbol, trade, 50)  # 50% exit
+        # Get trade details
+        entry_price = trade.get("entry_price")
+        direction = trade.get("direction", "").lower()
+        total_qty = trade.get("qty", 0)
+        
+        if not entry_price or not direction or total_qty <= 0:
+            log(f"❌ Invalid trade data for {symbol}", level="ERROR")
+            return False
+        
+        # Calculate 50% exit quantity
+        exit_qty = total_qty * 0.5
+        from symbol_info import round_qty
+        exit_qty = round_qty(symbol, exit_qty)
+        exit_qty = min(exit_qty, total_qty)
+        
+        log(f"🔍 Executing 50% exit: {exit_qty} of {total_qty} for {symbol}")
+        
+        # Execute 50% partial exit
+        exit_success = await execute_partial_exit_fixed(symbol, trade, exit_qty)
         
         if exit_success:
+            # CRITICAL: Update remaining quantity - Don't mark as fully exited
+            remaining_qty = total_qty - exit_qty
+            trade["qty"] = remaining_qty  # Update to remaining quantity
             trade["tp1_partial_exit"] = True
             
-            # Calculate profit at TP1
-            entry_price = trade.get("entry_price")
-            direction = trade.get("direction", "").lower()
+            # Track the exit
+            if "exit_tranches_history" not in trade:
+                trade["exit_tranches_history"] = []
             
+            trade["exit_tranches_history"].append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "percentage": 50,
+                "qty": exit_qty,
+                "price": current_price,
+                "reason": "TP1_Hit"
+            })
+            
+            # Calculate profit for notification
             if direction == "long":
                 profit_pct = ((current_price - entry_price) / entry_price) * 100
             else:
                 profit_pct = ((entry_price - current_price) / entry_price) * 100
             
-            # Log the 50% exit
-            write_log(f"TP1_50PCT_EXIT: {symbol} | Profit: {profit_pct:.2f}% | Price: {current_price}")
+            # Log the 50% exit (not full exit)
+            write_log(f"TP1_50PCT_EXIT: {symbol} | Exited: {exit_qty} | Remaining: {remaining_qty} | Profit: {profit_pct:.2f}%")
             
-            # Update auto-reentry tracking if enabled
-            if ENABLE_AUTO_REENTRY:
-                await handle_any_exit(symbol, trade, current_price, "TP1_50PCT")
-    
+            log(f"✅ 50% position exited for {symbol}. Remaining: {remaining_qty}")
+        else:
+            log(f"❌ Failed to execute 50% exit for {symbol}", level="ERROR")
+            return False
+        
         # Move SL to breakeven for remaining 50%
-        entry_price = trade.get("entry_price")
         sl_updated = await update_stop_loss_order(symbol, trade, entry_price)
-
-        # Send notification - Updated message
+        
+        if sl_updated:
+            log(f"🛡️ Stop loss moved to breakeven for {symbol}: {entry_price}")
+        else:
+            log(f"⚠️ Failed to update stop loss to breakeven for {symbol}", level="WARN")
+        
+        # Activate trailing for remaining position
+        trade["trailing_active"] = True
+        trade["trailing_sl"] = entry_price  # Start trailing from breakeven
+        
+        # Send notification
         await send_telegram_message(
-            f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price}\n"
-            f"💰 50% Position Exited (50% remaining)\n"
-            f"🛡️ SL Moved to Breakeven\n"
-            f"📍 Trailing {trade.get('trailing_pct', 1.0)}% active for remaining 50%"
+            f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price:.6f}\n"
+            f"💰 50% Position Exited ({exit_qty} units)\n"
+            f"📍 50% Remaining ({remaining_qty} units)\n"
+            f"🛡️ SL Moved to Breakeven ({entry_price:.6f})\n"
+            f"📈 Trailing stop active for remaining position"
         )
         
+        # Save changes
         save_active_trades()
         return True
         
     except Exception as e:
         log(f"❌ Error handling TP1 hit for {symbol}: {e}", level="ERROR")
+        import traceback
+        log(traceback.format_exc(), level="ERROR")
         return False
 
 async def handle_trailing_sl_hit(symbol, trade, current_price, direction):
