@@ -1568,12 +1568,12 @@ async def check_missed_tp1_hits():
 
 async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_attempts=3):
     """
-    Execute a partial exit with retry logic
+    Execute a partial exit with retry logic - FIXED VERSION
     
     Args:
         symbol: Trading symbol
         trade: Trade object from active_trades
-        exit_percentage: Percentage of position to exit (e.g., 33 for 33%)
+        exit_percentage: Percentage of position to exit (e.g., 50 for 50%)
         max_attempts: Maximum retry attempts
         
     Returns:
@@ -1600,39 +1600,42 @@ async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_at
     
     log(f"🔍 Attempting partial exit for {symbol}: {exit_qty} units ({exit_percentage}% of {total_qty})")
     
-    # Try to execute the exit with retries
+    # Try to execute the partial exit with retry logic
     for attempt in range(max_attempts):
         try:
-            # Execute market order
-            side = "Sell" if direction == "long" else "Buy"
+            # Determine order side for exit
+            if direction == "long":
+                order_side = "Sell"  # Sell to exit long position
+            else:
+                order_side = "Buy"   # Buy to exit short position
             
+            # Place market order to exit partial position
             result = await place_market_order(
                 symbol=symbol,
-                side=side,
-                qty=str(exit_qty),
-                market_type="linear",
-                reduce_only=True
+                side=order_side,
+                qty=exit_qty,
+                order_type="Market"
             )
             
-            if result.get("retCode") == 0:
-                # Update trade record with remaining quantity
-                trade["qty"] = round_qty(symbol, total_qty - exit_qty)
+            if result and result.get("retCode") == 0:
+                log(f"✅ Partial exit successful for {symbol}: {exit_qty} units")
                 
-                # Log the partial exit
-                log(f"💰 Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
-                write_log(f"PARTIAL EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
+                # CRITICAL: Update remaining quantity but DON'T set exited = True
+                remaining_qty = total_qty - exit_qty
+                trade["qty"] = remaining_qty  # Update to remaining quantity
                 
-                # Record in exit tranches history
+                # Track the exit in history
                 if "exit_tranches_history" not in trade:
                     trade["exit_tranches_history"] = []
                 
                 trade["exit_tranches_history"].append({
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "percentage": exit_percentage,
-                    "qty": exit_qty
+                    "qty": exit_qty,
+                    "remaining_qty": remaining_qty
                 })
                 
-                save_active_trades()
+                log(f"✅ Position updated for {symbol}: {exit_qty} exited, {remaining_qty} remaining")
                 return True
             else:
                 log(f"❌ Partial exit attempt {attempt+1}/{max_attempts} failed: {result.get('retMsg')}", level="ERROR")
