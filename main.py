@@ -242,6 +242,27 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
     
     return True
 
+def extract_last_pattern_enhanced(candles_by_tf):
+    """Enhanced pattern extraction with strength analysis"""
+    best_pattern = None
+    best_strength = 0
+    best_tf = None
+    
+    for tf in sorted(candles_by_tf, key=lambda x: int(x)):
+        candles = candles_by_tf[tf]
+        pattern = detect_pattern(candles)
+        
+        if pattern:
+            strength = analyze_pattern_strength(pattern, candles)
+            if strength > best_strength:
+                best_pattern = pattern
+                best_strength = strength
+                best_tf = tf
+    
+    if best_pattern:
+        log(f"🎯 Best pattern: {best_pattern} on {best_tf}m TF (strength: {best_strength:.2f})")
+    
+    return best_pattern
 
 async def stealth_activity_report():
     """Report on stealth accumulation activity"""
