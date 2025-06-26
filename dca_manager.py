@@ -218,8 +218,27 @@ class DCAManager:
                 trade["sl_order_id"] = sl_result.get("result", {}).get("orderId")
                 trade["original_sl"] = new_sl
             
-            # Update TP levels
-            trade["tp1_target"] = new_tp
+            # 1) cancel old TP
+            if trade.get("tp1_order_id"):
+                await signed_request("POST", "/v5/order/cancel", {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "orderId": trade["tp1_order_id"]
+                })
+ 
+            #2) place new TP limit
+            tp_qty = round_qty(symbol, new_total_qty * 0.5)
+            new_tp_order_id = await place_take_profit_order(
+                symbol=symbol,
+                direction=direction,
+                qty=tp_qty,
+                tp_price=new_tp,
+                market_type="linear"
+            )
+ 
+     # 3) write back so the rest of your system reads the updated TP
+            trade["tp1_order_id"] = new_tp_order_id
+            trade["tp1_price"]    = new_tp
             
             # Send notification
             await send_telegram_message(
