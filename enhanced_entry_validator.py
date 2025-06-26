@@ -38,10 +38,6 @@ class EntryValidator:
             # Only block if score is low
             if score < 8:
                 return False, momentum_reason
-        
-        # 3. Skip other checks if score is high enough
-        if score >= 9:
-            return True, "High score - bypassing strict checks"
             
         # 4. Check key levels (only for lower scores)
         levels_valid, levels_reason = self.check_key_levels(
@@ -141,7 +137,7 @@ class EntryValidator:
             return True, "No key levels detected"
             
         # INCREASED distance requirement (less strict)
-        min_distance_pct = 0.2  # Reduced from 0.3% to 0.2%
+        min_distance_pct = 0.4  # Reduced from 0.3% to 0.2%
         
         for level_type, level_price in levels.items():
             distance_pct = abs((entry_price - level_price) / level_price) * 100
@@ -240,7 +236,7 @@ class EntryValidator:
                 body_ratio = body_size / total_range
                 
                 # Doji = small body
-                if body_ratio < 0.2:  # Reduced from 0.3
+                if body_ratio < 0.3:  # Reduced from 0.3
                     doji_count += 1
         
         # Only exhausted if 4+ dojis out of 5 candles
