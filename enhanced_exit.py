@@ -263,7 +263,7 @@ async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_at
 
 async def execute_tp1_strategy(symbol, trade, current_price, candles):
     """
-    Comprehensive function to handle TP1 hit and related actions
+    FIXED: Comprehensive function to handle TP1 hit - Only exits 50% of position
     
     Args:
         symbol: Trading symbol
@@ -277,56 +277,57 @@ async def execute_tp1_strategy(symbol, trade, current_price, candles):
     try:
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
+        total_qty = trade.get("qty", 0)
         
-        if not entry_price or not direction:
+        if not entry_price or not direction or total_qty <= 0:
             log(f"❌ Cannot execute TP1 for {symbol}: Missing trade data", level="ERROR")
             return False
         
         log(f"🎯 Executing TP1 strategy for {symbol} at {current_price}")
         
-        # 1. Mark TP1 as hit in trade object
+        # 1. Mark TP1 as hit in trade object - DON'T SET EXITED = TRUE
         trade["tp1_hit"] = True
         trade["tp1_hit_cycle"] = trade.get("cycles", 0)
         trade["break_even_triggered"] = True
         trade["tp1_price"] = current_price
-
-        if first_tranche_executed:
-            # Calculate current profit
-            if direction == "long":
-                profit_pct = ((current_price - entry_price) / entry_price) * 100
-            else:
-                profit_pct = ((entry_price - current_price) / entry_price) * 100
-            
-            # This is a partial exit, not a full exit, so we don't log_exit here
-            # Just update performance tracking
-            write_log(f"TP1_PARTIAL: {symbol} | Profit at TP1: {profit_pct:.2f}%")
         
-        # 2. Calculate exit tranches if not already calculated
-        if not trade.get("exit_tranches"):
-            # Check for momentum to optimize exit tranches
-            has_momentum = detect_momentum_surge(candles) if candles else False
-            volatility = 1.0  # Default/normal volatility
-            
-            # Calculate dynamic exit tranches based on trade type
-            from exit_manager import calculate_exit_tranches
-            exit_tranches = calculate_exit_tranches(
-                symbol=symbol,
-                total_qty=trade.get("qty", 0)
-            )
-            
-            trade["exit_tranches"] = exit_tranches
-            log(f"📊 Calculated exit tranches for {symbol}: {exit_tranches}")
+        # 2. Calculate 50% exit quantity
+        exit_qty = total_qty * 0.5  # 50% of position
+        
+        # Round to proper decimal places based on symbol
+        from symbol_info import round_qty
+        exit_qty = round_qty(symbol, exit_qty)
+        exit_qty = min(exit_qty, total_qty)
+        
+        log(f"🔍 Executing 50% partial exit: {exit_qty} units out of {total_qty}")
         
         # 3. Execute first partial exit (retry up to 3 times)
         first_tranche_executed = False
-        exit_success = await execute_partial_exit_with_retry(symbol, trade, 33)  # Exit 33% of position
+        exit_success = await execute_partial_exit_with_retry(symbol, trade, 50)  # 50% exit
         
         if exit_success:
+            # CRITICAL: Update remaining quantity
+            remaining_qty = total_qty - exit_qty
+            trade["qty"] = remaining_qty  # Update to remaining position size
+            
             trade["tp1_partial_exit"] = True
-            log(f"💰 First partial exit executed for {symbol}")
+            log(f"💰 50% partial exit executed for {symbol}. Remaining: {remaining_qty}")
             first_tranche_executed = True
+            
+            # Track the exit
+            if "exit_tranches_history" not in trade:
+                trade["exit_tranches_history"] = []
+            
+            trade["exit_tranches_history"].append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "percentage": 50,
+                "qty": exit_qty,
+                "price": current_price,
+                "reason": "TP1_Strategy"
+            })
+            
         else:
-            log(f"⚠️ First partial exit failed for {symbol}", level="WARN")
+            log(f"⚠️ 50% partial exit failed for {symbol}", level="WARN")
         
         # 4. Move stop loss to breakeven (retry up to 3 times)
         sl_updated = False
@@ -344,6 +345,8 @@ async def execute_tp1_strategy(symbol, trade, current_price, candles):
                     
                     if sl_updated:
                         log(f"🛡️ Stop loss moved to breakeven for {symbol}: {entry_price}")
+                        trade["trailing_sl"] = entry_price  # Set initial trailing SL
+                        trade["trailing_active"] = True     # Activate trailing
                     else:
                         log(f"❌ Failed to update SL to breakeven for {symbol}", level="ERROR")
                 
@@ -358,35 +361,37 @@ async def execute_tp1_strategy(symbol, trade, current_price, candles):
             await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
             
         # 5. Send notification of TP1 hit
-        msg = f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b>"
+        msg = f"🎯 <b>TP1 Hit</b> on <b>{symbol}</b> @ {current_price:.6f}"
         if first_tranche_executed:
-            msg += f"\n💰 {trade['exit_tranches'][0] if trade.get('exit_tranches') else '33%'} Partial Exit Executed"
+            msg += f"\n💰 50% Position Exited ({exit_qty} units)"
+            msg += f"\n📍 50% Remaining ({trade['qty']} units)"
         if sl_updated:
-            msg += f"\n🛡️ SL Moved to Breakeven: {entry_price}"
+            msg += f"\n🛡️ SL Moved to Breakeven: {entry_price:.6f}"
+            msg += f"\n📈 Trailing stop active for remaining position"
             
         await send_telegram_message(msg)
         
-        # 6. Log for analysis
-        write_log(f"TP1 HIT: {symbol} | Price: {current_price} | Exit Status: {first_tranche_executed} | SL Update: {sl_updated}")
+        # 6. Log for analysis - Log as PARTIAL exit, not full exit
+        if first_tranche_executed:
+            # Calculate profit for the exited portion
+            if direction == "long":
+                profit_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            # This is a partial exit, not a full exit, so we don't log_exit here
+            # Just update performance tracking
+            write_log(f"TP1_PARTIAL_50PCT: {symbol} | Profit at TP1: {profit_pct:.2f}% | Remaining: {trade['qty']}")
         
-        from activity_logger import log_trade_to_file
-        log_trade_to_file(
-            symbol=symbol,
-            direction=direction,
-            entry=entry_price,
-            sl=entry_price,  # Now at breakeven
-            tp1=current_price,
-            tp2=None,
-            result="tp1",
-            score=trade.get("score_history", [0])[-1] if trade.get("score_history") else 0,
-            trade_type=trade.get("trade_type", "Unknown"),
-            confidence=0  # Not tracking confidence here
-        )
+        # 7. Save changes
+        from monitor import save_active_trades
+        save_active_trades()
         
-        return first_tranche_executed and sl_updated
+        return first_tranche_executed
         
     except Exception as e:
         log(f"❌ Error in TP1 strategy execution for {symbol}: {e}", level="ERROR")
+        import traceback
         log(f"Stack trace: {traceback.format_exc()}", level="ERROR")
         return False
 
