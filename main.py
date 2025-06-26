@@ -1359,7 +1359,7 @@ async def scan_for_new_signals(symbols,trend_context):
 
             if trade:
                 log(f"🛒 Trade placed successfully for {symbol} at {trade['entry_price']}")
-                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry_price']} | SL: {trade['sl_price']} | TP1: {trade['tp1']}")
+                write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry_price']} | SL: {trade['sl_price']} | TP1: {trade['tp1_price']}")
 
             
                 track_active_trade(
