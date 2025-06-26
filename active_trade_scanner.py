@@ -57,12 +57,12 @@ _last_save_time = 0
 _save_cooldown = 5  # 5 seconds between saves
 
 async def handle_trailing_sl_exit(symbol, trade, current_price):
-    """Handle trailing stop loss exit for HF scanner"""
+    """Handle trailing stop loss exit for HF scanner - Updated for 50/50"""
     try:
         direction = trade.get("direction", "").lower()
         entry_price = trade.get("entry_price")
         
-        # Calculate profit percentage
+        # Calculate total profit percentage
         if direction == "long":
             profit_pct = ((current_price - entry_price) / entry_price) * 100
         else:
@@ -75,19 +75,20 @@ async def handle_trailing_sl_exit(symbol, trade, current_price):
         trade["profit_pct"] = profit_pct
         trade["modified"] = True
         
-        # Send notification
+        # Send notification - Updated for 50/50 strategy
         await send_telegram_message(
-            f"💔 <b>Trailing SL Hit</b> on <b>{symbol}</b>\n"
+            f"💔 <b>HF Scanner: Trailing SL</b> on <b>{symbol}</b>\n"
             f"Exit Price: {current_price:.6f}\n"
-            f"Profit: {profit_pct:.2f}%\n"
-            f"Reason: Price hit trailing stop"
+            f"Total Trade Profit: {profit_pct:.2f}%\n"
+            f"Strategy: 50% secured @ TP1\n"
+            f"Final 50% exit via trailing SL"
         )
         
         # Log the exit
-        log(f"💔 HF SCANNER: Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% profit)")
-        write_log(f"HF_SCANNER_TRAILING_EXIT: {symbol} | Price: {current_price} | Profit: {profit_pct:.2f}%")
+        log(f"💔 HF SCANNER: Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% total profit)")
+        write_log(f"HF_SCANNER_TRAILING_FINAL: {symbol} | Price: {current_price} | Total Profit: {profit_pct:.2f}%")
         
-        # Log to activity file
+        # Log to activity file with 50/50 strategy context
         log_trade_to_file(
             symbol=symbol,
             direction=direction,
@@ -95,18 +96,11 @@ async def handle_trailing_sl_exit(symbol, trade, current_price):
             sl=trade.get("trailing_sl"),
             tp1=trade.get("tp1_target"),
             tp2=None,
-            result="trailing_sl",
+            result="trailing_sl_50_50",  # New result type
             score=trade.get("score_history", [0])[-1] if trade.get("score_history") else 0,
             trade_type=trade.get("trade_type", "Unknown"),
             confidence=0
         )
-        
-        # Update reentry tracking if enabled
-        from config import ENABLE_AUTO_REENTRY
-        if ENABLE_AUTO_REENTRY:
-            from auto_reentry import log_exit, update_reentry_performance
-            log_exit(symbol, trade, price=current_price, reason="Trailing_SL_Hit", profit_pct=profit_pct)
-            update_reentry_performance(symbol, success=(profit_pct > 0), profit_pct=profit_pct)
         
         return True
         
@@ -207,241 +201,122 @@ async def fetch_current_price(symbol):
         log(f"❌ HF SCANNER: Error fetching price for {symbol}: {e}", level="ERROR")
     return None
 
-async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_attempts=3):
-    """Execute a partial exit with retry logic - HF scanner version"""
-    direction = trade.get("direction", "").lower()
-    total_qty = trade.get("qty", 0)
-    
-    if not direction or not total_qty or total_qty <= 0:
-        log(f"❌ HF SCANNER: Cannot execute partial exit for {symbol}: Invalid trade data", level="ERROR")
-        return False
-    
-    # Calculate exit quantity
-    exit_qty = total_qty * (exit_percentage / 100)
-    
-    # Ensure exit quantity meets minimum requirements
-    from symbol_info import round_qty
-    min_qty = 0.001  # Default minimum quantity
-    
-    exit_qty = max(round_qty(symbol, exit_qty), min_qty)
-    
-    # Don't exit more than we have
-    exit_qty = min(exit_qty, total_qty)
-    
-    log(f"🔍 HF SCANNER: Attempting partial exit for {symbol}: {exit_qty} units ({exit_percentage}% of {total_qty})")
-    
-    # Try to execute the exit with retries
-    for attempt in range(max_attempts):
-        try:
-            # Execute market order
-            side = "Sell" if direction == "long" else "Buy"
+async def handle_tp1_detection(symbol, trade, current_price):
+    """Handle TP1 detection in high-frequency scanner - 50% exit"""
+    try:
+        log(f"🎯 HF SCANNER: TP1 detected for {symbol} at {current_price}")
+        
+        # Execute 50% partial exit
+        exit_success = await execute_partial_exit_with_retry(symbol, trade, 50)  # 50% instead of 33%
+        
+        if exit_success:
+            trade["tp1_hit"] = True
+            trade["tp1_partial_exit"] = True
+            trade["tp1_price_actual"] = current_price
             
-            result = await place_market_order(
-                symbol=symbol,
-                side=side,
-                qty=str(exit_qty),
-                market_type="linear",
-                reduce_only=True
+            # Calculate profit at TP1
+            entry_price = trade.get("entry_price")
+            direction = trade.get("direction", "").lower()
+            
+            if direction == "long":
+                profit_pct = ((current_price - entry_price) / entry_price) * 100
+            else:
+                profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            # Send notification
+            await send_telegram_message(
+                f"🎯 <b>HF Scanner TP1</b> on <b>{symbol}</b>\n"
+                f"Price: {current_price:.6f}\n"
+                f"50% Position Exited\n"
+                f"Profit: {profit_pct:.2f}%\n"
+                f"50% remaining for trailing"
             )
             
-            if result.get("retCode") == 0:
-                # Update trade record with remaining quantity
-                trade["qty"] = round_qty(symbol, total_qty - exit_qty)
-                
-                # Log the partial exit
-                log(f"💰 HF SCANNER: Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
-                write_log(f"HF_SCANNER_PARTIAL_EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
-                
-                # Record in exit tranches history
-                if "exit_tranches_history" not in trade:
-                    trade["exit_tranches_history"] = []
-                
-                trade["exit_tranches_history"].append({
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "percentage": exit_percentage,
-                    "qty": exit_qty,
-                    "source": "hf_scanner_let_winners_run"
-                })
-                
-                return True
-            else:
-                log(f"❌ HF SCANNER: Partial exit attempt {attempt+1}/{max_attempts} failed: {result.get('retMsg')}", level="ERROR")
-                
-                # Brief pause before retry
-                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
-        except Exception as e:
-            log(f"❌ HF SCANNER: Error in partial exit attempt {attempt+1}/{max_attempts}: {e}", level="ERROR")
+            # Log the 50% exit
+            write_log(f"HF_SCANNER_TP1_50PCT: {symbol} | Price: {current_price} | Profit: {profit_pct:.2f}%")
             
-            # Brief pause before retry
-            await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
-    
-    # If we get here, all attempts failed
-    log(f"❌ HF SCANNER: All partial exit attempts failed for {symbol}", level="ERROR")
-    return False
+            # Mark for trailing stop management
+            trade["trailing_active"] = True
+            trade["breakeven_target"] = entry_price
+            
+            log(f"✅ HF SCANNER: 50% TP1 exit completed for {symbol}")
+            return True
+            
+    except Exception as e:
+        log(f"❌ HF SCANNER: Error in TP1 detection for {symbol}: {e}", level="ERROR")
+        return False
 
-async def process_active_trade(symbol, trade, live_candles):
-    """Process a single active trade - focused on TP1 and trailing only"""
-    
-    # Skip if already being processed
-    if symbol in _processing_symbols:
-        return
-        
-    # Skip exited trades
-    if trade.get("exited"):
-        return
-    
-    # Validate trade data
-    direction = trade.get("direction", "").lower()
-    entry_price = trade.get("entry_price")
-    trade_type = trade.get("trade_type", "Intraday")
-    trade_type_normalized = trade_type.strip().title()
-    trade_type_normalized = trade_type.strip().title()  # Convert to Title Case
-
-    # Map common variations
-    trade_type_map = {
-        "Scalp": "Scalp",
-        "Scalping": "Scalp",
-        "Intraday": "Intraday",
-        "Intra": "Intraday",
-        "Day": "Intraday",
-        "Swing": "Swing",
-        "Position": "Swing"
-    }
-
-    # Get the correct trade type
-    trade_type = trade_type_map.get(trade_type_normalized, trade_type_normalized)
-
-    # Validate trade type
-    if trade_type not in ["Scalp", "Intraday", "Swing"]:
-        log(f"⚠️ HF SCANNER: Invalid trade type '{trade.get('trade_type')}' for {symbol}, defaulting to Intraday")
-        trade_type = "Intraday"  # Default to Intraday instead of Scalp
-    
-    if not direction or not entry_price:
-        return
-    
-    _processing_symbols.add(symbol)
-    
+async def scan_active_trade(symbol, trade):
+    """Main scanning function for active trades - Updated for 50/50"""
     try:
+        if trade.get("exited"):
+            return
+            
+        direction = trade.get("direction", "").lower()
+        entry_price = trade.get("entry_price")
+        tp1_target = trade.get("tp1_target")
+        trailing_pct = trade.get("trailing_pct", 1.0)
+        
         # Get current price
-        price_data = await fetch_current_price(symbol)
+        price_data = await get_current_price(symbol)
         if not price_data:
             return
             
-        current_price = price_data.get("mark_price", price_data.get("last_price", 0))
+        current_price = price_data.get("mark_price", 0)
         if current_price <= 0:
             return
         
-        # Get candles for momentum detection
-        candles = None
-        if symbol in live_candles and '1' in live_candles[symbol]:
-            candles = list(live_candles[symbol]['1'])
-        
-        # Get fixed percentages
-        fixed_params = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])
-        tp1_pct = fixed_params["tp1_pct"]
-        trailing_pct = fixed_params["trailing_pct"]
-        
-        # FOCUS 1: TP1 Detection (if not already hit)
-        if not trade.get("tp1_hit"):
-            tp1_level = trade.get("tp1_target")
-            if not tp1_level:
-                tp1_level = entry_price * (1 + tp1_pct/100) if direction == "long" else entry_price * (1 - tp1_pct/100)
-                trade["tp1_target"] = tp1_level
-            
-            # Check for TP1 hit
+        # Check for TP1 hit (if not already hit)
+        if not trade.get("tp1_hit") and tp1_target:
             tp1_hit = False
-            if direction == "long" and current_price >= tp1_level:
-                tp1_hit = True
-            elif direction == "short" and current_price <= tp1_level:
-                tp1_hit = True
             
-            # Check candle wicks
-            if not tp1_hit and candles and len(candles) >= 2:
-                last_candle = candles[-1]
-                if direction == "long" and float(last_candle["high"]) >= tp1_level:
-                    tp1_hit = True
-                elif direction == "short" and float(last_candle["low"]) <= tp1_level:
-                    tp1_hit = True
-            
+            if direction == "long" and current_price >= tp1_target:
+                tp1_hit = True
+            elif direction == "short" and current_price <= tp1_target:
+                tp1_hit = True
+                
             if tp1_hit:
-                log(f"🎯 HF SCANNER: TP1 hit detected for {symbol} at {current_price}")
-                
-                # Mark TP1 as hit
-                trade["tp1_hit"] = True
-                trade["tp1_price"] = tp1_level
-                trade["trailing_pct"] = trailing_pct
-                trade["modified"] = True
-                
-                # Execute partial exit
-                if not trade.get("tp1_partial_exit"):
-                    exit_success = await execute_partial_exit_with_retry(symbol, trade, 20)
-                    if exit_success:
-                        trade["tp1_partial_exit"] = True
-                
-                # Send notification
-                await send_telegram_message(
-                    f"🎯 <b>HF Scanner: TP1 Hit</b> on <b>{symbol}</b>\n"
-                    f"Target: {tp1_level:.6f}\n"
-                    f"Current: {current_price:.6f}\n"
-                    f"🚀 20% exit, 80% riding!\n"
-                    f"📍 Trailing: {trailing_pct}% active"
-                )
+                await handle_tp1_detection(symbol, trade, current_price)
+                return  # Exit early after TP1 processing
         
-        # FOCUS 2: Trailing Stop Updates (after TP1)
-        elif trade.get("tp1_hit") and trade.get("trailing_pct"):
+        # Handle trailing stop for remaining 50% (only after TP1 hit)
+        if trade.get("tp1_hit") and trade.get("trailing_active"):
             current_trailing_sl = trade.get("trailing_sl")
             
-            # Calculate new trailing SL
+            # Calculate new trailing stop
             if direction == "long":
-                new_sl = current_price * (1 - trailing_pct/100)
+                new_trailing_sl = current_price * (1 - trailing_pct/100)
             else:
-                new_sl = current_price * (1 + trailing_pct/100)
+                new_trailing_sl = current_price * (1 + trailing_pct/100)
             
-            new_sl = round(new_sl, 6)
+            new_trailing_sl = round(new_trailing_sl, 6)
             
-            # Check if update is needed (0.1% improvement)
+            # Update trailing SL if improved
             should_update = False
-            sl_updated = False  # at top of function
-            
             if current_trailing_sl is None:
                 should_update = True
-            elif direction == "long" and new_sl > current_trailing_sl:
-                improvement = ((new_sl - current_trailing_sl) / current_trailing_sl) * 100
-                if improvement >= 0.1:
-                    should_update = True
-            elif direction == "short" and new_sl < current_trailing_sl:
-                improvement = ((current_trailing_sl - new_sl) / current_trailing_sl) * 100
-                if improvement >= 0.1:
-                    should_update = True
+            elif direction == "long" and new_trailing_sl > current_trailing_sl:
+                should_update = True
+            elif direction == "short" and new_trailing_sl < current_trailing_sl:
+                should_update = True
             
             if should_update:
-                trade["trailing_sl"] = new_sl
-                trade["needs_sl_update"] = True
-                sl_updated = True
-                if sl_updated:
-                    trade["modified"] = True
-                    log(f"🔐 HF SCANNER: Trailing SL updated for {symbol} to {new_sl}")
-        
-        # FOCUS 3: Check for trailing SL hit
-        if trade.get("tp1_hit") and trade.get("trailing_sl"):
-            trailing_sl = trade.get("trailing_sl")
+                trade["trailing_sl"] = new_trailing_sl
+                trade["modified"] = True
+                log(f"🔄 HF SCANNER: Trailing SL updated for {symbol}: {new_trailing_sl}")
             
-            # Check with small buffer
+            # Check if trailing SL hit
             sl_hit = False
-            buffer = 0.002  # 0.2%
-            
-            if direction == "long" and current_price <= trailing_sl * (1 - buffer):
+            if direction == "long" and current_price <= new_trailing_sl:
                 sl_hit = True
-            elif direction == "short" and current_price >= trailing_sl * (1 + buffer):
+            elif direction == "short" and current_price >= new_trailing_sl:
                 sl_hit = True
-            
+                
             if sl_hit:
                 await handle_trailing_sl_exit(symbol, trade, current_price)
-                
+        
     except Exception as e:
-        log(f"❌ HF SCANNER: Error processing {symbol}: {e}", level="ERROR")
-    finally:
-        _processing_symbols.discard(symbol)
+        log(f"❌ HF SCANNER: Error scanning {symbol}: {e}", level="ERROR")
 
 async def high_frequency_scanner(live_candles):
     """Main high-frequency scanner loop - simplified and focused"""
