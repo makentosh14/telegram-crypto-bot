@@ -865,31 +865,6 @@ class PatternScanner:
             "inverted_hammer": lambda c: is_inverted_hammer(c[-1]) if len(c) >= 1 else False,
             "doji": lambda c: is_doji(c[-1]) if len(c) >= 1 else False,
         }
-
-def get_best_pattern(patterns_by_tf, trade_type="Scalp"):
-    """
-    Select the best pattern based on trade type:
-    - Scalp → prefer 1m/3m
-    - Intraday → prefer 5m/15m
-        - Swing → prefer 30m/1h/4h
-        """
-    tf_priority = {
-       "Scalp": ["1", "3"],
-        "Intraday": ["5", "15"],
-        "Swing": ["30", "60", "240"]
-    }
-    preferred_tfs = tf_priority.get(trade_type, ["1", "3"])
-    best = None
-    highest_strength = -1
-
-    for tf in preferred_tfs:
-        if tf in patterns_by_tf:
-            for pattern in patterns_by_tf[tf]:
-                if pattern["strength"] > highest_strength:
-                    best = pattern
-                    highest_strength = pattern["strength"]
-
-    return best
     
     def scan_all_patterns(self, candles: List[Dict]) -> Dict[str, bool]:
         """Scan for all patterns at once"""
