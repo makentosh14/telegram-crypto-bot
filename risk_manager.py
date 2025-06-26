@@ -551,24 +551,25 @@ async def calculate_position_size(symbol, candles_by_tf, account_balance, entry_
     return position_size, dollar_risk, leverage
 
 async def update_risk_metrics():
-    """Periodic task to update risk metrics from trading activity"""
+    """Updated risk manager with less frequent balance calls"""
     while True:
         try:
-            # Update account balance from Bybit
+            # Only fetch balance every 5 minutes instead of every update
             from bybit_api import get_futures_available_balance
-            balance = await get_futures_available_balance()
+            balance = await get_futures_available_balance(
+                force_refresh=False,
+                caller_name="risk_manager"
+            )
             
             if balance > 0:
                 update_account_balance(balance)
                 
-                # Log daily risk status
-                reset_daily_risk()  # Ensure daily tracking is current
-                log(f"📊 Daily Risk: {daily_risk['used_risk']:.2%} used, {daily_risk['remaining_risk']:.2%} remaining")
-                log(f"📉 Drawdown: Current {drawdown_tracking['current_drawdown']:.2%}, Max {drawdown_tracking['max_drawdown']:.2%}")
+                # Log daily risk status (less frequently)
+                reset_daily_risk()
+                log(f"📊 Daily Risk: {daily_risk['used_risk']:.2%} used")
             
         except Exception as e:
             log(f"❌ Error updating risk metrics: {e}", level="ERROR")
-            log(traceback.format_exc(), level="ERROR")
         
-        # Update every 15 minutes
+        # Update every 15 minutes (increased from frequent updates)
         await asyncio.sleep(900)
