@@ -207,7 +207,7 @@ async def handle_tp1_detection(symbol, trade, current_price):
         log(f"🎯 HF SCANNER: TP1 detected for {symbol} at {current_price}")
         
         # Execute 50% partial exit
-        exit_success = await execute_partial_exit_with_retry(symbol, trade, 50)  # 50% instead of 33%
+        exit_success = await execute_partial_exit_with_retry(symbol, trade, 50)  # 50% exit
         
         if exit_success:
             trade["tp1_hit"] = True
@@ -245,26 +245,59 @@ async def handle_tp1_detection(symbol, trade, current_price):
     except Exception as e:
         log(f"❌ HF SCANNER: Error in TP1 detection for {symbol}: {e}", level="ERROR")
         return False
-
-async def scan_active_trade(symbol, trade):
-    """Main scanning function for active trades - Updated for 50/50"""
-    try:
-        if trade.get("exited"):
-            return
-            
-        direction = trade.get("direction", "").lower()
-        entry_price = trade.get("entry_price")
-        tp1_target = trade.get("tp1_target")
-        trailing_pct = trade.get("trailing_pct", 1.0)
         
+async def process_active_trade(symbol, trade, live_candles):
+    """Process a single active trade - focused on TP1 and trailing only"""
+    
+    # Skip if already being processed
+    if symbol in _processing_symbols:
+        return
+        
+    # Skip exited trades
+    if trade.get("exited"):
+        return
+    
+    # Validate trade data
+    direction = trade.get("direction", "").lower()
+    entry_price = trade.get("entry_price")
+    trade_type = trade.get("trade_type", "Intraday")
+    
+    # Normalize trade type
+    trade_type_normalized = trade_type.strip().title()
+    trade_type_map = {
+        "Scalp": "Scalp",
+        "Scalping": "Scalp", 
+        "Intraday": "Intraday",
+        "Intra": "Intraday",
+        "Day": "Intraday",
+        "Swing": "Swing",
+        "Position": "Swing"
+    }
+    trade_type = trade_type_map.get(trade_type_normalized, "Intraday")
+    
+    # Validate trade type
+    if trade_type not in ["Scalp", "Intraday", "Swing"]:
+        log(f"⚠️ HF SCANNER: Invalid trade type '{trade.get('trade_type')}' for {symbol}, defaulting to Intraday")
+        trade_type = "Intraday"
+    
+    if not direction or not entry_price:
+        return
+    
+    _processing_symbols.add(symbol)
+    
+    try:
         # Get current price
-        price_data = await get_current_price(symbol)
+        price_data = await fetch_current_price(symbol)
         if not price_data:
             return
-            
+        
         current_price = price_data.get("mark_price", 0)
         if current_price <= 0:
             return
+        
+        # Get trade parameters
+        tp1_target = trade.get("tp1_target")
+        trailing_pct = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])["trailing_pct"]
         
         # Check for TP1 hit (if not already hit)
         if not trade.get("tp1_hit") and tp1_target:
@@ -277,10 +310,11 @@ async def scan_active_trade(symbol, trade):
                 
             if tp1_hit:
                 await handle_tp1_detection(symbol, trade, current_price)
+                trade["modified"] = True
                 return  # Exit early after TP1 processing
         
-        # Handle trailing stop for remaining 50% (only after TP1 hit)
-        if trade.get("tp1_hit") and trade.get("trailing_active"):
+        # Handle trailing stop for remaining position (only after TP1 hit)
+        if trade.get("tp1_hit") and not trade.get("exited"):
             current_trailing_sl = trade.get("trailing_sl")
             
             # Calculate new trailing stop
@@ -314,9 +348,14 @@ async def scan_active_trade(symbol, trade):
                 
             if sl_hit:
                 await handle_trailing_sl_exit(symbol, trade, current_price)
+                trade["modified"] = True
         
     except Exception as e:
-        log(f"❌ HF SCANNER: Error scanning {symbol}: {e}", level="ERROR")
+        log(f"❌ HF SCANNER: Error processing {symbol}: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+    finally:
+        # Always remove from processing set
+        _processing_symbols.discard(symbol)
 
 async def high_frequency_scanner(live_candles):
     """Main high-frequency scanner loop - simplified and focused"""
@@ -378,3 +417,4 @@ async def high_frequency_scanner(live_candles):
         sleep_time = max(0.1, ACTIVE_SCAN_INTERVAL - elapsed)
         
         await asyncio.sleep(sleep_time)
+        
