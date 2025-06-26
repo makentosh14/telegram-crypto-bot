@@ -123,7 +123,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             confidence=confidence,
             regime=regime,
             account_balance=account_balance,
-            risk_per_trade=max_risk * 100  # Convert to percentage
+            risk_per_trade=max_risk  # Pass as decimal (0.06 for 6%)
         )
         
     except Exception as e:
@@ -194,12 +194,34 @@ async def execute_trade_core(
             if len(sl_tp_result) >= 5:
                 sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
                 
-                # Calculate position size based on risk
-                risk_amount = account_balance * (risk_per_trade / 100)
+                # Calculate position size based on risk - FIXED CALCULATION
+                # Handle both decimal (0.06) and percentage (6.0) formats
+                if risk_per_trade > 1:
+                    # Assume it's already a percentage, convert to decimal
+                    risk_decimal = risk_per_trade / 100
+                else:
+                    # Assume it's already a decimal
+                    risk_decimal = risk_per_trade
+                
+                # Cap maximum risk at 3% per trade for safety
+                risk_decimal = min(risk_decimal, 0.03)
+                
+                risk_amount = account_balance * risk_decimal
                 price_diff = abs(current_price - sl_price)
+                
                 if price_diff > 0:
                     qty = risk_amount / price_diff
                     qty = round_qty(symbol, qty)
+                    
+                    # SAFETY CHECK: Limit maximum position size
+                    max_position_value = account_balance * 0.25  # Max 25% of account per trade
+                    position_value = qty * current_price
+                    
+                    if position_value > max_position_value:
+                        log(f"⚠️ Position too large ({position_value:.2f}), capping at 25% of account ({max_position_value:.2f})")
+                        qty = round_qty(symbol, max_position_value / current_price)
+                        
+                    log(f"📊 Position sizing: Risk={risk_decimal*100:.1f}%, Amount=${risk_amount:.2f}, Qty={qty}, Value=${qty*current_price:.2f}")
             else:
                 log(f"❌ Failed to calculate SL/TP for {symbol}", level="ERROR")
                 return None
