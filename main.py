@@ -1043,7 +1043,7 @@ async def scan_for_new_signals(symbols,trend_context):
 
         # ---- Primary strategy scoring ----
         from score import enhanced_score_symbol
-        score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
+        score, tf_scores, trade_type, indicator_scores, used_indicators, best_pattern  = enhanced_score_symbol(
             symbol, candles_by_tf, market_context=trend_context
         )
         direction = determine_direction(tf_scores)
@@ -1319,6 +1319,7 @@ async def scan_for_new_signals(symbols,trend_context):
                 "market_type": get_symbol_category(symbol),
                 "range_break_active": range_break_bonus > 0,
                 "range_break_details": range_break_details,
+                "best_pattern": best_pattern,
                 "range_break_confidence": break_confidence if range_break_bonus > 0 else 0
             })
 
