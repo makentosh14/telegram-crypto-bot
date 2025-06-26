@@ -36,46 +36,23 @@ _balance_cache_ttl = 30  # 30 seconds TTL for balance cache
 EXECUTION_STATES = {}
 
 async def get_account_balance():
-    """
-    Get account balance with caching to reduce API calls
-    
-    Returns:
-        float: Available account balance
-    """
-    global _cached_balance, _balance_timestamp
-    
-    # Use cached balance if it's recent enough
-    current_time = time.time()
-    if _cached_balance is not None and current_time - _balance_timestamp < _balance_cache_ttl:
-        log(f"💰 Using cached balance: {_cached_balance} USDT (cached {int(current_time - _balance_timestamp)}s ago)")
-        return _cached_balance
-    
-    # Fetch fresh balance
+    """Updated position manager balance function"""
     try:
-        usdt_balance = await get_futures_available_balance()
+        # Use optimized balance with caller identification
+        from bybit_api import get_futures_available_balance
+        usdt_balance = await get_futures_available_balance(
+            force_refresh=False, 
+            caller_name="position_manager"
+        )
         
         if usdt_balance > 0:
-            _cached_balance = usdt_balance
-            _balance_timestamp = current_time
-            log(f"💰 Fetched fresh balance: {usdt_balance} USDT")
             return usdt_balance
         else:
             log(f"⚠️ Invalid balance returned: {usdt_balance}", level="WARN")
-            if _cached_balance is not None:
-                log(f"💰 Using last known balance: {_cached_balance} USDT")
-                return _cached_balance
             return 0
             
     except Exception as e:
         log(f"❌ Failed to get wallet balance: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
-        
-        # Use cached balance as fallback if available
-        if _cached_balance is not None:
-            log(f"💰 Using last known balance due to error: {_cached_balance} USDT")
-            return _cached_balance
-        
-        return 0
 
 async def calculate_quantity(symbol, price, sl_price, account_balance, 
                             candles_by_tf, trade_type, strategy, confidence,
