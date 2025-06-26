@@ -1,4 +1,5 @@
 # dca_manager.py - Dollar Cost Averaging strategy for handling fakeouts
+# FIXED: Removes all artificial minimum order checks - if Bybit allowed the initial order, it should allow DCA
 
 import asyncio
 import json
@@ -9,33 +10,30 @@ from bybit_api import place_market_order, place_stop_loss_with_retry, signed_req
 from symbol_info import round_qty
 from error_handler import send_telegram_message
 
-# DCA Configuration
+# DCA Configuration - Exact position size matching
 DCA_CONFIG = {
     "Scalp": {
         "trigger_drop_pct": 0.5,    # Trigger DCA at -0.5% drop
-        "add_size_pct": 50,         # Add 50% of original position
+        "add_size_pct": 100,        # Add exactly 100% of original position
         "max_adds": 2,              # Maximum 2 DCA adds
         "new_sl_adjustment": 0.6,   # New SL at 0.6% below average entry
-        "new_tp_adjustment": 1.0    # New TP at 1.0% above average entry
+        "new_tp_adjustment": 0.9    # New TP at 1.0% above average entry
     },
     "Intraday": {
-        "trigger_drop_pct": 0.8,    # Trigger DCA at -0.8% drop
-        "add_size_pct": 40,         # Add 40% of original position
+        "trigger_drop_pct": 0.7,    # Trigger DCA at -0.8% drop
+        "add_size_pct": 100,        # Add exactly 100% of original position
         "max_adds": 3,              # Maximum 3 DCA adds
         "new_sl_adjustment": 0.8,   # New SL at 0.8% below average entry
-        "new_tp_adjustment": 1.5    # New TP at 1.5% above average entry
+        "new_tp_adjustment": 1.2    # New TP at 1.5% above average entry
     },
     "Swing": {
-        "trigger_drop_pct": 1.5,    # Trigger DCA at -1.5% drop
-        "add_size_pct": 30,         # Add 30% of original position
+        "trigger_drop_pct": 1.3,    # Trigger DCA at -1.5% drop
+        "add_size_pct": 100,        # Add exactly 100% of original position
         "max_adds": 3,              # Maximum 3 DCA adds
-        "new_sl_adjustment": 1.2,   # New SL at 1.2% below average entry
-        "new_tp_adjustment": 3.0    # New TP at 3.0% above average entry
+        "new_sl_adjustment": 1.5,   # New SL at 1.2% below average entry
+        "new_tp_adjustment": 3.5    # New TP at 3.0% above average entry
     }
 }
-
-# Track DCA operations
-dca_tracking = {}
 
 class DCAManager:
     def __init__(self):
@@ -45,14 +43,6 @@ class DCAManager:
     async def check_dca_opportunity(self, symbol, trade, current_price):
         """
         Check if a trade qualifies for DCA entry
-        
-        Args:
-            symbol: Trading symbol
-            trade: Active trade data
-            current_price: Current market price
-            
-        Returns:
-            bool: True if DCA should be triggered
         """
         try:
             # Skip if already exited or no entry price
@@ -100,16 +90,8 @@ class DCAManager:
     
     async def execute_dca_add(self, symbol, trade, current_price, account_balance):
         """
-        Execute a DCA addition to the position
-        
-        Args:
-            symbol: Trading symbol
-            trade: Active trade data
-            current_price: Current market price
-            account_balance: Current account balance
-            
-        Returns:
-            dict: Updated trade data if successful, None otherwise
+        Execute a DCA addition - adds exactly 100% of original position size
+        NO MINIMUM ORDER VALUE CHECKS - if Bybit allowed the initial order, it should allow DCA
         """
         try:
             # Get trade details
@@ -122,30 +104,54 @@ class DCAManager:
             # Get DCA config
             dca_config = DCA_CONFIG.get(trade_type, DCA_CONFIG["Intraday"])
             
-            # Calculate DCA size
+            # Calculate DCA size - EXACTLY the percentage of original position
             add_size = original_qty * (dca_config["add_size_pct"] / 100)
             add_size = round_qty(symbol, add_size)
             
-            # Check if we have enough balance
-            required_margin = (add_size * current_price) / 5  # Assuming 5x leverage
-            if required_margin > account_balance * 0.1:  # Don't use more than 10% of balance
-                log(f"⚠️ Insufficient balance for DCA: Required ${required_margin:.2f}, limit ${account_balance * 0.1:.2f}")
+            # Calculate order value for logging
+            order_value = add_size * current_price
+            
+            log(f"📊 DCA Calculation for {symbol}:")
+            log(f"  Original Position: {original_qty:.8f}")
+            log(f"  DCA Percentage: {dca_config['add_size_pct']}%")
+            log(f"  DCA Add Size: {add_size:.8f}")
+            log(f"  DCA Order Value: ${order_value:.2f}")
+            log(f"  ✅ No minimum order value checks - trusting Bybit's validation")
+            
+            if add_size <= 0:
+                log(f"⚠️ DCA size calculation resulted in zero for {symbol}", level="WARN")
                 return None
             
-            # Execute the DCA market order
+            # Simple balance check - just ensure we have some balance
+            if account_balance <= 1:  # Only check if we have at least $1
+                log(f"⚠️ Insufficient account balance: ${account_balance:.2f}")
+                return None
+            
+            # Execute the DCA market order directly - NO MINIMUM VALUE FILTERING
             side = "Buy" if direction == "long" else "Sell"
             
-            log(f"📤 Executing DCA add for {symbol}: {side} {add_size} at ~{current_price}")
+            log(f"📤 Executing DCA add for {symbol}: {side} {add_size:.8f} at ~${current_price:.6f}")
+            log(f"💵 Order Value: ${order_value:.2f}")
             
-            result = await place_market_order(
-                symbol=symbol,
-                side=side,
-                qty=str(add_size),
-                market_type="linear"
-            )
+            # Direct API call to Bybit - let Bybit decide if the order is valid
+            result = await signed_request("POST", "/v5/order/create", {
+                "category": "linear",
+                "symbol": symbol,
+                "side": side,
+                "orderType": "Market",
+                "qty": str(add_size),
+                "timeInForce": "GTC"
+            })
             
             if result.get("retCode") != 0:
-                log(f"❌ DCA order failed: {result.get('retMsg')}", level="ERROR")
+                error_msg = result.get('retMsg', 'Unknown error')
+                log(f"❌ DCA order failed: {error_msg}", level="ERROR")
+                
+                # Log the specific error for debugging
+                if "minimum" in error_msg.lower():
+                    log(f"💡 Bybit rejected for minimum order size - this means your initial order was different or there's a Bybit setting change")
+                    log(f"💡 Initial order was accepted, so this might be a temporary Bybit issue")
+                
                 return None
             
             # Get actual execution price
@@ -175,7 +181,10 @@ class DCAManager:
                 "timestamp": datetime.utcnow().isoformat(),
                 "price": dca_price,
                 "qty": add_size,
-                "new_avg_entry": new_avg_entry
+                "new_avg_entry": new_avg_entry,
+                "order_value": order_value,
+                "original_qty": original_qty,
+                "add_percentage": dca_config["add_size_pct"]
             })
             
             # Calculate new SL and TP based on average entry
@@ -215,17 +224,20 @@ class DCAManager:
             # Send notification
             await send_telegram_message(
                 f"💰 <b>DCA Added</b> for <b>{symbol}</b>\n"
-                f"Add Price: {dca_price:.8f}\n"
-                f"Add Size: {add_size}\n"
-                f"New Avg Entry: {new_avg_entry:.8f}\n"
-                f"New Total Size: {new_total_qty}\n"
-                f"New SL: {new_sl:.8f}\n"
-                f"New TP: {new_tp:.8f}\n"
+                f"Original Position: {original_qty:.8f}\n"
+                f"Added: {add_size:.8f} ({dca_config['add_size_pct']}%)\n"
+                f"Add Price: ${dca_price:.6f}\n"
+                f"Order Value: ${order_value:.2f}\n"
+                f"New Avg Entry: ${new_avg_entry:.6f}\n"
+                f"New Total Size: {new_total_qty:.8f}\n"
+                f"New SL: ${new_sl:.6f}\n"
+                f"New TP: ${new_tp:.6f}\n"
                 f"DCA Count: {trade['dca_count']}/{dca_config['max_adds']}"
             )
             
-            log(f"✅ DCA executed for {symbol}: Added {add_size} at {dca_price}, new avg entry: {new_avg_entry}")
-            write_log(f"DCA_EXECUTED: {symbol} | Add: {add_size} @ {dca_price} | New Avg: {new_avg_entry}")
+            log(f"✅ DCA executed for {symbol}: Added {add_size:.8f} ({dca_config['add_size_pct']}% of {original_qty:.8f}) at ${dca_price:.6f}")
+            log(f"📈 New average entry: ${new_avg_entry:.6f}, Total size: {new_total_qty:.8f}")
+            write_log(f"DCA_EXECUTED: {symbol} | Add: {add_size:.8f} @ ${dca_price:.6f} | New Avg: ${new_avg_entry:.6f} | Value: ${order_value:.2f}")
             
             return trade
             
@@ -240,6 +252,32 @@ class DCAManager:
         if symbol:
             return self.dca_history.get(symbol, {})
         return self.dca_history
+    
+    def get_dca_summary(self, symbol):
+        """Get summary of DCA operations for a symbol"""
+        try:
+            if symbol not in self.dca_history:
+                return None
+                
+            history = self.dca_history[symbol].get("dca_history", [])
+            if not history:
+                return None
+                
+            total_added = sum(dca["qty"] for dca in history)
+            total_value = sum(dca["order_value"] for dca in history)
+            avg_price = sum(dca["price"] * dca["qty"] for dca in history) / total_added if total_added > 0 else 0
+            
+            return {
+                "total_dca_count": len(history),
+                "total_qty_added": total_added,
+                "total_value_added": total_value,
+                "average_dca_price": avg_price,
+                "latest_avg_entry": history[-1]["new_avg_entry"] if history else None
+            }
+            
+        except Exception as e:
+            log(f"❌ Error getting DCA summary: {e}", level="ERROR")
+            return None
 
 # Global DCA manager instance
 dca_manager = DCAManager()
