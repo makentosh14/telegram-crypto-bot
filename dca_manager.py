@@ -218,27 +218,34 @@ class DCAManager:
                 trade["sl_order_id"] = sl_result.get("result", {}).get("orderId")
                 trade["original_sl"] = new_sl
             
-            # 1) cancel old TP
             if trade.get("tp1_order_id"):
-                await signed_request("POST", "/v5/order/cancel", {
-                    "category": "linear",
-                    "symbol": symbol,
-                    "orderId": trade["tp1_order_id"]
-                })
- 
-            #2) place new TP limit
+                try:
+                    await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": symbol,
+                        "orderId": trade["tp1_order_id"]
+                    })
+                except:
+                    pass
+
             tp_qty = round_qty(symbol, new_total_qty * 0.5)
-            new_tp_order_id = await place_take_profit_order(
-                symbol=symbol,
-                direction=direction,
-                qty=tp_qty,
-                tp_price=new_tp,
-                market_type="linear"
-            )
- 
-     # 3) write back so the rest of your system reads the updated TP
-            trade["tp1_order_id"] = new_tp_order_id
-            trade["tp1_price"]    = new_tp
+
+            # Place new TP1 limit order
+            tp_side = "Sell" if direction == "long" else "Buy"
+            tp_result = await signed_request("POST", "/v5/order/create", {
+                "category": "linear",
+                "symbol": symbol,
+                "side": tp_side,
+                "orderType": "Limit",
+                "qty": str(round_qty(symbol, new_total_qty * 0.5)),  # TP1 for 50%
+                "price": str(round(new_tp, 6)),
+                "timeInForce": "GTC",
+                "reduceOnly": True
+            })
+
+            if tp_result.get("retCode") == 0:
+                trade["tp1_order_id"] = tp_result["result"]["orderId"]
+                trade["tp1_target"] = new_tp
             
             # Send notification
             await send_telegram_message(
