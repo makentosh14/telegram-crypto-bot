@@ -149,7 +149,7 @@ def load_active_trades_directly():
         return {}
 
 def save_active_trades_directly(trades):
-    """Save active trades directly to file with debouncing"""
+    """Save active trades directly to file with debouncing and datetime handling"""
     global _last_save_time
     
     # Check if we saved recently
@@ -165,11 +165,52 @@ def save_active_trades_directly(trades):
             with open(PERSIST_PATH, 'r') as f:
                 existing_trades = json.load(f)
         
-        # Update with modified trades
-        existing_trades.update(trades)
+        # Process trades and handle datetime serialization
+        trades_to_save = {}
+        for symbol, trade in trades.items():
+            # Create a copy of the trade dictionary
+            trade_copy = dict(trade)
+            
+            # Convert any datetime objects to string format
+            for key, value in trade_copy.items():
+                if isinstance(value, datetime):
+                    trade_copy[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+                # Handle lists that might contain datetime objects
+                elif isinstance(value, list):
+                    converted_list = []
+                    for item in value:
+                        if isinstance(item, datetime):
+                            converted_list.append(item.strftime("%Y-%m-%d %H:%M:%S"))
+                        elif isinstance(item, dict):
+                            # Handle dictionaries within lists that might contain datetime objects
+                            converted_item = {}
+                            for k, v in item.items():
+                                if isinstance(v, datetime):
+                                    converted_item[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                                else:
+                                    converted_item[k] = v
+                            converted_list.append(converted_item)
+                        else:
+                            converted_list.append(item)
+                    trade_copy[key] = converted_list
+                # Handle nested dictionaries that might contain datetime objects
+                elif isinstance(value, dict):
+                    converted_dict = {}
+                    for k, v in value.items():
+                        if isinstance(v, datetime):
+                            converted_dict[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            converted_dict[k] = v
+                    trade_copy[key] = converted_dict
+            
+            trades_to_save[symbol] = trade_copy
         
+        # Update with modified trades
+        existing_trades.update(trades_to_save)
+        
+        # Write to file with proper JSON serialization
         with open(PERSIST_PATH, 'w') as f:
-            json.dump(existing_trades, f, indent=2)
+            json.dump(existing_trades, f, indent=2, default=str)
         
         # Update last save time
         _last_save_time = current_time
@@ -182,6 +223,10 @@ def save_active_trades_directly(trades):
         log(f"💾 HF SCANNER: Saved {len(trades)} updated trades")
     except Exception as e:
         log(f"❌ HF SCANNER: Error saving trades: {e}", level="ERROR")
+        # Log the specific error and trade data for debugging
+        log(f"❌ HF SCANNER: Trade data causing error: {trades}", level="ERROR")
+        import traceback
+        log(f"❌ HF SCANNER: Full traceback: {traceback.format_exc()}", level="ERROR")
 
 async def fetch_current_price(symbol):
     """Fetch current price for a symbol with optimized API call"""
