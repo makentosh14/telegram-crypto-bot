@@ -87,7 +87,51 @@ def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, 
         log(f"❌ Error getting account balance: {e}", level="ERROR")
         return 0.0
 
-async def execute_trade_if_valid(
+async def execute_trade_if_valid(signal_data, max_risk=0.06):
+    """
+    WRAPPER FUNCTION - Converts main.py's dictionary call to individual parameters
+    This maintains compatibility with existing main.py code
+    
+    Args:
+        signal_data: Dictionary containing all trade parameters
+        max_risk: Maximum risk percentage
+        
+    Returns:
+        dict: Trade execution details or None if failed
+    """
+    try:
+        # Extract parameters from signal_data dictionary
+        symbol = signal_data.get("symbol")
+        direction = signal_data.get("direction", "Long").lower()
+        strategy = signal_data.get("strategy", "core_strategy")
+        score = signal_data.get("score", 0)
+        confidence = signal_data.get("confidence", 60)
+        regime = signal_data.get("regime", "trending")
+        
+        # Get account balance if not provided
+        account_balance = signal_data.get("account_balance")
+        if not account_balance:
+            account_balance = await get_account_balance()
+        
+        # Call the actual execution function
+        return await execute_trade_core(
+            symbol=symbol,
+            direction=direction, 
+            signal_data=signal_data,
+            strategy=strategy,
+            score=score,
+            confidence=confidence,
+            regime=regime,
+            account_balance=account_balance,
+            risk_per_trade=max_risk * 100  # Convert to percentage
+        )
+        
+    except Exception as e:
+        log(f"❌ Error in execute_trade_if_valid wrapper: {e}", level="ERROR")
+        log(traceback.format_exc(), level="ERROR")
+        return None
+
+async def execute_trade_core(
     symbol, 
     direction, 
     signal_data, 
@@ -118,19 +162,47 @@ async def execute_trade_if_valid(
     try:
         log(f"🔄 EXECUTING TRADE: {direction} {symbol} | Strategy: {strategy}")
         
-        # Get execution parameters from main.py's signal_data
+        # Get execution parameters from signal_data
         category = signal_data.get("market_type", get_symbol_category(symbol))
-        qty = signal_data.get("qty", 0)
-        current_price = signal_data.get("price", 0)
-        sl_price = signal_data.get("sl_price", 0)
-        tp1_price = signal_data.get("tp1_price", 0)
         trade_type = signal_data.get("trade_type", "Intraday")
         
-        # Validate execution parameters (main.py should have calculated these)
-        if not all([category, qty > 0, current_price > 0, sl_price > 0, tp1_price > 0]):
-            log(f"❌ Invalid execution parameters from main.py for {symbol}", level="ERROR")
-            log(f"   Category: {category}, Qty: {qty}, Price: {current_price}, SL: {sl_price}, TP1: {tp1_price}")
-            return None
+        # Get prices from signal_data or calculate them
+        current_price = signal_data.get("price", 0)
+        if current_price <= 0:
+            current_price = await get_symbol_price(symbol, category)
+            
+        sl_price = signal_data.get("sl_price", 0)
+        tp1_price = signal_data.get("tp1_price", 0)
+        qty = signal_data.get("qty", 0)
+        
+        # If SL/TP/qty not provided, we need to calculate them
+        if not all([sl_price > 0, tp1_price > 0, qty > 0]):
+            # Get candles for calculation
+            candles_by_tf = signal_data.get("candles", {})
+            
+            # Calculate SL/TP using the imported function
+            sl_tp_result = calculate_dynamic_sl_tp(
+                candles_by_tf=candles_by_tf,
+                price=current_price,
+                trade_type=trade_type,
+                direction=direction,
+                score=score,
+                confidence=confidence,
+                regime=regime
+            )
+            
+            if len(sl_tp_result) >= 5:
+                sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = sl_tp_result[:5]
+                
+                # Calculate position size based on risk
+                risk_amount = account_balance * (risk_per_trade / 100)
+                price_diff = abs(current_price - sl_price)
+                if price_diff > 0:
+                    qty = risk_amount / price_diff
+                    qty = round_qty(symbol, qty)
+            else:
+                log(f"❌ Failed to calculate SL/TP for {symbol}", level="ERROR")
+                return None
         
         log(f"📊 EXECUTING: {symbol} | Qty: {qty} | Entry: {current_price} | SL: {sl_price} | TP1: {tp1_price}")
         
@@ -187,9 +259,15 @@ async def execute_trade_if_valid(
         try:
             from monitor import track_active_trade
             
-            # Get trailing percentage from signal_data (calculated by main.py)
+            # Get trailing percentage from signal_data or sl_tp_result
             trailing_pct = signal_data.get("trailing_pct", 1.0)
-            tp1_pct = signal_data.get("tp1_pct", 2.0)
+            if 'trailing_pct' in locals() and len(sl_tp_result) >= 4:
+                trailing_pct = sl_tp_result[3]
+            
+            # Get tp1_pct for monitor registration
+            tp1_pct = signal_data.get("tp1_pct", 2.0) 
+            if 'tp1_pct' in locals() and len(sl_tp_result) >= 5:
+                tp1_pct = sl_tp_result[4]
             
             track_active_trade(
                 symbol=symbol,
