@@ -1111,6 +1111,21 @@ async def monitor_trades(live_candles):
     if any(t.get("cycles", 0) > 0 for t in active_trades.values()):
         save_active_trades()
 
+async def get_account_balance():
+    """Get account balance from exchange - Monitor version"""
+    try:
+        from bybit_api import get_futures_available_balance
+        balance = await get_futures_available_balance()
+        if balance > 0:
+            log(f"💰 Account balance: {balance} USDT")
+            return balance
+        else:
+            log(f"⚠️ Invalid balance returned: {balance}", level="WARN")
+            return 10000.0  # Fallback balance for safety
+    except Exception as e:
+        log(f"❌ Error getting account balance in monitor: {e}", level="ERROR")
+        return 10000.0  # Fallback balance
+
 async def check_dca_safety(symbol, trade, add_size, account_balance):
     """
     Safety checks before executing DCA
@@ -1311,7 +1326,7 @@ async def handle_tp1_hit(symbol, trade, current_price):
         log(f"❌ Error handling TP1 hit for {symbol}: {e}", level="ERROR")
         return False
 
-async def handle_trailing_sl_exit(symbol, trade, current_price):
+async def handle_trailing_stop(symbol, trade, current_price):
     """Handle trailing stop loss exit - Updated message"""
     try:
         direction = trade.get("direction", "").lower()
