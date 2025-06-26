@@ -37,18 +37,18 @@ _processing_symbols = set()
 # FIXED PERCENTAGES for SL/TP
 FIXED_PERCENTAGES = {
     "Scalp": {
-        "tp1_pct": 1.2,      # +1.2% take profit
-        "sl_pct": 0.8,       # -0.8% stop loss
+        "tp1_pct": 0.9,      # +1.2% take profit
+        "sl_pct": 0.6,       # -0.8% stop loss
         "trailing_pct": 0.4  # 0.4% trailing stop
     },
     "Intraday": {
-        "tp1_pct": 2.0,      # +2.0% take profit
-        "sl_pct": 1.0,       # -1.0% stop loss
-        "trailing_pct": 1.0  # 1.0% trailing stop
+        "tp1_pct": 1.2,      # +2.0% take profit
+        "sl_pct": 0.8,       # -1.0% stop loss
+        "trailing_pct": 0.8  # 1.0% trailing stop
     },
     "Swing": {
-        "tp1_pct": 5.0,      # Keep existing for swing
-        "sl_pct": 2.0,       # Keep existing for swing
+        "tp1_pct": 3.5,      # Keep existing for swing
+        "sl_pct": 1.5,       # Keep existing for swing
         "trailing_pct": 1.5  # Keep existing for swing
     }
 }
