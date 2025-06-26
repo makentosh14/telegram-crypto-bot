@@ -183,10 +183,11 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
     
     # Lower confidence requirements
     min_confidence = {
-        "Scalp": 55,      # Reduced from 65
-        "Intraday": 60,   # Reduced from 70
-        "Swing": 65       # Reduced from 75
+        "Scalp": 65,
+        "Intraday": 70,
+        "Swing": 75
     }
+
 
     # Apply altseason confidence reduction
     if use_altseason_mode:
@@ -218,14 +219,14 @@ def meets_quality_standards(symbol, score, confidence, indicator_scores, used_in
     bearish_count = sum(1 for k, v in indicator_scores.items() if v < 0)
     
     # Allow more conflicts
-    if min(bullish_count, bearish_count) > 4:  # Increased from 2
+    if min(bullish_count, bearish_count) > 2:  # Increased from 2
         log(f"⚠️ {symbol}: Too many conflicting signals (Bull: {bullish_count}, Bear: {bearish_count})")
         return False
     
     # Require fewer strong indicators
     strong_indicators = [k for k, v in indicator_scores.items() if abs(v) > 0.7]  # Reduced from 0.8
-    if len(strong_indicators) < 1:
-        log(f"⚠️ {symbol}: No strong indicators found")
+    if len(strong_indicators) < 2:
+        log(f"⚠️ {symbol}: Not enough strong indicators ({len(strong_indicators)})")
         return False
     
     # Lower indicator count requirements
