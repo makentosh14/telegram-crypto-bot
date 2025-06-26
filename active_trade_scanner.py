@@ -245,6 +245,78 @@ async def handle_tp1_detection(symbol, trade, current_price):
     except Exception as e:
         log(f"❌ HF SCANNER: Error in TP1 detection for {symbol}: {e}", level="ERROR")
         return False
+
+async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_attempts=3):
+    """Execute a partial exit with retry logic - HF scanner version"""
+    direction = trade.get("direction", "").lower()
+    total_qty = trade.get("qty", 0)
+    
+    if not direction or not total_qty or total_qty <= 0:
+        log(f"❌ HF SCANNER: Cannot execute partial exit for {symbol}: Invalid trade data", level="ERROR")
+        return False
+    
+    # Calculate exit quantity
+    exit_qty = total_qty * (exit_percentage / 100)
+    
+    # Ensure exit quantity meets minimum requirements
+    from symbol_info import round_qty
+    min_qty = 0.001  # Default minimum quantity
+    
+    exit_qty = max(round_qty(symbol, exit_qty), min_qty)
+    
+    # Don't exit more than we have
+    exit_qty = min(exit_qty, total_qty)
+    
+    log(f"🔍 HF SCANNER: Attempting partial exit for {symbol}: {exit_qty} units ({exit_percentage}% of {total_qty})")
+    
+    # Try to execute the exit with retries
+    for attempt in range(max_attempts):
+        try:
+            # Execute market order
+            side = "Sell" if direction == "long" else "Buy"
+            
+            result = await place_market_order(
+                symbol=symbol,
+                side=side,
+                qty=str(exit_qty),
+                market_type="linear",
+                reduce_only=True
+            )
+            
+            if result.get("retCode") == 0:
+                # Update trade record with remaining quantity
+                trade["qty"] = round_qty(symbol, total_qty - exit_qty)
+                
+                # Log the partial exit
+                log(f"💰 HF SCANNER: Partial exit ({exit_percentage}%) executed for {symbol}: {exit_qty} out of {total_qty}")
+                write_log(f"HF_SCANNER_PARTIAL_EXIT: {symbol} | {exit_percentage}% | Qty: {exit_qty}/{total_qty}")
+                
+                # Record in exit tranches history
+                if "exit_tranches_history" not in trade:
+                    trade["exit_tranches_history"] = []
+                
+                trade["exit_tranches_history"].append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "percentage": exit_percentage,
+                    "qty": exit_qty,
+                    "source": "hf_scanner_50_percent"
+                })
+                
+                return True
+            else:
+                log(f"❌ HF SCANNER: Partial exit attempt {attempt+1}/{max_attempts} failed: {result.get('retMsg')}", level="ERROR")
+                
+                # Brief pause before retry
+                await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+        except Exception as e:
+            log(f"❌ HF SCANNER: Error in partial exit attempt {attempt+1}/{max_attempts}: {e}", level="ERROR")
+            
+            # Brief pause before retry
+            await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+    
+    # If we get here, all attempts failed
+    log(f"❌ HF SCANNER: All partial exit attempts failed for {symbol}", level="ERROR")
+    return False
         
 async def process_active_trade(symbol, trade, live_candles):
     """Process a single active trade - focused on TP1 and trailing only"""
@@ -417,4 +489,3 @@ async def high_frequency_scanner(live_candles):
         sleep_time = max(0.1, ACTIVE_SCAN_INTERVAL - elapsed)
         
         await asyncio.sleep(sleep_time)
-        
