@@ -8,8 +8,8 @@ from ema import detect_ema_crossover, calculate_ema_ribbon, analyze_ema_ribbon, 
 from bollinger import calculate_bollinger_bands, detect_band_walk, get_bollinger_signal, detect_bollinger_squeeze
 from pattern_detector import (
     detect_pattern, analyze_pattern_strength, detect_pattern_cluster,
-    get_pattern_direction, pattern_success_probability, get_all_patterns,
-    PATTERN_WEIGHTS, REVERSAL_PATTERNS, CONTINUATION_PATTERNS
+    get_pattern_direction, pattern_success_probability, get_all_patterns, 
+    get_best_pattern, PATTERN_WEIGHTS, REVERSAL_PATTERNS, CONTINUATION_PATTERNS
 )
 from volume import (is_volume_spike, get_average_volume, detect_volume_climax, 
                    get_volume_profile, get_volume_weighted_average_price, analyze_volume_trend)
@@ -77,6 +77,8 @@ def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
     original_score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
         symbol, candles_by_timeframe, market_context
     )
+
+    best_pattern = get_best_pattern(symbol, direction, trade_type, candles_by_tf)
     
     # If score is too low, skip enhanced checks
     if original_score < 5:
@@ -213,7 +215,7 @@ def enhanced_score_symbol(symbol, candles_by_timeframe, market_context=None):
     if divergences_found:
         log(f"   Divergences: {[d['type'] + ' ' + d['indicator'] for d in divergences_found]}")
     
-    return original_score, tf_scores, trade_type, indicator_scores, used_indicators
+    return original_score, tf_scores, trade_type, indicator_scores, used_indicators, best_pattern
 
 def detect_momentum_strength(candles, lookback=5):
     """Existing momentum detection function remains unchanged"""
