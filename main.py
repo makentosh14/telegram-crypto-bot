@@ -66,9 +66,9 @@ recent_swing_trades = {}  # Track recent swing trades by symbol with timestamp
 SWING_COOLDOWN = 3600  # 1 hour cooldown in seconds
 
 # Slightly reduced thresholds in volatile regime to capture more potential pumps
-MIN_SCALP_SCORE = 9
-MIN_INTRADAY_SCORE = 10
-MIN_SWING_SCORE = 11
+MIN_SCALP_SCORE = 9.5
+MIN_INTRADAY_SCORE = 10.5
+MIN_SWING_SCORE = 12
 
 # FIXED RISK PERCENTAGES - Add this after the existing thresholds
 FIXED_RISK_PERCENTAGES = {
