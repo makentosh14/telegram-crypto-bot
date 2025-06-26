@@ -13,14 +13,14 @@ from error_handler import send_telegram_message
 # DCA Configuration - Exact position size matching
 DCA_CONFIG = {
     "Scalp": {
-        "trigger_drop_pct": 0.5,    # Trigger DCA at -0.5% drop
+        "trigger_drop_pct": 0.4,    # Trigger DCA at -0.5% drop
         "add_size_pct": 100,        # Add exactly 100% of original position
         "max_adds": 2,              # Maximum 2 DCA adds
         "new_sl_adjustment": 0.6,   # New SL at 0.6% below average entry
         "new_tp_adjustment": 0.9    # New TP at 1.0% above average entry
     },
     "Intraday": {
-        "trigger_drop_pct": 0.7,    # Trigger DCA at -0.8% drop
+        "trigger_drop_pct": 0.6,    # Trigger DCA at -0.8% drop
         "add_size_pct": 100,        # Add exactly 100% of original position
         "max_adds": 3,              # Maximum 3 DCA adds
         "new_sl_adjustment": 0.8,   # New SL at 0.8% below average entry
