@@ -1,12 +1,12 @@
-# trade_executor.py - SIMPLIFIED VERSION: Only SL/TP placement, NO trailing stops
-# Let monitor.py and active_trade_scanner.py handle all trailing functionality
+# trade_executor.py - PURE EXECUTION ONLY
+# All strategies and logic are in main.py - this only executes what main.py decides
 
 import asyncio
 import traceback
 import json
 from datetime import datetime
 from logger import log, write_log
-from bybit_api import signed_request, place_market_order, get_symbol_price
+from bybit_api import signed_request, place_market_order
 from error_handler import send_telegram_message, send_error_to_telegram
 from config import DEFAULT_LEVERAGE
 from symbol_utils import get_symbol_category, round_qty
@@ -31,6 +31,54 @@ async def get_account_balance():
         
         log(f"❌ Failed to get account balance: {result.get('retMsg')}", level="ERROR")
         return 0.0
+
+async def get_symbol_price(symbol, category="linear"):
+    """Get current symbol price from exchange"""
+    try:
+        resp = await signed_request("GET", "/v5/market/tickers", {
+            "category": category,
+            "symbol": symbol
+        })
+        if resp.get("retCode") == 0:
+            return float(resp["result"]["list"][0]["lastPrice"])
+    except Exception as e:
+        log(f"❌ Error getting symbol price: {e}", level="ERROR")
+    return 0
+
+def calculate_dynamic_sl_tp(candles_by_tf, price, trade_type, direction, score, confidence, regime="trending", trend_context=None):
+    """
+    Calculate dynamic SL/TP - Compatibility function for main.py
+    This is a simplified version - main.py should handle the full logic
+    """
+    try:
+        # Import the enhanced function from sl_tp_utils
+        from sl_tp_utils import calculate_dynamic_sl_tp as enhanced_calculate_dynamic_sl_tp
+        
+        return enhanced_calculate_dynamic_sl_tp(
+            candles_by_tf=candles_by_tf,
+            entry_price=price,
+            trade_type=trade_type,
+            direction=direction,
+            score=score,
+            confidence=confidence,
+            regime=regime
+        )
+    except Exception as e:
+        log(f"❌ Error in dynamic SL/TP calculation: {e}", level="ERROR")
+        
+        # Fallback calculation
+        price = float(price)
+        sl_pct = 0.008 if trade_type == "Scalp" else 0.015 if trade_type == "Intraday" else 0.02
+        tp_pct = sl_pct * 1.5
+        
+        if direction.lower() == "long":
+            sl_price = price * (1 - sl_pct)
+            tp_price = price * (1 + tp_pct)
+        else:
+            sl_price = price * (1 + sl_pct)
+            tp_price = price * (1 - tp_pct)
+        
+        return sl_price, tp_price, sl_pct, 0.005, tp_pct
         
     except Exception as e:
         log(f"❌ Error getting account balance: {e}", level="ERROR")
@@ -48,70 +96,46 @@ async def execute_trade_if_valid(
     risk_per_trade=1.0
 ):
     """
-    SIMPLIFIED execute_trade_if_valid - Only places initial SL and TP orders
-    All trailing functionality handled by monitor.py and active_trade_scanner.py
+    PURE EXECUTION FUNCTION - Executes trades based on main.py decisions
+    
+    Args:
+        symbol: Trading symbol (from main.py)
+        direction: Trade direction (from main.py)
+        signal_data: Signal data with all calculations (from main.py)
+        strategy: Strategy name (from main.py)
+        score: Signal score (from main.py)
+        confidence: Signal confidence (from main.py)
+        regime: Market regime (from main.py)
+        account_balance: Account balance (from main.py)
+        risk_per_trade: Risk percentage (from main.py)
+        
+    Returns:
+        dict: Trade execution details or None if failed
     """
     try:
-        log(f"🔄 TRADE EXECUTOR: Executing {direction} trade for {symbol} | Strategy: {strategy}")
+        log(f"🔄 EXECUTING TRADE: {direction} {symbol} | Strategy: {strategy}")
         
-        # Step 1: Get symbol info and category
-        category = get_symbol_category(symbol)
-        if not category:
-            log(f"❌ Cannot determine category for {symbol}", level="ERROR")
-            return None
-        
-        # Step 2: Get account balance
-        if not account_balance or account_balance <= 0:
-            account_balance = await get_account_balance()
-            if account_balance <= 0:
-                log(f"❌ Invalid account balance: {account_balance} USDT", level="ERROR")
-                return None
-        
-        # Step 3: Calculate position size based on risk
-        current_price = await get_symbol_price(symbol, category)
-        if current_price <= 0:
-            log(f"❌ Invalid current price for {symbol}: {current_price}", level="ERROR")
-            return None
-        
-        # Get trade type from signal data
+        # Get execution parameters from main.py's signal_data
+        category = signal_data.get("market_type", get_symbol_category(symbol))
+        qty = signal_data.get("qty", 0)
+        current_price = signal_data.get("price", 0)
+        sl_price = signal_data.get("sl_price", 0)
+        tp1_price = signal_data.get("tp1_price", 0)
         trade_type = signal_data.get("trade_type", "Intraday")
         
-        # Use fixed risk percentages based on trade type
-        risk_percentages = {
-            "Scalp": {"tp1_pct": 0.9, "sl_pct": 0.6, "trailing_pct": 0.4},
-            "Intraday": {"tp1_pct": 1.2, "sl_pct": 0.8, "trailing_pct": 0.8}, 
-            "Swing": {"tp1_pct": 3.5, "sl_pct": 1.5, "trailing_pct": 1.5}
-        }
-        
-        params = risk_percentages.get(trade_type, risk_percentages["Intraday"])
-        sl_pct = params["sl_pct"]
-        tp1_pct = params["tp1_pct"]
-        
-        # Calculate SL and TP levels
-        if direction.lower() == "long":
-            sl_price = current_price * (1 - sl_pct/100)
-            tp1_price = current_price * (1 + tp1_pct/100)
-        else:
-            sl_price = current_price * (1 + sl_pct/100)
-            tp1_price = current_price * (1 - tp1_pct/100)
-        
-        # Calculate position size based on SL risk
-        risk_amount = account_balance * (risk_per_trade / 100)
-        price_diff = abs(current_price - sl_price)
-        qty = risk_amount / price_diff
-        qty = round_qty(symbol, qty)
-        
-        if qty <= 0:
-            log(f"❌ Invalid quantity calculated: {qty}", level="ERROR")
+        # Validate execution parameters (main.py should have calculated these)
+        if not all([category, qty > 0, current_price > 0, sl_price > 0, tp1_price > 0]):
+            log(f"❌ Invalid execution parameters from main.py for {symbol}", level="ERROR")
+            log(f"   Category: {category}, Qty: {qty}, Price: {current_price}, SL: {sl_price}, TP1: {tp1_price}")
             return None
         
-        log(f"📊 TRADE SETUP: {symbol} | Balance: {account_balance} USDT | Qty: {qty} | Entry: {current_price} | SL: {sl_price} | TP1: {tp1_price}")
+        log(f"📊 EXECUTING: {symbol} | Qty: {qty} | Entry: {current_price} | SL: {sl_price} | TP1: {tp1_price}")
         
-        # Step 4: Set leverage if needed
+        # Step 1: Set leverage if needed
         if category == "linear":
             await set_leverage(symbol, DEFAULT_LEVERAGE, category)
         
-        # Step 5: Execute market order
+        # Step 2: Execute market order
         side = "Buy" if direction.lower() == "long" else "Sell"
         
         result = await place_market_order(
@@ -122,7 +146,7 @@ async def execute_trade_if_valid(
         )
         
         if result.get("retCode") != 0:
-            log(f"❌ Failed to place market order: {result.get('retMsg')}", level="ERROR")
+            log(f"❌ Market order failed: {result.get('retMsg')}", level="ERROR")
             return None
         
         # Get execution details
@@ -132,7 +156,7 @@ async def execute_trade_if_valid(
         
         log(f"✅ Market order executed: {executed_qty} units at {avg_entry_price}")
         
-        # Step 6: Place ONLY Stop Loss order (NO trailing stop)
+        # Step 3: Place Stop Loss order
         sl_order_id = await place_stop_loss_order(
             symbol=symbol,
             direction=direction,
@@ -142,11 +166,9 @@ async def execute_trade_if_valid(
         )
         
         if not sl_order_id:
-            log(f"⚠️ Trade executed but SL placement failed for {symbol}", level="WARN")
-            # Continue anyway - monitor can handle SL recovery
+            log(f"⚠️ SL placement failed for {symbol}", level="WARN")
         
-        # Step 7: Place Take Profit order (only TP1, no TP2)
-        # The monitor will handle partial exits and trailing
+        # Step 4: Place Take Profit order
         tp1_order_id = await place_take_profit_order(
             symbol=symbol,
             direction=direction,
@@ -156,21 +178,23 @@ async def execute_trade_if_valid(
         )
         
         if not tp1_order_id:
-            log(f"⚠️ TP1 order placement failed for {symbol}", level="WARN")
-            # Continue anyway - monitor can handle TP detection
+            log(f"⚠️ TP1 placement failed for {symbol}", level="WARN")
         
-        # Step 8: Register trade with monitor system for trailing management
+        # Step 5: Register with monitor for trailing management
         try:
             from monitor import track_active_trade
             
-            # Register with monitor for TP1 detection and trailing
+            # Get trailing percentage from signal_data (calculated by main.py)
+            trailing_pct = signal_data.get("trailing_pct", 1.0)
+            tp1_pct = signal_data.get("tp1_pct", 2.0)
+            
             track_active_trade(
                 symbol=symbol,
                 trade_type=trade_type,
                 initial_score=score,
                 entry_price=avg_entry_price,
                 direction=direction,
-                trailing_pct=params["trailing_pct"],  # Monitor will use this for trailing
+                trailing_pct=trailing_pct,
                 tp1_target=tp1_price,
                 tp1_pct=tp1_pct,
                 sl=sl_price,
@@ -178,58 +202,40 @@ async def execute_trade_if_valid(
                 qty=executed_qty
             )
             
-            log(f"✅ Trade registered with monitor: TP1={tp1_price:.6f}, Trailing={params['trailing_pct']}%")
+            log(f"✅ Trade registered with monitor for trailing management")
             
         except Exception as e:
-            log(f"⚠️ Failed to register with monitor: {e}", level="WARN")
-            # Trade still executed, just monitor integration failed
+            log(f"⚠️ Monitor registration failed: {e}", level="WARN")
         
-        # Calculate actual risk
+        # Calculate actual risk (for logging)
         actual_risk = calculate_actual_risk_percentage(avg_entry_price, sl_price, executed_qty, account_balance)
         
-        # Log successful execution
-        log(f"🎯 Trade setup complete for {symbol}")
-        log(f"   Entry: {avg_entry_price} | SL: {sl_price} | TP1 Target: {tp1_price:.6f}")
-        log(f"   Quantity: {executed_qty} | Risk: {actual_risk:.2f}%")
-        log(f"   Monitor will handle: TP1 detection → Partial exit → Trailing SL")
-        
-        # Return comprehensive trade details
+        # Prepare trade details
         trade_details = {
             "symbol": symbol,
             "direction": direction,
             "trade_type": trade_type,
             "entry_price": avg_entry_price,
             "qty": executed_qty,
-            "original_qty": executed_qty,
             "sl_price": sl_price,
             "tp1_price": tp1_price,
-            "sl_pct": sl_pct,
-            "tp1_pct": tp1_pct,
-            "trailing_pct": params["trailing_pct"],  # For monitor reference
             "sl_order_id": sl_order_id,
             "tp1_order_id": tp1_order_id,
-            "monitor_managed": True,  # Flag that monitor handles trailing
             "strategy": strategy,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "leverage": DEFAULT_LEVERAGE if category == "linear" else 1,
-            "execution_type": "Market",
             "actual_risk_pct": actual_risk,
             "confidence": confidence,
             "score": score,
             "regime": regime,
-            "indicator_scores": signal_data.get("indicator_scores", {}),
-            "used_indicators": signal_data.get("used_indicators", []),
             "market_type": category,
-            "range_break_details": signal_data.get("range_break_details"),
-            "exit_strategy": signal_data.get("exit_strategy", "standard"),
-            "trailing_multiplier": signal_data.get("trailing_multiplier", 1.0),
-            "exit_tranches": signal_data.get("exit_tranches", [0.5, 0.5])  # 50% TP1, 50% trail
+            "monitor_managed": True  # Flag for monitor
         }
         
-        # Log trade execution
+        # Log execution
         write_log(f"TRADE_EXECUTED: {json.dumps(trade_details, default=str)}")
         
-        # Send telegram notification - UPDATED message
+        # Send notification
         await send_telegram_message(
             f"✅ <b>Trade Executed</b>\n"
             f"Symbol: <b>{symbol}</b>\n"
@@ -239,9 +245,8 @@ async def execute_trade_if_valid(
             f"Quantity: <b>{executed_qty}</b>\n"
             f"SL: <b>{sl_price}</b>\n"
             f"TP1: <b>{tp1_price}</b> (50% exit)\n"
-            f"🔄 <b>Monitor Handles</b>: TP1 → 50% exit → Trailing SL\n"
             f"Risk: <b>{actual_risk:.2f}%</b>\n"
-            f"✅ No conflicts - Monitor manages trailing"
+            f"🔄 Monitor handles: TP1 → 50% exit → Trailing SL"
         )
         
         # Log to activity file
@@ -251,17 +256,18 @@ async def execute_trade_if_valid(
             entry=avg_entry_price,
             sl=sl_price,
             tp1=tp1_price,
-            tp2=None,  # No TP2 - monitor handles trailing
+            tp2=None,
             result="executed",
             score=score,
             trade_type=trade_type,
             confidence=confidence
         )
         
+        log(f"🎯 Trade execution complete for {symbol}")
         return trade_details
         
     except Exception as e:
-        log(f"❌ Fatal error in execute_trade_if_valid: {e}", level="ERROR")
+        log(f"❌ Trade execution error: {e}", level="ERROR")
         log(traceback.format_exc(), level="ERROR")
         await send_error_to_telegram(f"Trade execution failed for {symbol}: {str(e)}")
         return None
@@ -291,30 +297,10 @@ async def set_leverage(symbol, leverage, market_type="linear"):
         return False
 
 async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="linear"):
-    """Enhanced stop loss order placement - ONLY initial SL, no trailing"""
+    """Place stop loss order"""
     try:
-        # Validate SL price
-        current_price = await get_symbol_price(symbol, market_type)
-        if current_price > 0:
-            if direction.lower() == "long":
-                if sl_price >= current_price:
-                    log(f"⚠️ Invalid long SL {sl_price} >= current {current_price}, adjusting...")
-                    sl_price = current_price * 0.99  # 1% below current
-                elif (current_price - sl_price) / current_price > 0.10:  # More than 10% away
-                    log(f"⚠️ SL too far for long ({((current_price - sl_price) / current_price) * 100:.1f}%), adjusting...")
-                    sl_price = current_price * 0.95  # Cap at 5% away
-            else:  # short
-                if sl_price <= current_price:
-                    log(f"⚠️ Invalid short SL {sl_price} <= current {current_price}, adjusting...")
-                    sl_price = current_price * 1.01  # 1% above current
-                elif (sl_price - current_price) / current_price > 0.10:  # More than 10% away
-                    log(f"⚠️ SL too far for short ({((sl_price - current_price) / current_price) * 100:.1f}%), adjusting...")
-                    sl_price = current_price * 1.05  # Cap at 5% away
+        log(f"🛡️ Placing SL order for {symbol}: {direction} at {sl_price}")
         
-        # Place stop loss order
-        log(f"🛡️ Placing initial SL order for {symbol}: {direction} at {sl_price}")
-        
-        # Use the enhanced stop loss function from bybit_api
         from bybit_api import place_stop_loss_with_retry
         
         result = await place_stop_loss_with_retry(
@@ -327,19 +313,18 @@ async def place_stop_loss_order(symbol, direction, qty, sl_price, market_type="l
         
         if result.get("retCode") == 0:
             order_id = result.get("result", {}).get("orderId")
-            log(f"✅ Initial SL order placed: {order_id}")
+            log(f"✅ SL order placed: {order_id}")
             return order_id
         else:
-            log(f"❌ Failed to place SL order: {result.get('retMsg')}", level="ERROR")
+            log(f"❌ Failed to place SL: {result.get('retMsg')}", level="ERROR")
             return None
             
     except Exception as e:
-        log(f"❌ Error placing SL order: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
+        log(f"❌ Error placing SL: {e}", level="ERROR")
         return None
 
 async def place_take_profit_order(symbol, direction, qty, tp_price, market_type="linear"):
-    """Enhanced take profit order placement - ONLY TP1"""
+    """Place take profit order"""
     try:
         side = "Sell" if direction.lower() == "long" else "Buy"
         
@@ -361,58 +346,35 @@ async def place_take_profit_order(symbol, direction, qty, tp_price, market_type=
             log(f"✅ TP1 order placed: {order_id}")
             return order_id
         else:
-            log(f"❌ Failed to place TP1 order: {result.get('retMsg')}", level="ERROR")
+            log(f"❌ Failed to place TP1: {result.get('retMsg')}", level="ERROR")
             return None
             
     except Exception as e:
-        log(f"❌ Error placing TP1 order: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
+        log(f"❌ Error placing TP1: {e}", level="ERROR")
         return None
 
 def calculate_actual_risk_percentage(entry_price, sl_price, qty, account_balance):
-    """Calculate the actual risk percentage of the trade"""
+    """Calculate actual risk percentage"""
     try:
         risk_amount = abs(entry_price - sl_price) * qty
         risk_percentage = (risk_amount / account_balance) * 100
         return risk_percentage
     except Exception as e:
-        log(f"❌ Error calculating risk percentage: {e}", level="ERROR")
+        log(f"❌ Error calculating risk: {e}", level="ERROR")
         return 0.0
 
-async def cancel_all_orders(symbol, market_type="linear"):
-    """Cancel all orders for a symbol"""
-    try:
-        result = await signed_request("POST", "/v5/order/cancel-all", {
-            "category": market_type,
-            "symbol": symbol
-        })
-        
-        if result.get("retCode") == 0:
-            cancelled_count = len(result.get("result", {}).get("list", []))
-            log(f"✅ Cancelled {cancelled_count} orders for {symbol}")
-            return True
-        else:
-            log(f"⚠️ Error cancelling orders: {result.get('retMsg')}", level="WARN")
-            return False
-            
-    except Exception as e:
-        log(f"❌ Error cancelling orders: {e}", level="ERROR")
-        log(traceback.format_exc(), level="ERROR")
-        return False
+# REMOVED FUNCTIONS (handled by main.py):
+# - All strategy logic
+# - Signal generation
+# - Risk calculations
+# - SL/TP calculations
+# - Position sizing
+# - Market analysis
+# - Trailing stop placement (monitor handles this)
 
-# REMOVED FUNCTIONS TO PREVENT CONFLICTS:
-# - place_trailing_stop_order() - Monitor handles this
-# - place_exchange_trailing_stop() - Monitor handles this  
-# - Any other trailing stop functions - Monitor handles all trailing
-
-# NOTE: This simplified trade_executor only handles:
-# 1. Market order execution
-# 2. Initial SL placement
-# 3. Initial TP1 placement
-# 4. Trade registration with monitor
-#
-# The monitor.py and active_trade_scanner.py handle:
-# 1. TP1 detection and partial exits
-# 2. Moving SL to breakeven after TP1
-# 3. All trailing stop functionality
-# 4. Final exit management
+# ONLY HANDLES:
+# - Market order execution
+# - SL order placement
+# - TP1 order placement
+# - Monitor registration
+# - Execution logging
