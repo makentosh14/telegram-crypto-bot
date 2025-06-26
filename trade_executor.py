@@ -30,6 +30,8 @@ async def get_account_balance():
                         return balance
         
         log(f"❌ Failed to get account balance: {result.get('retMsg')}", level="ERROR")
+    except Exception as e:
+        log(f"❌ Error getting account balance: {e}", level="ERROR")
         return 0.0
 
 async def get_symbol_price(symbol, category="linear"):
