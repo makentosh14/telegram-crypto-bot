@@ -64,7 +64,7 @@ load_memory()
 TIMEFRAMES = SUPPORTED_INTERVALS
 active_signals = {}
 recent_exits = {}
-EXIT_COOLDOWN = 10
+EXIT_COOLDOWN = 120
 recent_swing_trades = {}  # Track recent swing trades by symbol with timestamp
 SWING_COOLDOWN = 3600  # 1 hour cooldown in seconds
 
@@ -1032,13 +1032,13 @@ async def scan_for_new_signals(symbols,trend_context):
     adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
     adj_swing = MIN_SWING_SCORE + adjust["swing"]
 
-    trade_type = None
-    for i, symbol in enumerate(symbols, 1):
-        if symbol not in live_candles:
-            continue
-        if recent_exits.get(symbol, 0) > 0:
-            recent_exits[symbol] -= 1
-            continue
+    if symbol in active_trades and not active_trades[symbol].get("exited", False):
+        continue  # Skip - already trading this symbol
+        
+    # Extended exit cooldown check
+    if recent_exits.get(symbol, 0) > 0:
+        recent_exits[symbol] -= 1
+        continue
 
         try:
             candles_by_tf = {
