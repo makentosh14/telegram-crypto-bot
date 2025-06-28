@@ -466,6 +466,35 @@ async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="line
     
     return result
 
+async def check_order_exists(order_id, symbol, market_type="linear"):
+    """
+    Check if an order exists
+    
+    Args:
+        order_id: Order ID to check
+        symbol: Trading symbol
+        market_type: Market type
+    
+    Returns:
+        bool: True if order exists, False otherwise
+    """
+    try:
+        result = await signed_request("GET", "/v5/order/realtime", {
+            "category": market_type,
+            "symbol": symbol,
+            "orderId": order_id
+        })
+        
+        if result.get("retCode") == 0:
+            orders = result.get("result", {}).get("list", [])
+            return len(orders) > 0
+        
+        return False
+        
+    except Exception as e:
+        log(f"❌ Error checking order existence: {e}", level="ERROR")
+        return False
+
 async def update_stop_loss_order(symbol, order_id, new_sl_price, market_type="linear"):
     """
     Update an existing stop loss order with a new price
@@ -536,35 +565,6 @@ async def update_stop_loss_order(symbol, order_id, new_sl_price, market_type="li
     except Exception as e:
         log(f"❌ Error updating stop loss order: {e}", level="ERROR")
         return {"retCode": -1, "retMsg": f"Error updating stop loss: {str(e)}"}
-
-async def check_order_exists(order_id, symbol, market_type="linear"):
-    """
-    Check if an order exists
-    
-    Args:
-        order_id: Order ID to check
-        symbol: Trading symbol
-        market_type: Market type
-    
-    Returns:
-        bool: True if order exists, False otherwise
-    """
-    try:
-        result = await signed_request("GET", "/v5/order/realtime", {
-            "category": market_type,
-            "symbol": symbol,
-            "orderId": order_id
-        })
-        
-        if result.get("retCode") == 0:
-            orders = result.get("result", {}).get("list", [])
-            return len(orders) > 0
-        
-        return False
-        
-    except Exception as e:
-        log(f"❌ Error checking order existence: {e}", level="ERROR")
-        return False
 
 async def get_wallet_balance(force_refresh=False):
     """Get wallet balance - redirects to optimized version"""
