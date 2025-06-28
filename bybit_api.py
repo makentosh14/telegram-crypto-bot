@@ -466,6 +466,77 @@ async def fallback_stop_loss(symbol, direction, qty, sl_price, market_type="line
     
     return result
 
+async def update_stop_loss_order(symbol, order_id, new_sl_price, market_type="linear"):
+    """
+    Update an existing stop loss order with a new price
+    
+    Args:
+        symbol: Trading symbol (e.g., "BTCUSDT")
+        order_id: The order ID of the existing stop loss order
+        new_sl_price: New stop loss price
+        market_type: Market type ("linear" for futures)
+    
+    Returns:
+        dict: API response
+    """
+    try:
+        log(f"🔄 Updating SL order {order_id} for {symbol} to {new_sl_price}")
+        
+        params = {
+            "category": market_type,
+            "symbol": symbol,
+            "orderId": order_id,
+            "triggerPrice": str(new_sl_price)
+        }
+        
+        result = await signed_request("POST", "/v5/order/amend", params)
+        
+        if result.get("retCode") == 0:
+            log(f"✅ Stop loss updated successfully for {symbol}")
+        else:
+            error_msg = result.get("retMsg", "Unknown error")
+            log(f"❌ Failed to update stop loss: {error_msg}", level="ERROR")
+            
+            # If update fails, try to cancel and replace
+            log("🔄 Attempting to cancel and replace stop loss order")
+            
+            # First cancel the existing order
+            cancel_result = await signed_request("POST", "/v5/order/cancel", {
+                "category": market_type,
+                "symbol": symbol,
+                "orderId": order_id
+            })
+            
+            if cancel_result.get("retCode") == 0:
+                log("✅ Old stop loss cancelled, placing new one")
+                
+                # Need to determine direction and quantity from the original order
+                # Get order details first
+                order_info_result = await signed_request("GET", "/v5/order/history", {
+                    "category": market_type,
+                    "symbol": symbol,
+                    "orderId": order_id
+                })
+                
+                if order_info_result.get("retCode") == 0:
+                    orders = order_info_result.get("result", {}).get("list", [])
+                    if orders:
+                        original_order = orders[0]
+                        direction = "Long" if original_order.get("side") == "Sell" else "Short"
+                        qty = original_order.get("qty")
+                        
+                        # Place new stop loss
+                        new_sl_result = await place_stop_loss_with_retry(
+                            symbol, direction, qty, new_sl_price, market_type
+                        )
+                        return new_sl_result
+        
+        return result
+        
+    except Exception as e:
+        log(f"❌ Error updating stop loss order: {e}", level="ERROR")
+        return {"retCode": -1, "retMsg": f"Error updating stop loss: {str(e)}"}
+
 async def check_order_exists(order_id, symbol, market_type="linear"):
     """
     Check if an order exists
