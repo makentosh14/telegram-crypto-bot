@@ -6,6 +6,8 @@ import traceback
 from datetime import datetime
 from logger import log, write_log
 from bybit_api import signed_request, place_market_order, update_stop_loss_order
+from enhanced_dca_protection import protection_manager
+from config import ENABLE_FAST_DROP_PROTECTION, FAST_DROP_PROTECTION
 
 # FIXED PERCENTAGES - Ensure consistency across all files
 FIXED_PERCENTAGES = {
@@ -147,58 +149,58 @@ async def universal_handle_trailing_stop(symbol, trade, current_price, direction
 
 async def universal_check_trailing_sl_hit(symbol, trade, current_price, direction):
     """
-    Check if trailing stop loss has been hit - works for both DCA and non-DCA trades
+    Check if trailing stop loss has been hit - with enhanced protection
     """
     try:
+        # First check fast drop protection
+        if ENABLE_FAST_DROP_PROTECTION:
+            # Detect fast drops
+            await protection_manager.detect_fast_drop(symbol, current_price)
+            
+            # Check if we should pause SL
+            should_pause = await protection_manager.should_pause_stop_loss(symbol, trade, current_price)
+            
+            if should_pause:
+                log(f"🛡️ SL execution paused for {symbol} - Protection active")
+                return False
+        
         trailing_sl = trade.get("trailing_sl")
         if not trailing_sl:
             return False
         
-        # Add small buffer for market volatility and slippage
-        buffer = 0.002  # 0.2% buffer
+        # Enhanced buffer during fast drops
+        base_buffer = 0.002  # 0.2%
+        enhanced_buffer = 0 if not ENABLE_FAST_DROP_PROTECTION else FAST_DROP_PROTECTION.get("enhanced_buffer", 0)
+        total_buffer = base_buffer + enhanced_buffer
         
         hit = False
         if direction.lower() == "long":
             # For long positions, SL is hit when price drops below trailing SL
-            if current_price <= trailing_sl * (1 - buffer):
+            if current_price <= trailing_sl * (1 - total_buffer):
                 hit = True
         else:  # short
             # For short positions, SL is hit when price rises above trailing SL
-            if current_price >= trailing_sl * (1 + buffer):
+            if current_price >= trailing_sl * (1 + total_buffer):
                 hit = True
         
         if hit:
+            # One final check before executing SL
+            if ENABLE_FAST_DROP_PROTECTION:
+                final_check = await protection_manager.should_pause_stop_loss(symbol, trade, current_price)
+                if final_check:
+                    log(f"🛡️ SL execution blocked at final check for {symbol}")
+                    return False
+            
             # Determine trade type for logging
             is_dca_trade = trade.get("dca_count", 0) > 0
-            trade_context = "DCA" if is_dca_trade else "Standard"
+            trade_type = "DCA" if is_dca_trade else "Standard"
+            log(f"🔥 Trailing SL hit for {symbol} ({trade_type} trade) at ${current_price:.6f}")
             
-            log(f"🚨 TRAILING SL HIT ({trade_context}): {symbol} at {current_price} (SL: {trailing_sl})")
-            
-            # Calculate final profit percentage using effective entry price
-            entry_price = get_effective_entry_price(trade)
-            if entry_price:
-                if direction.lower() == "long":
-                    profit_pct = ((current_price - entry_price) / entry_price) * 100
-                else:
-                    profit_pct = ((entry_price - current_price) / entry_price) * 100
-            else:
-                profit_pct = 0
-            
-            log(f"📊 Final profit for {symbol} ({trade_context}): {profit_pct:.2f}%")
-            
-            # Save DCA history if it was a DCA trade
-            if is_dca_trade:
-                from dca_manager import dca_manager
-                dca_manager.dca_history[symbol] = {
-                    "dca_count": trade["dca_count"],
-                    "final_result": "win" if profit_pct > 0 else "loss",
-                    "final_pnl": profit_pct,
-                    "dca_history": trade.get("dca_history", []),
-                    "exit_type": "trailing_sl"
-                }
-                log(f"📝 DCA history saved for {symbol}: {trade['dca_count']} DCA operations")
-        
         return hit
+        
+    except Exception as e:
+        log(f"❌ Error in enhanced trailing SL check for {symbol}: {e}", level="ERROR")
+        return False
         
     except Exception as e:
         log(f"❌ Error checking trailing SL hit for {symbol}: {e}", level="ERROR")
