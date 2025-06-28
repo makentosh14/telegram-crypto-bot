@@ -149,3 +149,37 @@ FAST_DROP_PROTECTION = {
     "min_data_points": 5,            # Minimum price points for analysis
     "monitoring_window": 10,          # Monitor last 10 minutes of price data
 }
+
+# === STRATEGY ACTIVATION SETTINGS ===
+ENABLE_CORE_STRATEGY = True        # Your main trend-following strategy
+ENABLE_MEAN_REVERSION = True       # Mean reversion strategy (for ranging markets)
+ENABLE_BREAKOUT_SNIPER = True      # Breakout detection strategy (for volatile markets)
+ENABLE_RANGE_BREAK = True          # Range breakout detection strategy
+ENABLE_SWING_STRATEGY = True       # Swing trading strategy
+
+# Strategy-specific risk settings
+STRATEGY_RISK_WEIGHTS = {
+    "core_strategy": 1.0,          # Full risk allocation
+    "mean_reversion": 0.85,        # 85% of normal risk (more conservative)
+    "breakout_sniper": 0.7,        # 70% of normal risk (high volatility)
+    "swing": 0.8,                  # 80% of normal risk
+    "range_break": 0.9             # 90% of normal risk
+}
+
+# Strategy score thresholds
+STRATEGY_MIN_SCORES = {
+    "core_strategy": 7,            # Your current core threshold
+    "mean_reversion": 4,           # Lower threshold for mean reversion
+    "breakout_sniper": 4,          # Lower threshold for breakouts
+    "swing": 8,                    # Higher threshold for swing trades
+    "range_break": 6               # Medium threshold for range breaks
+}
+
+# Market regime preferences for each strategy
+STRATEGY_REGIME_PREFERENCES = {
+    "core_strategy": ["trending", "volatile"],
+    "mean_reversion": ["ranging", "consolidating"],
+    "breakout_sniper": ["volatile", "trending"],
+    "swing": ["trending", "ranging"],
+    "range_break": ["ranging", "consolidating"]
+}
