@@ -1009,9 +1009,22 @@ async def monitor_trades(live_candles):
                         # Mark as modified for saving
                         trade["modified"] = True
             
-            # 4. Handle trailing stop after TP1
+            # 4. Handle trailing stop after TP1 (UNIVERSAL - works for all trades)
             elif trade.get("tp1_hit") and trade.get("trailing_pct"):
-                await handle_trailing_stop(symbol, trade, current_price, direction)
+                # Use universal monitoring - automatically detects DCA vs non-DCA
+                from universal_trailing_stop_fix import universal_trade_monitoring
+        
+                trailing_result = await universal_trade_monitoring(
+                    symbol, trade, current_price, direction, candles_by_tf
+                )
+        
+                if trailing_result:
+                    # Trade was modified (SL updated or exit executed)
+                    trade["modified"] = True
+            
+                    # If trade was exited, continue to next trade
+                    if trade.get("exited"):
+                        continue
             
             # 5. Check for SL hit (before TP1)
             if not trade.get("tp1_hit") and trade.get("original_sl"):
@@ -1193,42 +1206,30 @@ def check_sl_hit(trade, current_price, direction):
         return True
 
 def check_trailing_sl_hit(trade, current_price, direction):
-    """Check if trailing SL has been hit"""
-    trailing_sl = trade.get("trailing_sl")
-    if not trailing_sl:
+    """
+    Universal check for trailing SL hits - works for both DCA and non-DCA trades
+    """
+    try:
+        from universal_trailing_stop_fix import universal_check_trailing_sl_hit
+        import asyncio
+        
+        symbol = trade.get("symbol", "UNKNOWN")
+        
+        # Create event loop if none exists
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async function
+        return loop.run_until_complete(
+            universal_check_trailing_sl_hit(symbol, trade, current_price, direction)
+        )
+        
+    except Exception as e:
+        log(f"❌ Error checking trailing SL hit: {e}", level="ERROR")
         return False
-
-    # Add small buffer for wicks
-    buffer = 0.002  # 0.2%
-
-    hit = False
-    if direction == "long" and current_price <= trailing_sl * (1 - buffer):
-        hit = True
-    elif direction == "short" and current_price >= trailing_sl * (1 + buffer):
-        hit = True
-
-    if hit:
-        # ✅ Calculate profit_pct before logging it
-        entry_price = trade.get("entry_price", 0)
-        if entry_price:
-            if direction == "long":
-                profit_pct = ((current_price - entry_price) / entry_price) * 100
-            else:
-                profit_pct = ((entry_price - current_price) / entry_price) * 100
-        else:
-            profit_pct = 0
-
-        # ✅ Log DCA history if DCA was used
-        if trade.get("dca_count", 0) > 0:
-            symbol = trade.get("symbol", "UNKNOWN")
-            dca_manager.dca_history[symbol] = {
-                "dca_count": trade["dca_count"],
-                "final_result": "win" if profit_pct > 0 else "loss",
-                "final_pnl": profit_pct,
-                "dca_history": trade.get("dca_history", [])
-            }
-
-    return hit
 
 
 async def handle_tp1_hit(symbol, trade, current_price):
@@ -1326,43 +1327,12 @@ async def handle_tp1_hit(symbol, trade, current_price):
         return False
 
 async def handle_trailing_stop(symbol, trade, current_price, direction):
-    """Handle trailing stop logic after TP1 hit"""
+    """
+    Universal trailing stop handler - works for ALL trade types (DCA and non-DCA)
+    """
     try:
-        # Get trailing percentage from trade or use default
-        trade_type = trade.get("trade_type", "Intraday")
-        trailing_pct = FIXED_PERCENTAGES.get(trade_type, FIXED_PERCENTAGES["Intraday"])["trailing_pct"]
-        
-        # Calculate new trailing stop
-        current_trailing_sl = trade.get("trailing_sl")
-        
-        if direction == "long":
-            new_trailing_sl = current_price * (1 - trailing_pct / 100)
-        else:  # short
-            new_trailing_sl = current_price * (1 + trailing_pct / 100)
-        
-        # Only update if new SL is better than current
-        if current_trailing_sl:
-            if direction == "long" and new_trailing_sl <= current_trailing_sl:
-                return  # Don't update if worse
-            if direction == "short" and new_trailing_sl >= current_trailing_sl:
-                return  # Don't update if worse
-        
-        # Update trailing stop
-        trade["trailing_sl"] = round(new_trailing_sl, 6)
-        trade["modified"] = True
-        
-        # Try to update the actual SL order on exchange
-        try:
-            from bybit_api import update_stop_loss_order
-            sl_updated = await update_stop_loss_order(symbol, trade, new_trailing_sl)
-            if sl_updated:
-                log(f"📈 Trailing SL updated for {symbol}: {new_trailing_sl:.6f}")
-            else:
-                log(f"⚠️ Failed to update trailing SL order for {symbol}")
-        except Exception as e:
-            log(f"⚠️ Error updating SL order for {symbol}: {e}")
-        
-        return True
+        from universal_trailing_stop_fix import universal_trade_monitoring
+        return await universal_trade_monitoring(symbol, trade, current_price, direction)
         
     except Exception as e:
         log(f"❌ Error in handle_trailing_stop for {symbol}: {e}", level="ERROR")
