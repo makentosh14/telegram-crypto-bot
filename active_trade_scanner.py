@@ -21,6 +21,11 @@ except ImportError:
     monitor_active_trades = {}
     log("⚠️ HF SCANNER: Could not import active_trades from monitor")
 
+try:
+    from universal_trailing_stop_fix import universal_trade_monitoring
+except ImportError:
+    universal_trade_monitoring = None
+
 # Configuration for active trade scanner
 ACTIVE_SCAN_INTERVAL = 3  # Check active trades every 3 seconds
 MAX_CONCURRENT_CHECKS = 5  # Limit concurrent API calls
@@ -426,11 +431,10 @@ async def process_active_trade(symbol, trade, live_candles):
         
         # Handle trailing stop for remaining position (only after TP1 hit)
         if trade.get("tp1_hit") and not trade.get("exited"):
-            # Use universal monitoring function
-            try:
-                from universal_trailing_stop_fix import universal_trade_monitoring
-            except ImportError:
-                universal_trade_monitoring = None
+            # Use universal monitoring function (imported at top)
+            if universal_trade_monitoring is None:
+                log(f"⚠️ HF SCANNER: Trailing monitoring not available for {symbol}", level="WARN")
+                return
         
         direction = trade.get("direction", "").lower()
         
