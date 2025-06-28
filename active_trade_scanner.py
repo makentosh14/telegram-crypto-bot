@@ -427,7 +427,10 @@ async def process_active_trade(symbol, trade, live_candles):
         # Handle trailing stop for remaining position (only after TP1 hit)
         if trade.get("tp1_hit") and not trade.get("exited"):
             # Use universal monitoring function
-            from universal_trailing_stop_fix import universal_trade_monitoring
+            try:
+                from universal_trailing_stop_fix import universal_trade_monitoring
+            except ImportError:
+                universal_trade_monitoring = None
         
         direction = trade.get("direction", "").lower()
         
