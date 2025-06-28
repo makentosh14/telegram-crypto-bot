@@ -1032,13 +1032,21 @@ async def scan_for_new_signals(symbols,trend_context):
     adj_intraday = MIN_INTRADAY_SCORE + adjust["intraday"]
     adj_swing = MIN_SWING_SCORE + adjust["swing"]
 
-    if symbol in active_trades and not active_trades[symbol].get("exited", False):
-        continue  # Skip - already trading this symbol
-        
-    # Extended exit cooldown check
+    for i, symbol in enumerate(symbols, 1):
+    if symbol not in live_candles:
+        continue
     if recent_exits.get(symbol, 0) > 0:
         recent_exits[symbol] -= 1
         continue
+
+    # ADD THESE LINES HERE:
+    # CRITICAL: Prevent duplicate trades
+    if symbol in active_trades and not active_trades[symbol].get("exited", False):
+        continue  # Skip - already trading this symbol
+        
+    # Check signal cooldown
+    if is_duplicate_signal(symbol):
+        continue  # Skip - signal cooldown active
 
         try:
             candles_by_tf = {
