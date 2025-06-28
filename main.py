@@ -7,7 +7,10 @@ from score import score_symbol, determine_direction, calculate_confidence, has_p
 from telegram_bot import send_telegram_message, format_trade_signal, send_error_to_telegram
 from trend_filters import get_trend_context_cached, monitor_btc_trend_accuracy, monitor_altseason_status, validate_short_signal
 from signal_memory import log_signal, is_duplicate_signal
-from config import DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING, ALTSEASON_MODE, NORMAL_MAX_POSITIONS
+from config import (
+    DEFAULT_LEVERAGE, ALWAYS_ALLOW_SWING, ALTSEASON_MODE, NORMAL_MAX_POSITIONS,
+    MIN_SCALP_SCORE, MIN_INTRADAY_SCORE, MIN_SWING_SCORE
+)
 from performance_tracker import track_signal
 from logger import log
 from monitor_report import log_trade_result, send_daily_report
@@ -975,6 +978,12 @@ async def process_break_signal(break_signal, trend_context):
 
 async def scan_for_new_signals(symbols,trend_context):
     global active_trades
+
+    log("🎯 SCANNING WITH ALL STRATEGIES ENABLED:")
+    log("  - Core Strategy: ✅ Active")
+    log("  - Mean Reversion: ✅ Active (all regimes)")  
+    log("  - Breakout Sniper: ✅ Active (all regimes)")
+    log("  - Range Break: ✅ Active")
     
     regime = trend_context.get("regime", "trending")
     altseason = trend_context.get("altseason", False)
@@ -1503,9 +1512,9 @@ async def scan_for_new_signals(symbols,trend_context):
             log(f"⚠️ Trade execution failed for {symbol}")
 
         # ✅ Additional Strategy: Mean Reversion Logic
-        if regime == "ranging":
+        if True:
             rev_score, rev_dir, rev_conf, rev_reasons = score_mean_reversion(symbol, candles_by_tf, regime)
-            if rev_score >= 4 and not is_duplicate_signal(symbol):
+            if rev_score >= 3 and not is_duplicate_signal(symbol):
                 log_signal(symbol)
                 track_signal(symbol, rev_score)
 
@@ -1572,9 +1581,9 @@ async def scan_for_new_signals(symbols,trend_context):
                     )
 
         # ✅ Additional Strategy: Breakout Sniper Logic
-        if regime == "volatile":
+        if True:
             bo_score, bo_dir, bo_conf, bo_reasons = score_breakout_sniper(symbol, candles_by_tf, regime)
-            if bo_score >= 4 and not is_duplicate_signal(symbol):
+            if bo_score >= 3 and not is_duplicate_signal(symbol):
                 log_signal(symbol)
                 track_signal(symbol, bo_score)
 
@@ -1727,6 +1736,22 @@ def check_special_entry_conditions(symbol, score, indicator_scores, used_indicat
     
     return False
 
+def log_strategy_activation():
+    """Log which strategies are activated"""
+    strategies = {
+        "Core Strategy": "Always Active",
+        "Mean Reversion": "All Regimes (was: ranging only)",
+        "Breakout Sniper": "All Regimes (was: volatile only)", 
+        "Range Break": "Active",
+        "Swing": "Active"
+    }
+    
+    log("=" * 60)
+    log("🚀 STRATEGY ACTIVATION STATUS:")
+    for strategy, status in strategies.items():
+        log(f"  {strategy}: {status}")
+    log("=" * 60)
+
 async def verify_stop_loss_placement(symbol, trade, direction):
     """Verifies that the stop-loss order was properly placed and attempts to fix if not"""
     if trade and trade.get("sl_order_id"):
@@ -1852,6 +1877,7 @@ async def run_bot():
     asyncio.create_task(update_risk_metrics())
 
     load_active_trades()
+    log_strategy_activation()
     
     if len(active_trades) == 0:
         await recover_active_trades_from_exchange()
