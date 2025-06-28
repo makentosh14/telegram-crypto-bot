@@ -3,7 +3,7 @@ import time
 # In-memory signal cache to prevent duplicates
 signal_cache = {}
 
-def is_duplicate_signal(symbol, cooldown=1800):
+def is_duplicate_signal(symbol, cooldown=2400):
     """
     Returns True if a signal was already sent for this symbol within the cooldown period.
 
