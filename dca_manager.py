@@ -9,6 +9,7 @@ from logger import log, write_log
 from bybit_api import place_market_order, place_stop_loss_with_retry, signed_request
 from symbol_info import round_qty
 from error_handler import send_telegram_message
+from universal_trailing_stop_fix import update_trade_after_dca
 
 # DCA Configuration - Exact position size matching
 DCA_CONFIG = {
@@ -246,6 +247,15 @@ class DCAManager:
             if tp_result.get("retCode") == 0:
                 trade["tp1_order_id"] = tp_result["result"]["orderId"]
                 trade["tp1_target"] = new_tp
+
+            update_success = update_trade_after_dca(
+            trade, new_avg_entry, new_total_qty, new_sl, new_tp
+            )
+        
+            if not update_success:
+                log(f"⚠️ Warning: Trade update after DCA may have issues for {symbol}")
+            else:
+                log
             
             # Send notification
             await send_telegram_message(
