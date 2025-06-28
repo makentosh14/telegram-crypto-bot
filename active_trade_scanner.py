@@ -57,52 +57,12 @@ _last_save_time = 0
 _save_cooldown = 5  # 5 seconds between saves
 
 async def handle_trailing_sl_exit(symbol, trade, current_price):
-    """Handle trailing stop loss exit for HF scanner - Updated for 50/50"""
+    """
+    Universal trailing SL exit handler - works for both DCA and non-DCA trades
+    """
     try:
-        direction = trade.get("direction", "").lower()
-        entry_price = trade.get("entry_price")
-        
-        # Calculate total profit percentage
-        if direction == "long":
-            profit_pct = ((current_price - entry_price) / entry_price) * 100
-        else:
-            profit_pct = ((entry_price - current_price) / entry_price) * 100
-        
-        # Mark trade as exited
-        trade["exited"] = True
-        trade["exit_price"] = current_price
-        trade["exit_reason"] = "Trailing_SL_Hit"
-        trade["profit_pct"] = profit_pct
-        trade["modified"] = True
-        
-        # Send notification - Updated for 50/50 strategy
-        await send_telegram_message(
-            f"💔 <b>HF Scanner: Trailing SL</b> on <b>{symbol}</b>\n"
-            f"Exit Price: {current_price:.6f}\n"
-            f"Total Trade Profit: {profit_pct:.2f}%\n"
-            f"Strategy: 50% secured @ TP1\n"
-            f"Final 50% exit via trailing SL"
-        )
-        
-        # Log the exit
-        log(f"💔 HF SCANNER: Trailing SL hit for {symbol} at {current_price} ({profit_pct:.2f}% total profit)")
-        write_log(f"HF_SCANNER_TRAILING_FINAL: {symbol} | Price: {current_price} | Total Profit: {profit_pct:.2f}%")
-        
-        # Log to activity file with 50/50 strategy context
-        log_trade_to_file(
-            symbol=symbol,
-            direction=direction,
-            entry=entry_price,
-            sl=trade.get("trailing_sl"),
-            tp1=trade.get("tp1_target"),
-            tp2=None,
-            result="trailing_sl_50_50",  # New result type
-            score=trade.get("score_history", [0])[-1] if trade.get("score_history") else 0,
-            trade_type=trade.get("trade_type", "Unknown"),
-            confidence=0
-        )
-        
-        return True
+        from universal_trailing_stop_fix import universal_execute_trailing_sl_exit
+        return await universal_execute_trailing_sl_exit(symbol, trade, current_price)
         
     except Exception as e:
         log(f"❌ HF SCANNER: Error handling trailing SL exit for {symbol}: {e}", level="ERROR")
@@ -466,40 +426,27 @@ async def process_active_trade(symbol, trade, live_candles):
         
         # Handle trailing stop for remaining position (only after TP1 hit)
         if trade.get("tp1_hit") and not trade.get("exited"):
-            current_trailing_sl = trade.get("trailing_sl")
+        # Use universal monitoring function
+        from universal_trailing_stop_fix import universal_trade_monitoring
+        
+        direction = trade.get("direction", "").lower()
+        
+        # This automatically handles both DCA and non-DCA trades
+        trailing_result = await universal_trade_monitoring(
+            symbol, trade, current_price, direction
+        )
+        
+        if trailing_result:
+            trade["modified"] = True
             
-            # Calculate new trailing stop
-            if direction == "long":
-                new_trailing_sl = current_price * (1 - trailing_pct/100)
-            else:
-                new_trailing_sl = current_price * (1 + trailing_pct/100)
+            # Log the action taken
+            is_dca = trade.get("dca_count", 0) > 0
+            trade_type = "DCA" if is_dca else "Standard"
+            log(f"🔄 HF SCANNER: Trailing processed for {symbol} ({trade_type} trade)")
             
-            new_trailing_sl = round(new_trailing_sl, 6)
-            
-            # Update trailing SL if improved
-            should_update = False
-            if current_trailing_sl is None:
-                should_update = True
-            elif direction == "long" and new_trailing_sl > current_trailing_sl:
-                should_update = True
-            elif direction == "short" and new_trailing_sl < current_trailing_sl:
-                should_update = True
-            
-            if should_update:
-                trade["trailing_sl"] = new_trailing_sl
-                trade["modified"] = True
-                log(f"🔄 HF SCANNER: Trailing SL updated for {symbol}: {new_trailing_sl}")
-            
-            # Check if trailing SL hit
-            sl_hit = False
-            if direction == "long" and current_price <= new_trailing_sl:
-                sl_hit = True
-            elif direction == "short" and current_price >= new_trailing_sl:
-                sl_hit = True
-                
-            if sl_hit:
-                await handle_trailing_sl_exit(symbol, trade, current_price)
-                trade["modified"] = True
+            # If trade was exited, we're done processing this symbol
+            if trade.get("exited"):
+                return
         
     except Exception as e:
         log(f"❌ HF SCANNER: Error processing {symbol}: {e}", level="ERROR")
