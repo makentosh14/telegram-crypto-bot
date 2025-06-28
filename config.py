@@ -136,5 +136,16 @@ DCA_MAX_RISK_MULTIPLIER = 2.0  # Maximum total risk after all DCAs (2x original)
 DCA_COOLDOWN_MINUTES = 5  # Minimum time between DCA additions
 
 # DCA Risk Limits
-DCA_MAX_BALANCE_USAGE = 0.15  # Maximum 15% of balance for all DCA positions
-DCA_DAILY_LIMIT = 5  # Maximum DCA operations per day
+DCA_MAX_BALANCE_USAGE = 0.50  # Maximum 15% of balance for all DCA positions
+DCA_DAILY_LIMIT = 20  # Maximum DCA operations per day
+
+ENABLE_FAST_DROP_PROTECTION = True  # Master switch for fast drop protection
+FAST_DROP_PROTECTION = {
+    "enabled": True,
+    "velocity_threshold": 0.3,        # 0.3% per minute velocity threshold
+    "pause_duration": 120,            # Pause SL for 2 minutes after fast drop
+    "dca_buffer": 0.1,               # 0.1% buffer before DCA trigger
+    "enhanced_buffer": 0.001,         # Extra 0.1% during fast drops
+    "min_data_points": 5,            # Minimum price points for analysis
+    "monitoring_window": 10,          # Monitor last 10 minutes of price data
+}
