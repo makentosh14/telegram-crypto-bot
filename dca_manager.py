@@ -10,6 +10,8 @@ from bybit_api import place_market_order, place_stop_loss_with_retry, signed_req
 from symbol_info import round_qty
 from error_handler import send_telegram_message
 from universal_trailing_stop_fix import update_trade_after_dca
+from config import DCA_FAST_BUFFER          # <-- NEW
+from trade_verification import verify_position_and_orders   # <-- NEW
 
 # DCA Configuration - Exact position size matching
 DCA_CONFIG = {
@@ -47,6 +49,9 @@ class DCAManager:
         """
         try:
             # Skip if already exited or no entry price
+            if trade.get("exited") or not await verify_position_and_orders(symbol):
+                return False
+    
             if trade.get("exited") or not trade.get("entry_price"):
                 return False
                 
@@ -62,6 +67,18 @@ class DCAManager:
             dca_count = trade.get("dca_count", 0)
             if dca_count >= dca_config["max_adds"]:
                 return False
+
+            # --- NEW: block DCA only when price is BEYOND the SL by more than buffer
+            sl_price = trade.get("original_sl")
+            if sl_price:
+                crossed = (
+                    direction == "long"  and current_price <= sl_price * (1 - DCA_FAST_BUFFER / 100)
+                ) or (
+                    direction == "short" and current_price >= sl_price * (1 + DCA_FAST_BUFFER / 100)
+                )
+                if crossed:
+                    log(f"🚫 DCA skipped for {symbol}: price >{DCA_FAST_BUFFER:.2f}% past SL")
+                    return False
             
             # Calculate current drawdown
             if direction == "long":
