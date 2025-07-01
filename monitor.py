@@ -26,7 +26,6 @@ from activity_logger import log_trade_to_file
 from bybit_api import signed_request, check_order_exists, place_stop_loss, place_stop_loss_with_retry, place_market_order
 from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
-from exit_manager import should_trail_stop, adjust_profit_protection, should_exit_by_time, detect_momentum_surge, calculate_exit_tranches
 from sl_tp_utils import evaluate_score_exit
 from dca_manager import dca_manager
 
@@ -1010,12 +1009,29 @@ async def monitor_trades(live_candles):
                         trade["modified"] = True
             
             # 4. Handle trailing stop after TP1 (UNIVERSAL - works for all trades)
-            elif trade.get("tp1_hit") and trade.get("trailing_pct"):
-                # Use universal monitoring - automatically detects DCA vs non-DCA
-                from universal_trailing_stop_fix import universal_trade_monitoring
-        
-                trailing_result = await universal_trade_monitoring(
-                    symbol, trade, current_price, direction, candles_by_tf
+            # 4. Handle trailing stop after TP1  ─────────────────────────────────────────
+            elif trade.get("tp1_hit"):                                # ← keep it simple
+                # 4-A  Initialise or tighten the SL for the REMAINING 50 %
+                new_sl = should_trail_stop_enhanced(
+                    symbol=symbol,
+                    trade=trade,
+                    current_price=current_price,
+                    candles=candles_by_tf.get('1', [])      # use 1-minute candles
+                )
+
+                if new_sl:                                  # only if we got a “better” SL
+                    # Decide if we are setting it for the first time or just moving it up
+                    init_or_update = "INITIALISED" if trade.get("trailing_sl") is None else "UPDATED"
+
+                    # Persist both locally and on the exchange
+                    await update_stop_loss_order(symbol, trade, new_sl)
+                    log_trailing_event(symbol, init_or_update, {"sl": new_sl})
+
+                # 4-B  (optional but handy) let the universal handler _monitor_ the SL-hit
+                from universal_trailing_stop_fix import universal_check_trailing_sl_hit
+
+                await universal_check_trailing_sl_hit(
+                    symbol, trade, current_price, direction
                 )
         
                 if trailing_result:
