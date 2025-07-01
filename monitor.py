@@ -963,28 +963,6 @@ async def monitor_trades(live_candles):
             
             # Update cycle count
             trade["cycles"] = trade.get("cycles", 0) + 1
-            
-            # 1. SL Check (only if needed and not too frequent)
-            if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
-                # Only check SL periodically, not every cycle
-                if trade["cycles"] % 360 == 0:  # Every 60 seconds (5s * 12)
-                    await check_and_restore_sl(symbol, trade)
-            
-            # 2. Calculate score for monitoring
-            try:
-                score, tf_scores, _, indicator_scores, used_list = score_symbol(symbol, candles_by_tf)
-                if score is not None and score >= 0:
-                    trade["score_history"].append(score)
-                    trade["last_score_update"] = datetime.utcnow()
-            except Exception as e:
-                log(f"Error scoring {symbol}: {e}")
-                score = trade.get("score_history", [7.0])[-1]
-            
-            # 3. Check for TP1 hit
-            if not trade.get("tp1_hit"):
-                tp1_hit = check_tp1_hit(trade, current_price, candles_by_tf.get('1', []))
-                if tp1_hit:
-                    await handle_tp1_hit(symbol, trade, current_price)
 
             # Check for DCA opportunity (only if not in profit)
             if not trade.get("tp1_hit"):
@@ -1008,7 +986,28 @@ async def monitor_trades(live_candles):
                         # Mark as modified for saving
                         trade["modified"] = True
             
-            # 4. Handle trailing stop after TP1 (UNIVERSAL - works for all trades)
+            # 1. SL Check (only if needed and not too frequent)
+            if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
+                # Only check SL periodically, not every cycle
+                if trade["cycles"] % 360 == 0:  # Every 60 seconds (5s * 12)
+                    await check_and_restore_sl(symbol, trade)
+            
+            # 2. Calculate score for monitoring
+            try:
+                score, tf_scores, _, indicator_scores, used_list = score_symbol(symbol, candles_by_tf)
+                if score is not None and score >= 0:
+                    trade["score_history"].append(score)
+                    trade["last_score_update"] = datetime.utcnow()
+            except Exception as e:
+                log(f"Error scoring {symbol}: {e}")
+                score = trade.get("score_history", [7.0])[-1]
+            
+            # 3. Check for TP1 hit
+            if not trade.get("tp1_hit"):
+                tp1_hit = check_tp1_hit(trade, current_price, candles_by_tf.get('1', []))
+                if tp1_hit:
+                    await handle_tp1_hit(symbol, trade, current_price)
+
             # 4. Handle trailing stop after TP1  ─────────────────────────────────────────
             elif trade.get("tp1_hit"):                                # ← keep it simple
                 # 4-A  Initialise or tighten the SL for the REMAINING 50 %
