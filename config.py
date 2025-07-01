@@ -150,6 +150,8 @@ FAST_DROP_PROTECTION = {
     "monitoring_window": 10,          # Monitor last 10 minutes of price data
 }
 
+DCA_FAST_BUFFER = 0.05
+
 # === STRATEGY ACTIVATION SETTINGS ===
 ENABLE_CORE_STRATEGY = True        # Your main trend-following strategy
 ENABLE_MEAN_REVERSION = True       # Mean reversion strategy (for ranging markets)
