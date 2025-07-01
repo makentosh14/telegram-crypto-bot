@@ -1041,8 +1041,10 @@ async def scan_for_new_signals(symbols,trend_context):
 
     # ADD THESE LINES HERE:
     # CRITICAL: Prevent duplicate trades
-        if symbol in active_trades and not active_trades[symbol].get("exited", False):
-            continue  # Skip - already trading this symbol
+        from monitor import active_trades
+        if (symbol in active_trades and not active_trades[symbol].get("exited", False)) \
+                or symbol in active_signals:
+            continue  
         
     # Check signal cooldown
         if is_duplicate_signal(symbol):
