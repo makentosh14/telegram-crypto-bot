@@ -107,6 +107,17 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
         score = signal_data.get("score", 0)
         confidence = signal_data.get("confidence", 60)
         regime = signal_data.get("regime", "trending")
+
+        from monitor import active_trades
+        if symbol in active_trades and not active_trades[symbol].get("exited", False):
+            log(f"🚫 Duplicate entry prevented for {symbol} (local active trade already open)")
+            return None
+
+        # Second layer – ask the exchange in case our file-state is stale
+        from trade_verification import verify_position_and_orders
+        if await verify_position_and_orders(symbol):
+            log(f"🚫 Duplicate entry prevented for {symbol} (exchange still reports open pos/order)")
+            return None
         
         # Get account balance if not provided
         account_balance = signal_data.get("account_balance")
