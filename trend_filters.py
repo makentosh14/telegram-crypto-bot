@@ -913,9 +913,65 @@ async def monitor_altseason_status():
 
 # Enhanced validation functions
 
+def validate_short_signal(symbol, candles_by_tf, trend_context, indicator_scores):
+    """
+    Strict validation for short signals to prevent false entries
+    This function maintains backward compatibility with existing main.py imports
+    """
+    try:
+        # Get BTC trend details
+        btc_trend = trend_context.get('btc_trend', 'neutral')
+        btc_confidence = trend_context.get('btc_confidence', 0)
+        
+        # 1. BTC must be in confirmed downtrend or ranging
+        if btc_trend not in ['downtrend', 'ranging']:
+            log(f"❌ {symbol}: BTC in {btc_trend}, not suitable for shorts")
+            return False
+        
+        # 2. If downtrend, check confidence
+        if btc_trend == 'downtrend' and btc_confidence < 65:
+            log(f"❌ {symbol}: BTC downtrend confidence too low ({btc_confidence:.1f}%)")
+            return False
+        
+        # 3. Check immediate price action (last 5 candles) - this is key!
+        if '5' in candles_by_tf:
+            recent_candles = candles_by_tf['5'][-5:]
+            bullish_candles = sum(1 for c in recent_candles if float(c['close']) > float(c['open']))
+            
+            if bullish_candles > 2:
+                log(f"❌ {symbol}: Too many recent bullish candles ({bullish_candles}/5)")
+                return False
+        
+        # 4. Require multiple bearish indicators (reduced from 3 to 2)
+        strong_bearish = sum(1 for k, v in indicator_scores.items() if v < -1.0)
+        if strong_bearish < 2:
+            log(f"❌ {symbol}: Insufficient bearish indicators ({strong_bearish})")
+            return False
+        
+        # 5. Check for divergence (price up, indicators down)
+        if '15' in candles_by_tf:
+            candles = candles_by_tf['15']
+            if len(candles) >= 5:
+                # FIX #8: Proper candle ordering check
+                closes = [float(c['close']) for c in candles[-5:]]  # Last 5 candles
+                price_trend = closes[-1] > closes[0]  # Price going up
+                indicator_trend = sum(v for v in indicator_scores.values()) < -2
+                
+                if price_trend and not indicator_trend:
+                    log(f"❌ {symbol}: Price/indicator divergence detected")
+                    return False
+        
+        log(f"✅ {symbol}: Short signal validated")
+        return True
+        
+    except Exception as e:
+        log(f"❌ Error validating short signal for {symbol}: {e}", level="ERROR")
+        return False
+
+
 async def validate_short_signal_fixed(symbol, candles_by_tf):
     """
-    Enhanced short signal validation with fixed logic
+    Enhanced short signal validation with fixed logic (async version)
     Addresses various validation issues mentioned in the fixes
     """
     try:
@@ -957,27 +1013,8 @@ async def validate_short_signal_fixed(symbol, candles_by_tf):
         else:
             indicator_scores['altseason'] = -0.2
         
-        # Require multiple bearish indicators (reduced from 3 to 2)
-        strong_bearish = sum(1 for k, v in indicator_scores.items() if v < -1.0)
-        if strong_bearish < 2:
-            log(f"❌ {symbol}: Insufficient bearish indicators ({strong_bearish})")
-            return False
-        
-        # 5. Check for divergence (price up, indicators down)
-        if '15' in candles_by_tf:
-            candles = candles_by_tf['15']
-            if len(candles) >= 5:
-                # FIX #8: Proper candle ordering (oldest → newest)
-                closes = [float(c[4]) for c in candles[-5:]]  # Last 5 candles
-                price_trend = closes[-1] > closes[0]  # Price going up
-                indicator_trend = sum(v for v in indicator_scores.values()) < -2
-                
-                if price_trend and not indicator_trend:
-                    log(f"❌ {symbol}: Price/indicator divergence detected")
-                    return False
-        
-        log(f"✅ {symbol}: Short signal validated")
-        return True
+        # Use the synchronous validate_short_signal function
+        return validate_short_signal(symbol, candles_by_tf, context, indicator_scores)
         
     except Exception as e:
         log(f"❌ Error validating short signal for {symbol}: {e}", level="ERROR")
@@ -1015,6 +1052,7 @@ __all__ = [
     'detect_market_regime',
     'get_market_sentiment',
     'calculate_ema_fixed',
+    'validate_short_signal',  # Added missing function
     'validate_short_signal_fixed',
     'monitor_btc_trend_accuracy',
     'monitor_altseason_status',
