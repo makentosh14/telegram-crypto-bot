@@ -102,7 +102,21 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
     try:
         # Extract parameters from signal_data dictionary
         symbol = signal_data.get("symbol")
-        direction = signal_data.get("direction", "Long").lower()
+        direction = signal_data.get("direction")
+        if not direction:
+            log(f"❌ No direction provided for {symbol}", level="ERROR")
+            return None
+
+        # Add debug logging
+        log(f"🔍 DIRECTION DEBUG for {symbol}: '{direction}' (type: {type(direction)})")
+
+        # Ensure it's a string and normalize
+        if isinstance(direction, str):
+            direction = direction.strip()
+            log(f"🔍 Direction after strip: '{direction}'")
+        else:
+            log(f"❌ Direction is not a string: {type(direction)}", level="ERROR")
+            return None
         strategy = signal_data.get("strategy", "core_strategy")
         score = signal_data.get("score", 0)
         confidence = signal_data.get("confidence", 60)
