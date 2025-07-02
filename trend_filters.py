@@ -415,6 +415,7 @@ class AltseasonDetector:
 class BTCTrendAnalyzer:
     """
     Enhanced BTC trend analyzer with thread-safe caching
+    FIXED: Complete implementation with all required methods
     """
     
     def __init__(self):
@@ -469,10 +470,148 @@ class BTCTrendAnalyzer:
         
         return ema
     
+    def _analyze_moving_averages(self, candles_by_tf):
+        """Analyze moving averages across timeframes"""
+        signals = []
+        
+        for tf in ['15', '1H', '4H']:
+            if tf not in candles_by_tf or len(candles_by_tf[tf]) < 50:
+                continue
+                
+            candles = candles_by_tf[tf]
+            closes = [float(c[4]) for c in candles]
+            
+            # Calculate EMAs
+            ema_20 = self._calculate_ema(closes, 20)
+            ema_50 = self._calculate_ema(closes, 50)
+            current_price = closes[-1]
+            
+            # Determine trend
+            if current_price > ema_20 > ema_50:
+                signals.append(('uptrend', 1.5 if tf in ['4H'] else 1.0))
+            elif current_price < ema_20 < ema_50:
+                signals.append(('downtrend', 1.5 if tf in ['4H'] else 1.0))
+            else:
+                signals.append(('neutral', 0.8))
+        
+        if not signals:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        # Aggregate signals
+        trend_weights = {'uptrend': 0, 'downtrend': 0, 'neutral': 0}
+        for trend, weight in signals:
+            trend_weights[trend] += weight
+        
+        dominant_trend = max(trend_weights.items(), key=lambda x: x[1])
+        confidence = min(75, 40 + len(signals) * 10)
+        
+        return {
+            'trend': dominant_trend[0],
+            'weight': dominant_trend[1],
+            'confidence': confidence
+        }
+    
+    def _analyze_price_structure(self, candles_by_tf):
+        """Analyze higher highs/lower lows structure"""
+        if '1H' not in candles_by_tf or len(candles_by_tf['1H']) < 20:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        candles = candles_by_tf['1H'][-20:]  # Last 20 hours
+        highs = [float(c[2]) for c in candles]
+        lows = [float(c[3]) for c in candles]
+        
+        # Check for higher highs and higher lows (uptrend)
+        recent_high = max(highs[-10:])
+        earlier_high = max(highs[:10])
+        recent_low = min(lows[-10:])
+        earlier_low = min(lows[:10])
+        
+        if recent_high > earlier_high and recent_low > earlier_low:
+            return {'trend': 'uptrend', 'weight': 1.2, 'confidence': 65}
+        elif recent_high < earlier_high and recent_low < earlier_low:
+            return {'trend': 'downtrend', 'weight': 1.2, 'confidence': 65}
+        else:
+            return {'trend': 'neutral', 'weight': 0.8, 'confidence': 45}
+    
+    def _analyze_momentum(self, candles_by_tf):
+        """Analyze price momentum"""
+        if '15' not in candles_by_tf or len(candles_by_tf['15']) < 14:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        candles = candles_by_tf['15']
+        closes = [float(c[4]) for c in candles]
+        
+        # Calculate RSI-like momentum
+        gains = []
+        losses = []
+        
+        for i in range(1, len(closes)):
+            change = closes[i] - closes[i-1]
+            if change > 0:
+                gains.append(change)
+                losses.append(0)
+            else:
+                gains.append(0)
+                losses.append(abs(change))
+        
+        if len(gains) < 14:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        avg_gain = np.mean(gains[-14:])
+        avg_loss = np.mean(losses[-14:])
+        
+        if avg_loss == 0:
+            rs = 100
+        else:
+            rs = avg_gain / avg_loss
+            
+        rsi = 100 - (100 / (1 + rs))
+        
+        if rsi > 60:
+            return {'trend': 'uptrend', 'weight': 1.0, 'confidence': min(70, 50 + (rsi-60)*2)}
+        elif rsi < 40:
+            return {'trend': 'downtrend', 'weight': 1.0, 'confidence': min(70, 50 + (40-rsi)*2)}
+        else:
+            return {'trend': 'neutral', 'weight': 0.8, 'confidence': 45}
+    
+    def _analyze_volume_trend(self, candles_by_tf):
+        """Analyze volume trends"""
+        if '1H' not in candles_by_tf or len(candles_by_tf['1H']) < 20:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        candles = candles_by_tf['1H']
+        
+        up_volume = []
+        down_volume = []
+        
+        for candle in candles:
+            close = float(candle[4])
+            open_price = float(candle[1])
+            volume = float(candle[5])
+            
+            if close > open_price:
+                up_volume.append(volume)
+            else:
+                down_volume.append(volume)
+        
+        if not up_volume or not down_volume:
+            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
+        
+        avg_up_vol = np.mean(up_volume)
+        avg_down_vol = np.mean(down_volume)
+        
+        if avg_up_vol > avg_down_vol * 1.3:
+            return {'trend': 'uptrend', 'weight': 1.0, 'confidence': 60}
+        elif avg_down_vol > avg_up_vol * 1.3:
+            return {'trend': 'downtrend', 'weight': 1.0, 'confidence': 60}
+        else:
+            return {'trend': 'neutral', 'weight': 0.8, 'confidence': 45}
+    
     async def analyze_btc_trend(self):
         """
         Enhanced BTC trend analysis
         FIX #12: Use concurrent API calls for multiple timeframes
+        FIXED: Complete implementation with all required analysis methods
         """
         try:
             # FIX #12: Fetch all timeframes concurrently
@@ -485,10 +624,11 @@ class BTCTrendAnalyzer:
             candles_by_tf = {}
             for i, tf in enumerate(self.timeframes):
                 if (isinstance(candles_results[i], list) and 
-                    len(candles_results[i]) > 50):
+                    len(candles_results[i]) > 20):  # Reduced from 50 to 20 for more lenient check
                     candles_by_tf[tf] = candles_results[i]
             
             if not candles_by_tf:
+                log("⚠️ No valid candle data for BTC trend analysis")
                 return {
                     'trend': 'neutral',
                     'strength': 0.5,
@@ -496,37 +636,54 @@ class BTCTrendAnalyzer:
                     'details': {'error': 'No valid candle data'}
                 }
             
-            # Analyze each timeframe
-            trend_votes = {}
+            # Analyze each component
+            trend_scores = {'uptrend': 0, 'downtrend': 0, 'neutral': 0}
             confidence_factors = []
+            analysis_details = {}
             
-            for tf, candles in candles_by_tf.items():
-                analysis = await self._analyze_timeframe(candles, tf)
-                trend_votes[tf] = analysis
-                confidence_factors.append(analysis['confidence'])
+            # 1. Moving Average Analysis
+            ma_analysis = self._analyze_moving_averages(candles_by_tf)
+            trend_scores[ma_analysis['trend']] += ma_analysis['weight']
+            confidence_factors.append(ma_analysis['confidence'])
+            analysis_details['moving_averages'] = ma_analysis
+            
+            # 2. Price Structure Analysis
+            structure_analysis = self._analyze_price_structure(candles_by_tf)
+            trend_scores[structure_analysis['trend']] += structure_analysis['weight']
+            confidence_factors.append(structure_analysis['confidence'])
+            analysis_details['price_structure'] = structure_analysis
+            
+            # 3. Momentum Analysis
+            momentum_analysis = self._analyze_momentum(candles_by_tf)
+            trend_scores[momentum_analysis['trend']] += momentum_analysis['weight']
+            confidence_factors.append(momentum_analysis['confidence'])
+            analysis_details['momentum'] = momentum_analysis
+            
+            # 4. Volume Analysis
+            volume_analysis = self._analyze_volume_trend(candles_by_tf)
+            trend_scores[volume_analysis['trend']] += volume_analysis['weight']
+            confidence_factors.append(volume_analysis['confidence'])
+            analysis_details['volume'] = volume_analysis
             
             # Determine overall trend
-            uptrend_weight = sum(v['weight'] for v in trend_votes.values() if v['trend'] == 'uptrend')
-            downtrend_weight = sum(v['weight'] for v in trend_votes.values() if v['trend'] == 'downtrend')
-            neutral_weight = sum(v['weight'] for v in trend_votes.values() if v['trend'] == 'neutral')
-            
-            total_weight = uptrend_weight + downtrend_weight + neutral_weight
+            total_weight = sum(trend_scores.values())
             
             if total_weight == 0:
                 overall_trend = 'neutral'
                 strength = 0.5
-            elif uptrend_weight > downtrend_weight and uptrend_weight > neutral_weight:
-                overall_trend = 'uptrend'
-                strength = uptrend_weight / total_weight
-            elif downtrend_weight > uptrend_weight and downtrend_weight > neutral_weight:
-                overall_trend = 'downtrend'
-                strength = downtrend_weight / total_weight
             else:
-                overall_trend = 'neutral'
-                strength = neutral_weight / total_weight
+                # Get trend with highest score
+                overall_trend = max(trend_scores.items(), key=lambda x: x[1])[0]
+                strength = trend_scores[overall_trend] / total_weight
+                
+                # Require minimum agreement for non-neutral trends
+                if overall_trend != 'neutral' and strength < 0.6:
+                    overall_trend = 'neutral'
+                    strength = 0.5
             
             # Calculate confidence
             confidence = np.mean(confidence_factors) if confidence_factors else 30
+            confidence = max(30, min(95, confidence))  # Clamp between 30-95
             
             # Update state
             self.last_trend = overall_trend
@@ -537,7 +694,7 @@ class BTCTrendAnalyzer:
                 'trend': overall_trend,
                 'strength': strength,
                 'confidence': confidence,
-                'details': trend_votes
+                'details': analysis_details
             }
             
         except Exception as e:
@@ -548,47 +705,6 @@ class BTCTrendAnalyzer:
                 'confidence': 30,
                 'details': {'error': str(e)}
             }
-    
-    async def _analyze_timeframe(self, candles, timeframe):
-        """Analyze trend for a specific timeframe"""
-        try:
-            if len(candles) < 50:
-                return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
-            
-            closes = [float(c[4]) for c in candles]
-            
-            # Calculate EMAs with fixed initialization
-            ema_20 = self._calculate_ema(closes, 20)
-            ema_50 = self._calculate_ema(closes, 50)
-            
-            current_price = closes[-1]
-            
-            # Determine trend based on EMA positioning and price action
-            if current_price > ema_20 > ema_50:
-                trend = 'uptrend'
-                weight = 1.5 if timeframe in ['4H', '1D'] else 1.0
-                confidence = 70
-            elif current_price < ema_20 < ema_50:
-                trend = 'downtrend'
-                weight = 1.5 if timeframe in ['4H', '1D'] else 1.0
-                confidence = 70
-            else:
-                trend = 'neutral'
-                weight = 0.8
-                confidence = 50
-            
-            return {
-                'trend': trend,
-                'weight': weight,
-                'confidence': confidence,
-                'ema_20': ema_20,
-                'ema_50': ema_50,
-                'current_price': current_price
-            }
-            
-        except Exception as e:
-            log(f"❌ Error analyzing timeframe {timeframe}: {e}", level="ERROR")
-            return {'trend': 'neutral', 'weight': 0.5, 'confidence': 30}
 
 
 # Global analyzer instances
