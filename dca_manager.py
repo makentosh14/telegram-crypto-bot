@@ -49,7 +49,7 @@ class DCAManager:
         """
         try:
             # Skip if already exited or no entry price
-            if trade.get("exited") or not await verify_position_and_orders(symbol):
+            if trade.get("exited") or not await verify_position_and_orders(symbol, trade):
                 return False
     
             if trade.get("exited") or not trade.get("entry_price"):
