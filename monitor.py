@@ -205,6 +205,12 @@ def save_active_trades():
                     
             trades_to_save[symbol] = trade_copy
 
+            for key, value in trade_copy.items():
+                if isinstance(value, datetime):
+                    trade_copy[key] = value.strftime("%Y-%m-%d %H:%M:%S")
+                elif hasattr(value, 'item'):  # Handle numpy types
+                    trade_copy[key] = value.item()
+
         log(f"📋 Trades to save: {list(trades_to_save.keys())}")
         
         # Use a temporary file for atomic writes
@@ -212,7 +218,7 @@ def save_active_trades():
         
         # First write to a temporary file
         with open(temp_path, 'w') as f:
-            json.dump(trades_to_save, f, indent=2)
+            json.dump(trades_to_save, f, indent=2, default=str)
             
         # Then rename the temp file to the actual file (atomic operation)
         if os.path.exists(PERSIST_PATH):
@@ -1031,6 +1037,14 @@ async def monitor_trades(live_candles):
 
                 await universal_check_trailing_sl_hit(
                     symbol, trade, current_price, direction
+                )
+
+                trailing_result = await universal_trade_monitoring(
+                    symbol=symbol, 
+                    trade=trade, 
+                    current_price=current_price, 
+                    direction=direction,
+                    candles_by_tf=candles_by_tf
                 )
         
                 if trailing_result:
