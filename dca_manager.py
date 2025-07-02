@@ -223,6 +223,24 @@ class DCAManager:
                     })
                 except:
                     pass
+
+            if trade.get("tp1_order_id"):
+                try:
+                    cancel_result = await signed_request("POST", "/v5/order/cancel", {
+                        "category": "linear",
+                        "symbol": symbol,
+                        "orderId": trade["tp1_order_id"]
+                    })
+                    
+                    if cancel_result.get("retCode") == 0:
+                        log(f"✅ Successfully cancelled existing TP1 order: {trade['tp1_order_id']}")
+                        orders_cancelled.append("TP1")
+                        trade["tp1_order_id"] = None
+                    else:
+                        log(f"⚠️ Failed to cancel TP1 order: {cancel_result.get('retMsg', 'Unknown error')}")
+                        
+                except Exception as e:
+                    log(f"❌ Error cancelling TP1 order: {e}")
             
             # Place new SL order
             sl_result = await place_stop_loss_with_retry(
