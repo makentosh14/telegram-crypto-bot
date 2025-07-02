@@ -135,7 +135,7 @@ def classify_signal(row):
         return "🧪 Unknown"
 
 def format_indicator_scores(raw):
-    """Format indicator scores for display"""
+    """Format indicator scores for display - FIXED to handle non-numeric values"""
     try:
         if isinstance(raw, str) and raw.strip():
             data = json.loads(raw)
@@ -143,18 +143,52 @@ def format_indicator_scores(raw):
             data = raw
 
         if isinstance(data, dict):
-            readable = [f"{INDICATOR_MAP.get(k, k)}: {v}" for k, v in data.items() if float(v) > 0]
+            def safe_format_value(value):
+                """Safely format value for display"""
+                try:
+                    if isinstance(value, str):
+                        # Try to parse as float
+                        try:
+                            return f"{float(value):.2f}"
+                        except ValueError:
+                            # If it's a non-numeric string, just return it
+                            return value
+                    elif isinstance(value, (int, float)):
+                        return f"{float(value):.2f}"
+                    else:
+                        return str(value)
+                except:
+                    return str(value)
+            
+            # Only include indicators with meaningful values
+            readable = []
+            for k, v in data.items():
+                try:
+                    # Skip empty or zero values
+                    if v is None or v == "" or v == 0:
+                        continue
+                    
+                    formatted_value = safe_format_value(v)
+                    indicator_name = INDICATOR_MAP.get(k, k)
+                    readable.append(f"{indicator_name}: {formatted_value}")
+                    
+                except Exception as e:
+                    print(f"Error formatting indicator {k}: {v}, error: {e}")
+                    continue
+                    
         elif isinstance(data, list):
             readable = [INDICATOR_MAP.get(str(item), str(item)) for item in data if item]
         else:
             readable = []
 
         return "\n".join(readable) if readable else "—"
-    except Exception:
+        
+    except Exception as e:
+        print(f"Error in format_indicator_scores: {e}, raw data: {raw}")
         return "—"
 
 def top_indicator(raw):
-    """Extract top indicator from scores"""
+    """Extract top indicator from scores - FIXED to handle non-numeric values"""
     try:
         if isinstance(raw, str):
             data = json.loads(raw)
@@ -162,11 +196,46 @@ def top_indicator(raw):
             data = raw
 
         if isinstance(data, dict):
-            sorted_items = sorted(data.items(), key=lambda x: float(x[1]) if str(x[1]).replace('.','',1).isdigit() else 0, reverse=True)
-            return INDICATOR_MAP.get(sorted_items[0][0], sorted_items[0][0]) if sorted_items else ""
-        return ""
-    except:
-        return ""
+            # FIXED: Handle non-numeric values properly
+            def safe_float_parse(value):
+                """Safely parse value to float, return 0 if not numeric"""
+                try:
+                    # Handle string values like 'range_break'
+                    if isinstance(value, str):
+                        # Try to parse as float first
+                        try:
+                            return float(value)
+                        except ValueError:
+                            # If it's a non-numeric string, return 1.0 as indicator presence
+                            return 1.0 if value else 0.0
+                    # Handle numeric values
+                    elif isinstance(value, (int, float)):
+                        return float(value)
+                    else:
+                        return 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+            
+            # Sort indicators by their numeric value
+            sorted_items = sorted(
+                data.items(), 
+                key=lambda x: safe_float_parse(x[1]), 
+                reverse=True
+            )
+            
+            if sorted_items:
+                top_key, top_value = sorted_items[0]
+                # Return the indicator name with its value
+                return f"{INDICATOR_MAP.get(top_key, top_key)}: {safe_float_parse(top_value):.2f}"
+            else:
+                return "—"
+        else:
+            return "—"
+            
+    except Exception as e:
+        # Log the error for debugging
+        print(f"Error in top_indicator: {e}, raw data: {raw}")
+        return "—"
 
 def format_tf_scores(raw):
     """Format timeframe scores for display"""
@@ -423,70 +492,97 @@ def display_performance_charts(df):
             st.info("Missed upside data not available")
 
 def display_indicator_details(df):
-    """Display indicator breakdown with enhanced information"""
-    st.write("### 🧠 Top Indicators Analysis")
-    if df.empty:
-        st.warning("No data available to display indicator details.")
-        return
-
-    # Create a column for the DataFrame with the top indicator for each trade
-    if 'indicator_scores' in df.columns:
-        df['top_ind'] = df['indicator_scores'].apply(top_indicator)
-        
-        # Count occurrences of each top indicator
-        ind_counts = df['top_ind'].value_counts()
-        
-        if not ind_counts.empty:
-            # Plot top indicators
-            fig = px.bar(
-                x=ind_counts.index,
-                y=ind_counts.values,
-                labels={'x': 'Indicator', 'y': 'Count'},
-                title='Most Common Top Indicators'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-    # Latest trade indicator breakdown
-    st.subheader("📊 Latest Trade Indicator Details")
-    latest = df.iloc[0]
-
+    """Display indicator scores chart - FIXED to handle non-numeric values"""
     if "indicator_scores" in latest and pd.notna(latest["indicator_scores"]):
         try:
-            scores = json.loads(latest["indicator_scores"])
-            readable = {INDICATOR_MAP.get(k, k): v for k, v in scores.items()}
+            # Parse the indicator scores
+            if isinstance(latest["indicator_scores"], str):
+                indicator_data = json.loads(latest["indicator_scores"])
+            else:
+                indicator_data = latest["indicator_scores"]
             
-            # Sort indicators by absolute value for better visualization
-            sorted_indicators = dict(sorted(readable.items(), 
-                                           key=lambda item: abs(float(item[1])) if str(item[1]).replace('-','',1).replace('.','',1).isdigit() else 0, 
-                                           reverse=True))
-            
-            # Create a horizontal bar chart for indicators
-            fig = px.bar(
-                x=list(sorted_indicators.values()),
-                y=list(sorted_indicators.keys()),
-                orientation='h',
-                labels={'x': 'Score', 'y': 'Indicator'},
-                title='Indicator Scores for Latest Trade'
-            )
-            
-            # Color coding: green for positive, red for negative
-            fig.update_traces(marker_color=[
-                'green' if str(v).replace('.','',1).isdigit() and float(v) > 0 else 'red' 
-                for v in sorted_indicators.values()
-            ])
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
+            if isinstance(indicator_data, dict) and indicator_data:
+                # Convert to readable format and filter numeric values
+                sorted_indicators = {}
+                
+                for key, value in indicator_data.items():
+                    try:
+                        # Convert to float if possible
+                        if isinstance(value, str):
+                            try:
+                                numeric_value = float(value)
+                            except ValueError:
+                                # For non-numeric strings like 'range_break', assign 1.0
+                                numeric_value = 1.0 if value else 0.0
+                        elif isinstance(value, (int, float)):
+                            numeric_value = float(value)
+                        else:
+                            continue  # Skip non-convertible values
+                        
+                        # Only include meaningful values
+                        if numeric_value > 0:
+                            readable_name = INDICATOR_MAP.get(key, key)
+                            sorted_indicators[readable_name] = numeric_value
+                            
+                    except Exception as e:
+                        print(f"Error processing indicator {key}: {value}, error: {e}")
+                        continue
+                
+                if sorted_indicators:
+                    # Sort by value
+                    sorted_indicators = dict(sorted(
+                        sorted_indicators.items(), 
+                        key=lambda x: x[1], 
+                        reverse=True
+                    ))
+                    
+                    # Create horizontal bar chart
+                    fig = px.bar(
+                        x=list(sorted_indicators.values()),
+                        y=list(sorted_indicators.keys()),
+                        orientation='h',
+                        labels={'x': 'Score', 'y': 'Indicator'},
+                        title='Indicator Scores for Latest Trade'
+                    )
+                    
+                    # Color coding: green for positive values
+                    fig.update_traces(marker_color='green')
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No numeric indicator scores found for charting.")
+                    
         except Exception as e:
             st.error(f"Error parsing indicator scores: {e}")
+            print(f"Full error details: {e}, data: {latest['indicator_scores']}")
 
-    if "used_indicators" in latest and pd.notna(latest["used_indicators"]):
-        try:
-            indicators = json.loads(latest["used_indicators"])
-            st.subheader("✅ Indicators Used in Latest Trade")
-            st.markdown(", ".join([INDICATOR_MAP.get(i, i) for i in indicators]))
-        except Exception as e:
-            st.error(f"Error parsing used indicators: {e}")
+# INDICATOR_MAP for readable names
+INDICATOR_MAP = {
+    'rsi': 'RSI',
+    'macd': 'MACD',
+    'bb': 'Bollinger Bands',
+    'volume': 'Volume',
+    'ema': 'EMA',
+    'sma': 'SMA',
+    'stoch': 'Stochastic',
+    'atr': 'ATR',
+    'obv': 'OBV',
+    'vwap': 'VWAP',
+    'range_break': 'Range Break',
+    'range_confidence': 'Range Confidence',
+    'range_direction_aligned': 'Direction Aligned',
+    'pre_breakout': 'Pre-Breakout',
+    'stealth_accumulation': 'Stealth Accumulation',
+    'volume_spike': 'Volume Spike',
+    'momentum': 'Momentum',
+    'trend_strength': 'Trend Strength',
+    'pattern_detected': 'Pattern',
+    'whale_signal': 'Whale Activity',
+    'pump_pattern': 'Pump Pattern',
+    'break_resistance': 'Break Resistance',
+    'break_support': 'Break Support',
+    # Add more mappings as needed
+}
 
 def display_trade_drilldown(df):
     """Enhanced trade drilldown analysis with more metrics and insights"""
