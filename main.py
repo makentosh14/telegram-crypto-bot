@@ -1248,15 +1248,21 @@ async def scan_for_new_signals(symbols,trend_context):
         btc_trend = trend_context.get("btc_trend", "ranging")
         market_sentiment = trend_context.get("sentiment", "neutral")
         
-        if direction == "Short" and btc_trend == "uptrend" and trade_type in ["Scalp", "Intraday"]:
-            log(f"⚠️ Skipping {symbol}: Short signal in strong uptrend")
-            continue
+        if direction == "Short" and btc_trend == "uptrend":
+            btc_confidence = trend_context.get("btc_confidence", 0)
+            if btc_confidence > 80 and trade_type in ["Scalp", "Intraday"]:
+                log(f"⚠️ Skipping {symbol}: Short signal in very strong uptrend (conf: {btc_confidence}%)")
+                continue
+            else:
+                log(f"📈 Allowing {symbol} short despite uptrend (low confidence: {btc_confidence}%)")
         
         # Require higher confidence for shorts in neutral/bullish markets
         if direction == "Short" and market_sentiment != "bearish":
-            if confidence < 60:
-                log(f"⚠️ Skipping {symbol}: Short confidence {confidence}% below 75% threshold")
+            if confidence < 40:  # Reduced from 60 to 40
+                log(f"⚠️ Skipping {symbol}: Short confidence {confidence}% below 40% threshold")
                 continue
+            else:
+                log(f"📊 Allowing {symbol} short in {market_sentiment} market (confidence: {confidence}%)")
         
         # Check if market conditions favor shorts
         if direction == "Short" and not is_short_favorable(candles_by_tf, trend_context):
