@@ -103,6 +103,7 @@ class AltseasonDetector:
         Check how many alts are outperforming BTC
         FIX #1: Remove double-scaling of price24hPcnt
         FIX #3: Use concurrent API calls instead of sequential
+        ADDITIONAL FIX: Handle empty API response lists properly
         """
         
         try:
@@ -130,39 +131,54 @@ class AltseasonDetector:
             # Execute all requests concurrently
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
-            # Process BTC data
+            # Process BTC data with proper error handling
             btc_resp = results[0]
             btc_perf_24h = 0
             
             if isinstance(btc_resp, dict) and btc_resp.get("retCode") == 0:
-                btc_data = btc_resp.get("result", {}).get("list", [{}])[0]
-                # FIX #1: Remove * 100 - price24hPcnt is already a percentage
-                btc_perf_24h = float(btc_data.get("price24hPcnt", 0))
+                result_data = btc_resp.get("result", {})
+                ticker_list = result_data.get("list", [])
+                
+                # ADDITIONAL FIX: Check if list is not empty before accessing index
+                if ticker_list and len(ticker_list) > 0:
+                    btc_data = ticker_list[0]
+                    # FIX #1: Remove * 100 - price24hPcnt is already a percentage
+                    btc_perf_24h = float(btc_data.get("price24hPcnt", 0))
+                else:
+                    log(f"⚠️ Empty ticker list for BTCUSDT", level="WARNING")
                 
             outperforming_24h = 0
             strong_performers = 0
             total_checked = 0
             
-            # Process alt data
+            # Process alt data with improved error handling
             for i, symbol in enumerate(alt_symbols):
                 try:
                     ticker_resp = results[i + 1]  # Skip BTC result
                     
                     if (isinstance(ticker_resp, dict) and 
                         ticker_resp.get("retCode") == 0):
-                        ticker = ticker_resp.get("result", {}).get("list", [{}])[0]
-                        # FIX #1: Remove * 100 - price24hPcnt is already a percentage
-                        alt_perf_24h = float(ticker.get("price24hPcnt", 0))
                         
-                        total_checked += 1
+                        result_data = ticker_resp.get("result", {})
+                        ticker_list = result_data.get("list", [])
                         
-                        # Check if outperforming BTC
-                        if alt_perf_24h > btc_perf_24h + 2:  # 2% outperformance threshold
-                            outperforming_24h += 1
+                        # ADDITIONAL FIX: Check if list is not empty before accessing index
+                        if ticker_list and len(ticker_list) > 0:
+                            ticker = ticker_list[0]
+                            # FIX #1: Remove * 100 - price24hPcnt is already a percentage
+                            alt_perf_24h = float(ticker.get("price24hPcnt", 0))
                             
-                        # Check for strong performers (>10% gain)
-                        if alt_perf_24h > 10:
-                            strong_performers += 1
+                            total_checked += 1
+                            
+                            # Check if outperforming BTC
+                            if alt_perf_24h > btc_perf_24h + 2:  # 2% outperformance threshold
+                                outperforming_24h += 1
+                                
+                            # Check for strong performers (>10% gain)
+                            if alt_perf_24h > 10:
+                                strong_performers += 1
+                        else:
+                            log(f"⚠️ Empty ticker list for {symbol}", level="WARNING")
                             
                 except Exception as e:
                     log(f"❌ Error processing {symbol}: {e}", level="WARNING")
@@ -190,6 +206,7 @@ class AltseasonDetector:
         """
         Analyze if volume is shifting to altcoins
         FIX #5: Use turnover24h (quote-value) for proper USD comparison
+        ADDITIONAL FIX: Handle empty API response lists properly
         """
         
         try:
@@ -213,11 +230,19 @@ class AltseasonDetector:
                     
                     if (isinstance(ticker_resp, dict) and 
                         ticker_resp.get("retCode") == 0):
-                        ticker = ticker_resp.get("result", {}).get("list", [{}])[0]
                         
-                        # FIX #5: Use turnover24h for USD-quoted volume instead of volume24h
-                        turnover_24h = float(ticker.get("turnover24h", 0))
-                        volumes[symbol] = turnover_24h
+                        result_data = ticker_resp.get("result", {})
+                        ticker_list = result_data.get("list", [])
+                        
+                        # ADDITIONAL FIX: Check if list is not empty before accessing index
+                        if ticker_list and len(ticker_list) > 0:
+                            ticker = ticker_list[0]
+                            
+                            # FIX #5: Use turnover24h for USD-quoted volume instead of volume24h
+                            turnover_24h = float(ticker.get("turnover24h", 0))
+                            volumes[symbol] = turnover_24h
+                        else:
+                            log(f"⚠️ Empty ticker list for {symbol} in volume analysis", level="WARNING")
                         
                 except Exception as e:
                     log(f"❌ Error processing volume for {symbol}: {e}", level="WARNING")
@@ -657,6 +682,7 @@ async def get_market_sentiment():
     """
     Analyze overall market sentiment
     FIX #12: Use concurrent API calls instead of sequential
+    ADDITIONAL FIX: Handle empty API response lists properly
     Returns: 'bullish', 'bearish', or 'neutral'
     """
     try:
@@ -683,18 +709,22 @@ async def get_market_sentiment():
                 
                 if (isinstance(ticker_resp, dict) and 
                     ticker_resp.get("retCode") == 0):
-                    ticker_list = ticker_resp.get("result", {}).get("list", [])
-                    if not ticker_list:
-                        continue
-
-                    ticker = ticker_list[0]
-                    # FIX #1: Remove * 100 - price24hPcnt is already a percentage
-                    price_24h_pct = float(ticker.get("price24hPcnt", 0))
                     
-                    if price_24h_pct > 2:
-                        bullish_count += 1
-                    elif price_24h_pct < -2:
-                        bearish_count += 1
+                    result_data = ticker_resp.get("result", {})
+                    ticker_list = result_data.get("list", [])
+                    
+                    # ADDITIONAL FIX: Check if list is not empty before accessing index
+                    if ticker_list and len(ticker_list) > 0:
+                        ticker = ticker_list[0]
+                        # FIX #1: Remove * 100 - price24hPcnt is already a percentage
+                        price_24h_pct = float(ticker.get("price24hPcnt", 0))
+                        
+                        if price_24h_pct > 2:
+                            bullish_count += 1
+                        elif price_24h_pct < -2:
+                            bearish_count += 1
+                    else:
+                        log(f"⚠️ Empty ticker list for {symbol} in sentiment analysis", level="WARNING")
 
                 else:
                     log(f"⚠️ Failed ticker call for {symbol}", level="WARNING")
