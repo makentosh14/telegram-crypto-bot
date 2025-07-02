@@ -115,7 +115,7 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
 
         # Second layer – ask the exchange in case our file-state is stale
         from trade_verification import verify_position_and_orders
-        if await verify_position_and_orders(symbol):
+        if await verify_position_and_orders(symbol, trade_data):
             log(f"🚫 Duplicate entry prevented for {symbol} (exchange still reports open pos/order)")
             return None
         
