@@ -114,10 +114,15 @@ async def execute_trade_if_valid(signal_data, max_risk=0.06):
             return None
 
         # Second layer – ask the exchange in case our file-state is stale
+        # FIX: Pass the trade data from active_trades, not undefined 'trade_data'
         from trade_verification import verify_position_and_orders
-        if await verify_position_and_orders(symbol, trade_data):
-            log(f"🚫 Duplicate entry prevented for {symbol} (exchange still reports open pos/order)")
-            return None
+        
+        # Check if we have an active trade to verify
+        if symbol in active_trades:
+            trade_to_verify = active_trades[symbol]
+            if await verify_position_and_orders(symbol, trade_to_verify):
+                log(f"🚫 Duplicate entry prevented for {symbol} (exchange still reports open pos/order)")
+                return None
         
         # Get account balance if not provided
         account_balance = signal_data.get("account_balance")
