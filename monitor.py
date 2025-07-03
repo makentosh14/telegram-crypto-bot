@@ -412,20 +412,21 @@ async def get_current_price(symbol, live_candles):
     Enhanced current price getter that tries live_candles first, then API
     """
     try:
-        # First try live_candles (faster)
+        # First try live_candles (faster) - NOTE: This is NOT async
         current_price = get_current_price(symbol, live_candles)
         
-        if current_price and current_price > 0:
+        # Check if we got a valid price from live_candles
+        if current_price is not None and isinstance(current_price, (int, float)) and current_price > 0:
             return current_price
         
         # Fallback to API call
         log(f"🔄 {symbol}: Falling back to API for current price")
         api_price = await get_current_price_api(symbol)
         
-        if api_price and api_price > 0:
+        if api_price is not None and isinstance(api_price, (int, float)) and api_price > 0:
             return api_price
         
-        log(f"❌ {symbol}: Could not get current price from any source", level="ERROR")
+        log(f"❌ {symbol}: Could not get current price from any source", level="WARN")
         return None
         
     except Exception as e:
@@ -961,7 +962,7 @@ async def monitor_trades(live_candles):
 
             # Get current price
             current_price = await get_current_price(symbol, live_candles)
-            if not current_price or current_price <= 0:
+            if current_price is None or not isinstance(current_price, (int, float)) or current_price <= 0:
                 log(f"⚠️ {symbol}: Could not get current price, skipping")
                 continue
             
@@ -973,25 +974,6 @@ async def monitor_trades(live_candles):
             # Validate trade data
             if not trade.get("entry_price") or not trade.get("direction"):
                 log(f"⚠️ {symbol}: Invalid trade data, skipping")
-                continue
-            
-            # Skip if symbol not in live candles
-            if symbol not in live_candles:
-                continue
-            
-            # Get candles
-            candles_by_tf = {}
-            try:
-                for tf in ['1', '3', '5', '15', '30', '60', '240']:
-                    if str(tf) in live_candles[symbol]:
-                        candles_by_tf[tf] = list(live_candles[symbol][str(tf)])
-                
-                if not candles_by_tf.get('1'):
-                    continue
-                    
-                current_price = float(candles_by_tf['1'][-1]['close'])
-            except Exception as e:
-                log(f"⚠️ Error getting candles for {symbol}: {e}")
                 continue
             
             # Core trade variables
