@@ -1,6 +1,8 @@
 import asyncio
 import traceback
 import time
+import json
+from datetime import datetime
 from scanner import fetch_symbols
 from websocket_candles import live_candles, stream_candles, SUPPORTED_INTERVALS
 from score import score_symbol, determine_direction, calculate_confidence, has_pump_potential, detect_momentum_strength
@@ -79,6 +81,28 @@ FIXED_RISK_PERCENTAGES = {
     "Intraday": 0.035,  # 3.5% risk for intraday  
     "Swing": 0.02       # 2% risk for swing trades
 }
+
+def clean_dict_for_json(data):
+    """Convert datetime objects to strings for JSON serialization"""
+    if isinstance(data, dict):
+        cleaned = {}
+        for key, value in data.items():
+            cleaned[key] = clean_dict_for_json(value)
+        return cleaned
+    elif isinstance(data, list):
+        return [clean_dict_for_json(item) for item in data]
+    elif isinstance(data, datetime):
+        return data.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        return data
+
+# Patch the JSON module to handle datetime objects
+original_json_dump = json.dump
+def patched_json_dump(obj, fp, **kwargs):
+    cleaned_obj = clean_dict_for_json(obj)
+    return original_json_dump(cleaned_obj, fp, **kwargs)
+
+json.dump = patched_json_dump
 
 def has_strong_swing_conditions(candles_by_tf, tf_scores, direction, trend_context, indicator_scores, used_indicators):
     """
