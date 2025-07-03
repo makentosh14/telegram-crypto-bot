@@ -1033,7 +1033,7 @@ async def monitor_trades(live_candles):
                     log_trailing_event(symbol, init_or_update, {"sl": new_sl})
 
                 # 4-B  (optional but handy) let the universal handler _monitor_ the SL-hit
-                from universal_trailing_stop_fix import universal_check_trailing_sl_hit
+                from universal_trailing_stop_fix import universal_check_trailing_sl_hit, universal_trade_monitoring
 
                 await universal_check_trailing_sl_hit(
                     symbol, trade, current_price, direction
