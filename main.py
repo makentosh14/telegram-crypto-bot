@@ -82,6 +82,36 @@ FIXED_RISK_PERCENTAGES = {
     "Swing": 0.02       # 2% risk for swing trades
 }
 
+try:
+    from universal_trailing_stop_fix import universal_trade_monitoring
+except ImportError:
+    # Create a fallback function if the module is missing
+    async def universal_trade_monitoring(symbol, trade, current_price, direction, candles_by_tf=None):
+        """Fallback function to prevent 'name not defined' error"""
+        try:
+            # Only handle trailing after TP1 is hit
+            if not trade.get("tp1_hit") or trade.get("exited"):
+                return False
+            
+            # Log that we're using fallback
+            from logger import log
+            log(f"⚠️ Using fallback monitoring for {symbol}")
+            
+            # Basic logic to prevent errors
+            return False
+        except Exception as e:
+            from logger import log
+            log(f"❌ Error in fallback monitoring: {e}", level="ERROR")
+            return False
+
+# Patch the active_trade_scanner module
+try:
+    import active_trade_scanner
+    active_trade_scanner.universal_trade_monitoring = universal_trade_monitoring
+    print("✅ Patched active_trade_scanner with universal_trade_monitoring")
+except Exception as e:
+    print(f"⚠️ Could not patch active_trade_scanner: {e}")
+
 def clean_dict_for_json(data):
     """Convert datetime objects to strings for JSON serialization"""
     if isinstance(data, dict):
