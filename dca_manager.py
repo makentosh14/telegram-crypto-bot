@@ -11,7 +11,8 @@ from symbol_info import round_qty
 from error_handler import send_telegram_message
 from universal_trailing_stop_fix import update_trade_after_dca
 from config import DCA_FAST_BUFFER          # <-- NEW
-from trade_verification import verify_position_and_orders   # <-- NEW
+from trade_verification import verify_position_and_orders # <-- NEW
+from auto_exit_handler import auto_exit_past_sl
 
 # DCA Configuration - Exact position size matching
 DCA_CONFIG = {
@@ -77,8 +78,16 @@ class DCAManager:
                     direction == "short" and current_price >= sl_price * (1 + DCA_FAST_BUFFER / 100)
                 )
                 if crossed:
-                    log(f"🚫 DCA skipped for {symbol}: price >{DCA_FAST_BUFFER:.2f}% past SL - Auto-exiting")
-                    await check_and_exit_past_sl(symbol, trade, current_price)
+                    log(f"🚫 DCA skipped for {symbol}: price >{DCA_FAST_BUFFER:.2f}% past SL - AUTO-EXITING")
+        
+                    # Auto-exit the trade instead of just skipping
+                    exit_success = await auto_exit_past_sl(symbol, trade, current_price, DCA_FAST_BUFFER)
+        
+                    if exit_success:
+                        log(f"✅ {symbol}: Trade auto-exited successfully")
+                    else:
+                        log(f"❌ {symbol}: Auto-exit failed, but DCA still blocked", level="ERROR")
+        
                     return False
             
             # Calculate current drawdown
