@@ -1971,7 +1971,7 @@ async def run_bot():
     asyncio.create_task(cleanup_stealth_cache())
     asyncio.create_task(stealth_activity_report())
     asyncio.create_task(range_break_scanner_loop(symbols))
-    asyncio.create_task(verify_all_positions(15))
+    asyncio.create_task(verify_all_positions(30))
 
     await startup_cleanup()
 
