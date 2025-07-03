@@ -1958,7 +1958,6 @@ async def run_bot():
     asyncio.create_task(pattern_match_loop(symbols))
     asyncio.create_task(pattern_summary_loop())
     asyncio.create_task(cleanup_cooldowns())
-    asyncio.create_task(verify_all_positions(frequency_minutes=15))
     asyncio.create_task(high_frequency_scanner(live_candles))
     asyncio.create_task(periodic_cleanup())
     asyncio.create_task(cleanup_pattern_cache())  # Add pattern cache cleanup
