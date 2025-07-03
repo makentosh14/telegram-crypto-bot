@@ -407,6 +407,31 @@ async def periodic_backups():
         # Wait for an hour
         await asyncio.sleep(3600)  # 1 hour
 
+async def get_current_price(symbol, live_candles):
+    """
+    Enhanced current price getter that tries live_candles first, then API
+    """
+    try:
+        # First try live_candles (faster)
+        current_price = get_current_price(symbol, live_candles)
+        
+        if current_price and current_price > 0:
+            return current_price
+        
+        # Fallback to API call
+        log(f"🔄 {symbol}: Falling back to API for current price")
+        api_price = await get_current_price_api(symbol)
+        
+        if api_price and api_price > 0:
+            return api_price
+        
+        log(f"❌ {symbol}: Could not get current price from any source", level="ERROR")
+        return None
+        
+    except Exception as e:
+        log(f"❌ Error in enhanced price getter for {symbol}: {e}", level="ERROR")
+        return None
+
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, 
                       trailing_pct=None, tp1_target=None, tp1_pct=None, tp2=None, sl=None, 
                       sl_order_id=None, qty=None, exit_tranches=None, has_pump_potential=False, range_break_details=None):
@@ -935,8 +960,9 @@ async def monitor_trades(live_candles):
                 continue
 
             # Get current price
-            current_price = get_current_price(symbol, live_candles)
-            if not current_price:
+            current_price = await get_current_price(symbol, live_candles)
+            if not current_price or current_price <= 0:
+                log(f"⚠️ {symbol}: Could not get current price, skipping")
                 continue
             
             # NEW: Auto-exit check BEFORE any other logic
