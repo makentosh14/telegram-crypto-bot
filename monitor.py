@@ -28,7 +28,7 @@ from error_handler import send_telegram_message
 from strategy_performance import log_strategy_result
 from sl_tp_utils import evaluate_score_exit
 from dca_manager import dca_manager
-
+from auto_exit_handler import auto_exit_past_sl
 
 # FIXED PERCENTAGES for SL/TP - Add this after the imports
 FIXED_PERCENTAGES = {
@@ -923,19 +923,25 @@ async def monitor_trades(live_candles):
         log("⏳ Grace period active, skipping trade monitoring...")
         return
     
-    # Skip during startup grace period
-    if time.time() - startup_time < 120:
-        log("⏳ Grace period active, skipping trade monitoring...")
-        return
-    
     # Clean up exited trades first
     cleanup_exited_trades()
+    global active_trades
     
     # Process each active trade
     for symbol, trade in list(active_trades.items()):
         try:
             # Skip exited trades
             if trade.get("exited"):
+                continue
+
+            # Get current price
+            current_price = get_current_price(symbol, live_candles)
+            if not current_price:
+                continue
+            
+            # NEW: Auto-exit check BEFORE any other logic
+            if await auto_exit_past_sl(symbol, trade, current_price):
+                log(f"🚫 {symbol}: Trade auto-exited, skipping further processing")
                 continue
             
             # Validate trade data
