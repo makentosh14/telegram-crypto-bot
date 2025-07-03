@@ -1843,14 +1843,32 @@ async def verify_and_sync_positions():
                     "recovered": True
                 }
                 log(f"🔧 Recovered missing trade: {symbol}")
-        
-        # 3. Trades in active_trades but no position on Bybit
+    
+        # 3. Trades in active_trades but no position on Bybit - SAFER VERSION
         for symbol in list(active_trades.keys()):
             if symbol not in bybit_positions and not active_trades[symbol].get("exited"):
-                issues_found.append(f"{symbol}: In active_trades but no position on Bybit")
-                # Mark as exited
-                active_trades[symbol]["exited"] = True
-                log(f"🔧 Fixed: {symbol} marked as exited (no position on Bybit)")
+                # Don't immediately mark as exited - could be API issue
+                trade = active_trades[symbol]
+        
+                # Track failed verifications
+                if "verification_failures" not in trade:
+                    trade["verification_failures"] = 0
+        
+                trade["verification_failures"] += 1
+                trade["last_verification_fail"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        
+                # Only mark as exited after multiple consecutive failures
+                if trade["verification_failures"] >= 3:
+                    issues_found.append(f"{symbol}: No position found after {trade['verification_failures']} checks")
+                    log(f"⚠️ MANUAL CHECK NEEDED: {symbol} not found on Bybit after 3 attempts")
+            
+                    # Don't auto-remove - require manual confirmation
+                    # active_trades[symbol]["exited"] = True  # COMMENTED OUT
+            
+                    # Send alert for manual review
+                    log(f"🚨 ALERT: {symbol} may be a ghost trade - manual verification required")
+                else:
+                    log(f"⚠️ Position not found for {symbol} (attempt {trade['verification_failures']}/3)")
         
         if issues_found:
             log(f"⚠️ Found {len(issues_found)} sync issues:", level="WARN")
