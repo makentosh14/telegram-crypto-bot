@@ -1234,27 +1234,18 @@ def check_sl_hit(trade, current_price, direction):
     elif direction == "short" and current_price >= sl_price:
         return True
 
-def check_trailing_sl_hit(trade, current_price, direction):
+async def check_trailing_sl_hit(trade, current_price, direction):
     """
     Universal check for trailing SL hits - works for both DCA and non-DCA trades
+    FIXED VERSION: Now properly async to prevent event loop conflicts
     """
     try:
         from universal_trailing_stop_fix import universal_check_trailing_sl_hit
-        import asyncio
         
         symbol = trade.get("symbol", "UNKNOWN")
         
-        # Create event loop if none exists
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the async function
-        return loop.run_until_complete(
-            universal_check_trailing_sl_hit(symbol, trade, current_price, direction)
-        )
+        # Call the async function directly since we're already in an async context
+        return await universal_check_trailing_sl_hit(symbol, trade, current_price, direction)
         
     except Exception as e:
         log(f"❌ Error checking trailing SL hit: {e}", level="ERROR")
