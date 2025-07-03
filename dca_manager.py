@@ -222,35 +222,59 @@ class DCAManager:
             else:  # short
                 new_sl = new_avg_entry * (1 + dca_config["new_sl_adjustment"] / 100)
                 new_tp = new_avg_entry * (1 - dca_config["new_tp_adjustment"] / 100)
+
+            log(f"📊 DCA Order Updates for {symbol}:")
+            log(f"  New Avg Entry: ${new_avg_entry:.6f}")
+            log(f"  New SL: ${new_sl:.6f}")
+            log(f"  New TP1: ${new_tp:.6f}")
+            log(f"  New Position Size: {new_total_qty:.8f}")
+
+            # STEP 1: Cancel existing orders FIRST
+            orders_cancelled = []
             
             # Cancel old SL order
             if trade.get("sl_order_id"):
                 try:
-                    await signed_request("POST", "/v5/order/cancel", {
+                    cancel_sl_result = await signed_request("POST", "/v5/order/cancel", {
                         "category": "linear",
                         "symbol": symbol,
                         "orderId": trade["sl_order_id"]
                     })
-                except:
-                    pass
+        
+                    if cancel_sl_result.get("retCode") == 0:
+                        log(f"✅ Successfully cancelled existing SL order: {trade['sl_order_id']}")
+                        orders_cancelled.append("SL")
+                        trade["sl_order_id"] = None
+                    else:
+                        log(f"⚠️ Failed to cancel SL order: {cancel_sl_result.get('retMsg', 'Unknown error')}")
+            
+                except Exception as e:
+                    log(f"❌ Error cancelling SL order: {e}", level="ERROR")
 
+            # Cancel old TP1 order
             if trade.get("tp1_order_id"):
                 try:
-                    cancel_result = await signed_request("POST", "/v5/order/cancel", {
+                    cancel_tp1_result = await signed_request("POST", "/v5/order/cancel", {
                         "category": "linear",
                         "symbol": symbol,
                         "orderId": trade["tp1_order_id"]
                     })
-                    
-                    if cancel_result.get("retCode") == 0:
+        
+                    if cancel_tp1_result.get("retCode") == 0:
                         log(f"✅ Successfully cancelled existing TP1 order: {trade['tp1_order_id']}")
                         orders_cancelled.append("TP1")
                         trade["tp1_order_id"] = None
                     else:
-                        log(f"⚠️ Failed to cancel TP1 order: {cancel_result.get('retMsg', 'Unknown error')}")
-                        
+                        log(f"⚠️ Failed to cancel TP1 order: {cancel_tp1_result.get('retMsg', 'Unknown error')}")
+            
                 except Exception as e:
-                    log(f"❌ Error cancelling TP1 order: {e}")
+                    log(f"❌ Error cancelling TP1 order: {e}", level="ERROR")
+
+            # Log cancellation results
+            if orders_cancelled:
+                log(f"🗑️ Cancelled orders: {', '.join(orders_cancelled)}")
+            else:
+                log("⚠️ No orders were cancelled (might not have existed)")
             
             # Place new SL order
             sl_result = await place_stop_loss_with_retry(
