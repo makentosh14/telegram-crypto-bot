@@ -77,7 +77,8 @@ class DCAManager:
                     direction == "short" and current_price >= sl_price * (1 + DCA_FAST_BUFFER / 100)
                 )
                 if crossed:
-                    log(f"🚫 DCA skipped for {symbol}: price >{DCA_FAST_BUFFER:.2f}% past SL")
+                    log(f"🚫 DCA skipped for {symbol}: price >{DCA_FAST_BUFFER:.2f}% past SL - Auto-exiting")
+                    await check_and_exit_past_sl(symbol, trade, current_price)
                     return False
             
             # Calculate current drawdown
