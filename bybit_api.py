@@ -164,7 +164,7 @@ async def _get_balance_legacy(force_refresh=False, caller_name="unknown"):
         log(f"❌ Failed to fetch balance: {e}", level="ERROR")
         return cache["balance"] if cache["balance"] is not None else 0.0
 
-async def place_market_order(symbol, side, qty, market_type="linear"):
+async def place_market_order(symbol, side, qty, market_type="linear", reduce_only=False):
     """
     Place a market order
     
@@ -184,8 +184,11 @@ async def place_market_order(symbol, side, qty, market_type="linear"):
             "side": side,
             "orderType": "Market",
             "qty": str(qty),
-            "timeInForce": "IOC"  # Immediate or Cancel for market orders
+            "timeInForce": "IOC" # Immediate or Cancel for market orders
         }
+
+        if reduce_only:
+            params["reduceOnly"] = True
         
         log(f"🚀 Placing market order: {side} {qty} {symbol}")
         
