@@ -1071,6 +1071,13 @@ async def monitor_trades(live_candles):
             if not trade.get("entry_price") or not trade.get("direction"):
                 log(f"⚠️ {symbol}: Invalid trade data, skipping")
                 continue
+
+            # Create candles_by_tf if needed for other functions
+            candles_by_tf = {}
+            if symbol in live_candles:
+                for tf in ['1', '3', '5', '15', '30', '60', '240']:
+                    if str(tf) in live_candles[symbol]:
+                        candles_by_tf[tf] = list(live_candles[symbol][str(tf)])
             
             # Core trade variables
             trade_type = trade.get("trade_type", "Intraday")
