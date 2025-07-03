@@ -23,8 +23,23 @@ except ImportError:
 
 try:
     from universal_trailing_stop_fix import universal_trade_monitoring
-except ImportError:
-    universal_trade_monitoring = None
+    log("✅ HF SCANNER: Successfully imported universal_trade_monitoring")
+except ImportError as e:
+    log(f"⚠️ HF SCANNER: Import failed: {e}")
+    
+    # Create a working fallback function instead of None
+    async def universal_trade_monitoring(symbol, trade, current_price, direction, candles_by_tf=None):
+        """Fallback function when import fails"""
+        try:
+            if not trade.get("tp1_hit") or trade.get("exited"):
+                return False
+            log(f"⚠️ Using fallback monitoring for {symbol}")
+            return False
+        except Exception as e:
+            log(f"❌ Error in fallback monitoring for {symbol}: {e}", level="ERROR")
+            return False
+    
+    log("⚠️ HF SCANNER: Using fallback universal_trade_monitoring")
 
 # Configuration for active trade scanner
 ACTIVE_SCAN_INTERVAL = 3  # Check active trades every 3 seconds
