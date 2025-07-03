@@ -407,7 +407,79 @@ async def periodic_backups():
         # Wait for an hour
         await asyncio.sleep(3600)  # 1 hour
 
-async def get_current_price(symbol, live_candles):
+def get_current_price(symbol, live_candles):
+    """
+    Get the current price for a symbol from live candles
+    
+    Args:
+        symbol: Trading symbol (e.g., "BTCUSDT")
+        live_candles: Dictionary of live candles data
+    
+    Returns:
+        float: Current price or None if not available
+    """
+    try:
+        # Check if symbol exists in live_candles
+        if not live_candles or symbol not in live_candles:
+            return None
+        
+        # Try to get 1-minute candles first (most current)
+        for timeframe in ['1', '3', '5']:
+            if timeframe in live_candles[symbol]:
+                candles = live_candles[symbol][timeframe]
+                if candles and len(candles) > 0:
+                    try:
+                        # Get the latest candle's close price
+                        latest_candle = candles[-1]
+                        if 'close' in latest_candle:
+                            current_price = float(latest_candle['close'])
+                            
+                            # Validate price
+                            if current_price > 0 and current_price < 1000000:  # Reasonable price range
+                                return current_price
+                    except (ValueError, TypeError, KeyError) as e:
+                        log(f"⚠️ Error parsing candle data for {symbol}: {e}")
+                        continue
+        
+        # If no valid candles found
+        return None
+        
+    except Exception as e:
+        log(f"❌ Error getting current price for {symbol}: {e}", level="ERROR")
+        return None
+
+async def get_current_price_api(symbol):
+    """
+    Get current price directly from Bybit API
+    Use this as a fallback when live_candles don't have the data
+    """
+    try:
+        ticker_resp = await signed_request("GET", "/v5/market/tickers", {
+            "category": "linear", 
+            "symbol": symbol
+        })
+        
+        if ticker_resp and ticker_resp.get("retCode") == 0:
+            result = ticker_resp.get("result", {})
+            ticker_list = result.get("list", [])
+            
+            if ticker_list and len(ticker_list) > 0:
+                mark_price = ticker_list[0].get("markPrice")
+                if mark_price:
+                    try:
+                        price = float(mark_price)
+                        if price > 0 and price < 1000000:  # Reasonable price range
+                            return price
+                    except (ValueError, TypeError):
+                        pass
+        
+        return None
+        
+    except Exception as e:
+        log(f"❌ Error getting API price for {symbol}: {e}", level="ERROR")
+        return None
+
+async def get_current_price_enhanced(symbol, live_candles):
     """
     Enhanced current price getter that tries live_candles first, then API
     """
@@ -432,6 +504,30 @@ async def get_current_price(symbol, live_candles):
     except Exception as e:
         log(f"❌ Error in enhanced price getter for {symbol}: {e}", level="ERROR")
         return None
+
+def debug_live_candles_structure(symbol, live_candles):
+    """
+    Debug helper to see what's in your live_candles
+    """
+    try:
+        if symbol not in live_candles:
+            log(f"🔍 DEBUG: {symbol} not found in live_candles")
+            log(f"🔍 DEBUG: Available symbols: {list(live_candles.keys())[:10]}...")  # Show first 10
+            return
+        
+        symbol_data = live_candles[symbol]
+        log(f"🔍 DEBUG: {symbol} timeframes: {list(symbol_data.keys())}")
+        
+        for tf in ['1', '3', '5']:
+            if tf in symbol_data:
+                candles = symbol_data[tf]
+                if candles:
+                    latest = candles[-1]
+                    log(f"🔍 DEBUG: {symbol} {tf}m latest candle: {latest}")
+                    break
+                    
+    except Exception as e:
+        log(f"❌ DEBUG error for {symbol}: {e}", level="ERROR")
 
 def track_active_trade(symbol, trade_type, initial_score, entry_price=None, direction=None, 
                       trailing_pct=None, tp1_target=None, tp1_pct=None, tp2=None, sl=None, 
@@ -961,7 +1057,7 @@ async def monitor_trades(live_candles):
                 continue
 
             # Get current price
-            current_price = await get_current_price(symbol, live_candles)
+            current_price = await get_current_price_enhanced(symbol, live_candles)
             if current_price is None or not isinstance(current_price, (int, float)) or current_price <= 0:
                 log(f"⚠️ {symbol}: Could not get current price, skipping")
                 continue
