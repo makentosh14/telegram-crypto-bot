@@ -15,67 +15,11 @@ from strategy_performance import log_strategy_result
 from exit_manager import detect_momentum_surge
 
 try:
-    from monitor import active_trades as monitor_active_trades, get_current_price, get_current_price_enhanced
-    log("✅ HF SCANNER: Successfully imported active_trades and price functions from monitor")
+    from monitor import active_trades as monitor_active_trades
+    log("✅ HF SCANNER: Successfully imported active_trades from monitor")
 except ImportError:
     monitor_active_trades = {}
     log("⚠️ HF SCANNER: Could not import active_trades from monitor")
-    
-    # Fallback get_current_price function
-    def get_current_price(symbol, live_candles):
-        """Fallback function to get current price from live candles"""
-        try:
-            if not live_candles or symbol not in live_candles:
-                return None
-            
-            for timeframe in ['1', '3', '5']:
-                if timeframe in live_candles[symbol]:
-                    candles = live_candles[symbol][timeframe]
-                    if candles and len(candles) > 0:
-                        try:
-                            latest_candle = candles[-1]
-                            if 'close' in latest_candle:
-                                current_price = float(latest_candle['close'])
-                                if current_price > 0 and current_price < 1000000:
-                                    return current_price
-                        except (ValueError, TypeError, KeyError):
-                            continue
-            return None
-        except Exception as e:
-            log(f"❌ Error in fallback get_current_price for {symbol}: {e}", level="ERROR")
-            return None
-    
-    async def get_current_price_enhanced(symbol, live_candles):
-        """Fallback enhanced price function"""
-        # Try fallback get_current_price first
-        price = get_current_price(symbol, live_candles)
-        if price is not None:
-            return price
-        
-        # Fallback to API if available
-        try:
-            ticker_resp = await signed_request("GET", "/v5/market/tickers", {
-                "category": "linear", 
-                "symbol": symbol
-            })
-            
-            if ticker_resp and ticker_resp.get("retCode") == 0:
-                result = ticker_resp.get("result", {})
-                ticker_list = result.get("list", [])
-                
-                if ticker_list and len(ticker_list) > 0:
-                    mark_price = ticker_list[0].get("markPrice")
-                    if mark_price:
-                        try:
-                            price = float(mark_price)
-                            if price > 0 and price < 1000000:
-                                return price
-                        except (ValueError, TypeError):
-                            pass
-            return None
-        except Exception as e:
-            log(f"❌ Error in fallback API price for {symbol}: {e}", level="ERROR")
-            return None
 
 try:
     from universal_trailing_stop_fix import universal_trade_monitoring
