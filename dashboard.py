@@ -492,12 +492,16 @@ def display_performance_charts(df):
             st.info("Missed upside data not available")
 
 def display_indicator_details(df):
-    """Display indicator scores chart - FIXED to handle non-numeric values"""
+    """Display indicator scores chart - FIXED to handle non-numeric values properly"""
     if "indicator_scores" in latest and pd.notna(latest["indicator_scores"]):
         try:
             # Parse the indicator scores
             if isinstance(latest["indicator_scores"], str):
-                indicator_data = json.loads(latest["indicator_scores"])
+                try:
+                    indicator_data = json.loads(latest["indicator_scores"])
+                except json.JSONDecodeError:
+                    st.warning("Could not parse indicator scores")
+                    return
             else:
                 indicator_data = latest["indicator_scores"]
             
@@ -505,84 +509,107 @@ def display_indicator_details(df):
                 # Convert to readable format and filter numeric values
                 sorted_indicators = {}
                 
+                # Known indicator mappings for non-numeric values
+                indicator_defaults = {
+                    'range_break': 1.0,
+                    'breakout': 1.0,
+                    'pump_signal': 1.0,
+                    'pre_breakout': 0.8,
+                    'volume_spike': 0.7,
+                    'momentum': 0.6,
+                    'trend_aligned': 1.0,
+                    'stealth_accumulation': 0.9,
+                    'range_direction_aligned': 1.0,
+                    'active': 1.0,
+                    'detected': 1.0,
+                    'confirmed': 1.0
+                }
+                
                 for key, value in indicator_data.items():
                     try:
-                        # Convert to float if possible
-                        if isinstance(value, str):
-                            try:
-                                numeric_value = float(value)
-                            except ValueError:
-                                # For non-numeric strings like 'range_break', assign 1.0
-                                numeric_value = 1.0 if value else 0.0
-                        elif isinstance(value, (int, float)):
+                        # Handle different value types safely
+                        if isinstance(value, (int, float)):
+                            # Already numeric
                             numeric_value = float(value)
+                        elif isinstance(value, str):
+                            # String value - try conversion
+                            value_clean = value.strip().lower()
+                            
+                            if not value_clean:
+                                # Empty string
+                                numeric_value = 0.0
+                            else:
+                                try:
+                                    # Try direct float conversion first
+                                    numeric_value = float(value)
+                                except ValueError:
+                                    # Handle named indicators
+                                    numeric_value = indicator_defaults.get(value_clean, 1.0)
+                        elif isinstance(value, bool):
+                            # Boolean values
+                            numeric_value = 1.0 if value else 0.0
                         else:
-                            continue  # Skip non-convertible values
+                            # Unknown type - skip or use default
+                            continue
                         
-                        # Only include meaningful values
-                        if numeric_value > 0:
-                            readable_name = INDICATOR_MAP.get(key, key)
-                            sorted_indicators[readable_name] = numeric_value
+                        # Only include positive, valid values
+                        if (numeric_value > 0 and 
+                            not (isinstance(numeric_value, float) and 
+                                 (numeric_value != numeric_value or  # NaN check
+                                  numeric_value == float('inf') or
+                                  numeric_value == float('-inf')))):
+                            
+                            # Clean up the key name for display
+                            display_key = key.replace('_', ' ').title()
+                            sorted_indicators[display_key] = round(numeric_value, 3)
                             
                     except Exception as e:
-                        print(f"Error processing indicator {key}: {value}, error: {e}")
+                        # Log the specific error for debugging
+                        st.warning(f"Skipping indicator '{key}' with value '{value}': {str(e)}")
                         continue
                 
+                # Display the chart if we have valid indicators
                 if sorted_indicators:
-                    # Sort by value
-                    sorted_indicators = dict(sorted(
-                        sorted_indicators.items(), 
-                        key=lambda x: x[1], 
-                        reverse=True
-                    ))
+                    # Sort by value for better visualization
+                    sorted_indicators = dict(sorted(sorted_indicators.items(), 
+                                                  key=lambda x: x[1], reverse=True))
                     
-                    # Create horizontal bar chart
-                    fig = px.bar(
-                        x=list(sorted_indicators.values()),
-                        y=list(sorted_indicators.keys()),
-                        orientation='h',
-                        labels={'x': 'Score', 'y': 'Indicator'},
-                        title='Indicator Scores for Latest Trade'
+                    # Create DataFrame for plotting
+                    indicator_df = pd.DataFrame(
+                        list(sorted_indicators.items()), 
+                        columns=['Indicator', 'Score']
                     )
                     
-                    # Color coding: green for positive values
-                    fig.update_traces(marker_color='green')
-                    
+                    # Display as bar chart
+                    st.subheader("📊 Indicator Scores")
+                    fig = px.bar(
+                        indicator_df, 
+                        x='Score', 
+                        y='Indicator',
+                        orientation='h',
+                        title="Current Signal Strength by Indicator"
+                    )
+                    fig.update_layout(height=max(300, len(sorted_indicators) * 30))
                     st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No numeric indicator scores found for charting.")
                     
+                    # Also show as metrics
+                    st.subheader("📈 Top Indicators")
+                    cols = st.columns(min(4, len(sorted_indicators)))
+                    for i, (indicator, score) in enumerate(list(sorted_indicators.items())[:4]):
+                        with cols[i % len(cols)]:
+                            st.metric(indicator, f"{score:.2f}")
+                else:
+                    st.info("No valid indicator scores to display")
+            else:
+                st.info("No indicator data available")
+                
         except Exception as e:
-            st.error(f"Error parsing indicator scores: {e}")
-            print(f"Full error details: {e}, data: {latest['indicator_scores']}")
-
-# INDICATOR_MAP for readable names
-INDICATOR_MAP = {
-    'rsi': 'RSI',
-    'macd': 'MACD',
-    'bb': 'Bollinger Bands',
-    'volume': 'Volume',
-    'ema': 'EMA',
-    'sma': 'SMA',
-    'stoch': 'Stochastic',
-    'atr': 'ATR',
-    'obv': 'OBV',
-    'vwap': 'VWAP',
-    'range_break': 'Range Break',
-    'range_confidence': 'Range Confidence',
-    'range_direction_aligned': 'Direction Aligned',
-    'pre_breakout': 'Pre-Breakout',
-    'stealth_accumulation': 'Stealth Accumulation',
-    'volume_spike': 'Volume Spike',
-    'momentum': 'Momentum',
-    'trend_strength': 'Trend Strength',
-    'pattern_detected': 'Pattern',
-    'whale_signal': 'Whale Activity',
-    'pump_pattern': 'Pump Pattern',
-    'break_resistance': 'Break Resistance',
-    'break_support': 'Break Support',
-    # Add more mappings as needed
-}
+            st.error(f"Error displaying indicators: {str(e)}")
+            # Show the raw data for debugging if needed
+            if st.checkbox("Show raw indicator data for debugging"):
+                st.json(latest.get("indicator_scores", {}))
+    else:
+        st.info("Indicator scores not available for this signal")
 
 def display_trade_drilldown(df):
     """Enhanced trade drilldown analysis with more metrics and insights"""
