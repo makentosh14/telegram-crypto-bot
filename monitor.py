@@ -652,8 +652,8 @@ async def execute_partial_exit_fixed(symbol, trade, exit_qty):
         result = await place_market_order(
             symbol=symbol,
             side=order_side,
-            qty=exit_qty,
-            order_type="Market"
+            qty=str(exit_qty),  # Also convert to string
+            market_type="linear"
         )
         
         if result and result.get("retCode") == 0:
@@ -1805,8 +1805,8 @@ async def execute_partial_exit_with_retry(symbol, trade, exit_percentage, max_at
             result = await place_market_order(
                 symbol=symbol,
                 side=order_side,
-                qty=exit_qty,
-                order_type="Market"
+                qty=str(exit_qty),  # Also convert to string
+                market_type="linear"
             )
             
             if result and result.get("retCode") == 0:
