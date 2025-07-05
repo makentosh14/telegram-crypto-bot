@@ -10,6 +10,23 @@ from logger import log, write_log
 from bybit_api import signed_request
 from error_handler import send_telegram_message
 
+def normalize_direction(direction):
+    """Normalize direction to handle different formats between bot and exchange"""
+    if not direction:
+        return ""
+    
+    direction = direction.lower().strip()
+    
+    # Map Bybit API format to bot internal format
+    direction_map = {
+        "buy": "long",
+        "sell": "short", 
+        "long": "long",
+        "short": "short"
+    }
+    
+    return direction_map.get(direction, direction)
+
 async def verify_position_and_orders(symbol, trade, auto_repair=True):
     """
     FIXED: Proper position verification that accounts for DCA correctly
@@ -134,10 +151,21 @@ async def verify_position_and_orders(symbol, trade, auto_repair=True):
                     log(f"🚨 {symbol}: Large size difference - flagged for manual review")
 
         # Check direction match
-        position_side = position_data.get("side", "").lower()
-        expected_direction = trade.get("direction", "").lower()
+        position_side_raw = position_data.get("side", "")
+        expected_direction_raw = trade.get("direction", "")
+
+        # Normalize both directions
+        position_side = normalize_direction(position_side_raw)
+        expected_direction = normalize_direction(expected_direction_raw)
+
         direction_matches = position_side == expected_direction
         result["direction_matches"] = direction_matches
+
+        # Enhanced logging to show the mapping
+        log(f"🔍 Direction Check for {symbol}:")
+        log(f"   Bybit API: '{position_side_raw}' → normalized: '{position_side}'")
+        log(f"   Bot expected: '{expected_direction_raw}' → normalized: '{expected_direction}'")
+        log(f"   Match: {direction_matches}")
         
         if not direction_matches:
             result["issues_detected"].append(
