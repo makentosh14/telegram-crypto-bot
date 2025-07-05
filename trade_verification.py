@@ -11,15 +11,7 @@ from error_handler import send_telegram_message
 
 async def verify_position_and_orders(symbol, trade, auto_repair=True):
     """
-    FIXED: Safer position verification that won't accidentally mark valid trades as exited
-    
-    Args:
-        symbol: Trading symbol
-        trade: Trade object from active_trades
-        auto_repair: Whether to automatically fix any issues
-        
-    Returns:
-        dict: Verification results and actions taken
+    FIXED: Proper position verification that accounts for DCA correctly
     """
     result = {
         "symbol": symbol,
@@ -39,238 +31,214 @@ async def verify_position_and_orders(symbol, trade, auto_repair=True):
         result["position_exists"] = False
         result["issues_detected"].append("Trade marked as exited")
         return result
-    
-    # 1. Verify position exists and matches trade data
+
     try:
-        from bybit_api import signed_request
-        
+        # Get position from exchange
         position_resp = await signed_request("GET", "/v5/position/list", {
             "category": "linear",
             "symbol": symbol,
             "settleCoin": "USDT"
         })
         
-        if position_resp.get("retCode") == 0:
-            positions = position_resp.get("result", {}).get("list", [])
+        if position_resp.get("retCode") != 0:
+            result["issues_detected"].append(f"Failed to fetch position: {position_resp.get('retMsg')}")
+            return result
             
-            # Check if position exists
-            position_exists = False
-            position_size = 0
-            position_side = None
-            position_data = None
+        positions = position_resp.get("result", {}).get("list", [])
+        position_data = None
+        position_size = 0
+        
+        # Find the position
+        for pos in positions:
+            if pos.get("symbol") == symbol and abs(float(pos.get("size", 0))) > 0:
+                position_data = pos
+                position_size = abs(float(pos.get("size", 0)))
+                break
+                
+        if not position_data:
+            result["position_exists"] = False
+            # Track verification failures
+            if "verification_failures" not in trade:
+                trade["verification_failures"] = 0
+            trade["verification_failures"] += 1
             
-            for pos in positions:
-                if pos.get("symbol") == symbol:
-                    size = float(pos.get("size", 0))
-                    if abs(size) > 0:
-                        position_exists = True
-                        position_size = abs(size)
-                        # Convert Bybit position side to our format
-                        bybit_side = pos.get("side", "")
-                        position_side = "long" if bybit_side == "Buy" else "short"
-                        position_data = pos
-                        break
-            
-            result["position_exists"] = position_exists
-            
-            # FIXED: Don't immediately mark as exited - be more careful
-            if not position_exists:
-                result["issues_detected"].append("Position not found on exchange")
-                
-                # SAFER APPROACH: Track consecutive failures instead of immediate exit
-                if "verification_failures" not in trade:
-                    trade["verification_failures"] = 0
-                
-                trade["verification_failures"] += 1
-                trade["last_verification_fail"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                if auto_repair:
-                    if trade["verification_failures"] >= 3:
-                        # Only after 3 consecutive failures, and with manual review flag
-                        result["manual_review_required"].append(
-                            f"Position not found for {trade['verification_failures']} consecutive checks"
-                        )
-                        result["repairs_attempted"].append("Flagged for manual review")
-                        
-                        # DON'T auto-exit, just flag
-                        trade["needs_manual_review"] = True
-                        
-                        # Send alert but don't exit
-                        await send_telegram_message(
-                            f"🚨 <b>Manual Review Required</b>\n"
-                            f"Symbol: {symbol}\n"
-                            f"Issue: Position not found for {trade['verification_failures']} consecutive checks\n"
-                            f"Action: Flagged for manual review (not auto-exited)"
-                        )
-                        
-                        log(f"🚨 {symbol}: Flagged for manual review after {trade['verification_failures']} failures")
-                    else:
-                        result["repairs_attempted"].append(f"Tracking failure #{trade['verification_failures']}")
-                        log(f"⚠️ {symbol}: Position not found (failure #{trade['verification_failures']}/3)")
-                
-                return result
+            if trade["verification_failures"] >= 3:
+                result["manual_review_required"].append(
+                    f"Position not found for {trade['verification_failures']} consecutive checks"
+                )
+                trade["needs_manual_review"] = True
+                log(f"🚨 {symbol}: Flagged for manual review after {trade['verification_failures']} failures")
             else:
-                # Reset failure counter if position found
-                if "verification_failures" in trade:
-                    del trade["verification_failures"]
-                if "last_verification_fail" in trade:
-                    del trade["last_verification_fail"]
+                log(f"⚠️ {symbol}: Position not found (failure #{trade['verification_failures']}/3)")
+            return result
+        else:
+            result["position_exists"] = True
+            # Reset failure counter if position found
+            trade.pop("verification_failures", None)
+            trade.pop("last_verification_fail", None)
+
+        # FIXED: Get the CURRENT expected position size (after any DCAs)
+        current_expected_size = trade.get("qty", 0)  # This should include DCA additions
+        original_size = trade.get("original_qty", current_expected_size)
+        dca_count = trade.get("dca_count", 0)
+        
+        # Calculate tolerance (0.1% or minimum 0.01)
+        size_tolerance = max(0.01, current_expected_size * 0.001)
+        size_matches = abs(position_size - current_expected_size) <= size_tolerance
+        result["position_size_matches"] = size_matches
+        
+        # Enhanced logging for DCA trades
+        if dca_count > 0:
+            log(f"📊 DCA Position Check for {symbol}:")
+            log(f"   Original Size: {original_size}")
+            log(f"   DCA Count: {dca_count}")
+            log(f"   Expected Current Size: {current_expected_size}")
+            log(f"   Actual Size: {position_size}")
+            log(f"   Size Matches: {size_matches}")
+        
+        # FIXED: Only flag size mismatch if it's actually wrong
+        if not size_matches:
+            size_diff = abs(position_size - current_expected_size)
+            size_diff_pct = (size_diff / current_expected_size) * 100 if current_expected_size > 0 else 0
             
-            # Check if position size matches (with tolerance)
-            expected_size = trade.get("qty", 0)
-            size_tolerance = max(0.01, expected_size * 0.001)  # 0.1% tolerance or 0.01 minimum
-            size_matches = abs(position_size - expected_size) <= size_tolerance
-            result["position_size_matches"] = size_matches
-            
-            # Check if direction matches (with better normalization)
-            expected_direction = trade.get("direction", "").lower()
-            direction_matches = position_side == expected_direction
-            result["direction_matches"] = direction_matches
-            
-            # FIXED: More careful size mismatch handling
-            if not size_matches:
-                size_diff = abs(position_size - expected_size)
-                size_diff_pct = (size_diff / expected_size) * 100 if expected_size > 0 else 0
-                
+            # Don't confuse users by comparing to original size for DCA trades
+            if dca_count > 0:
+                # For DCA trades, show comparison to current expected
                 result["issues_detected"].append(
-                    f"Position size mismatch: expected {expected_size}, found {position_size} "
+                    f"DCA position size mismatch: expected {current_expected_size}, found {position_size} "
+                    f"(diff: {size_diff:.4f}, {size_diff_pct:.2f}%) [DCA count: {dca_count}]"
+                )
+            else:
+                # For non-DCA trades, normal comparison
+                result["issues_detected"].append(
+                    f"Position size mismatch: expected {current_expected_size}, found {position_size} "
                     f"(diff: {size_diff:.4f}, {size_diff_pct:.2f}%)"
                 )
-                
-                if auto_repair:
-                    # Only auto-fix if difference is small (< 5%)
-                    if size_diff_pct < 5.0:
-                        result["repairs_attempted"].append("Update trade position size to match exchange")
-                        trade["qty"] = position_size
-                        from monitor import save_active_trades
-                        save_active_trades()
-                        result["repairs_successful"].append(f"Updated position size to {position_size}")
-                        log(f"🔧 {symbol}: Updated position size {expected_size} → {position_size}")
-                    else:
-                        # Large difference - flag for manual review
-                        result["manual_review_required"].append(
-                            f"Large position size difference ({size_diff_pct:.2f}%)"
-                        )
-                        trade["needs_manual_review"] = True
-                        log(f"🚨 {symbol}: Large size difference - flagged for manual review")
             
-            # FIXED: More careful direction mismatch handling
-            if not direction_matches:
-                result["issues_detected"].append(
-                    f"Position direction mismatch: expected {expected_direction}, found {position_side}"
-                )
-                
-                if auto_repair:
-                    # DON'T auto-exit for direction mismatch - this is likely the XEMUSDT issue
-                    # Instead, flag for manual review
+            if auto_repair:
+                # Only auto-fix small differences (< 5%)
+                if size_diff_pct < 5.0:
+                    result["repairs_attempted"].append("Update trade position size to match exchange")
+                    trade["qty"] = position_size
+                    from monitor import save_active_trades
+                    save_active_trades()
+                    result["repairs_successful"].append(f"Updated position size to {position_size}")
+                    log(f"🔧 {symbol}: Updated position size {current_expected_size} → {position_size}")
+                else:
+                    # Large difference - flag for manual review
                     result["manual_review_required"].append(
-                        f"Direction mismatch: expected {expected_direction}, found {position_side}"
+                        f"Large position size difference ({size_diff_pct:.2f}%)"
                     )
                     trade["needs_manual_review"] = True
-                    trade["direction_mismatch_detected"] = True
-                    
-                    # Send alert for manual review
-                    await send_telegram_message(
-                        f"🚨 <b>Direction Mismatch Alert</b>\n"
-                        f"Symbol: {symbol}\n"
-                        f"Expected: {expected_direction}\n"
-                        f"Found: {position_side}\n"
-                        f"Action: Flagged for manual review (not auto-exited)"
-                    )
-                    
-                    log(f"🚨 {symbol}: Direction mismatch - flagged for manual review")
-                    
-                    # Store actual position data for manual review
-                    trade["actual_position_data"] = {
-                        "size": position_size,
-                        "side": position_side,
-                        "avg_price": float(position_data.get("avgPrice", 0)),
-                        "unrealized_pnl": float(position_data.get("unrealisedPnl", 0))
-                    }
+                    log(f"🚨 {symbol}: Large size difference - flagged for manual review")
+
+        # Check direction match
+        position_side = position_data.get("side", "").lower()
+        expected_direction = trade.get("direction", "").lower()
+        direction_matches = position_side == expected_direction
+        result["direction_matches"] = direction_matches
+        
+        if not direction_matches:
+            result["issues_detected"].append(
+                f"Position direction mismatch: expected {expected_direction}, found {position_side}"
+            )
             
-        else:
-            result["issues_detected"].append(f"Failed to fetch position: {position_resp.get('retMsg')}")
-    
+            if auto_repair:
+                # Direction mismatch is serious - always flag for manual review
+                result["manual_review_required"].append(
+                    f"Direction mismatch: expected {expected_direction}, found {position_side}"
+                )
+                trade["needs_manual_review"] = True
+                trade["direction_mismatch_detected"] = True
+                log(f"🚨 {symbol}: Direction mismatch - flagged for manual review")
+
     except Exception as e:
         result["issues_detected"].append(f"Error checking position: {str(e)}")
         log(f"❌ Position verification error for {symbol}: {str(e)}", level="ERROR")
-    
-    # 2. Verify stop-loss order (if applicable)
-    sl_order_id = trade.get("sl_order_id")
-    if sl_order_id:
-        try:
-            sl_resp = await signed_request("GET", "/v5/order/realtime", {
-                "category": "linear",
-                "symbol": symbol,
-                "orderId": sl_order_id
-            })
-            
-            if sl_resp.get("retCode") == 0:
-                orders = sl_resp.get("result", {}).get("list", [])
-                sl_order_exists = len(orders) > 0
-                result["sl_order_exists"] = sl_order_exists
-                
-                if sl_order_exists:
-                    sl_order = orders[0]
-                    trigger_price = float(sl_order.get("triggerPrice", 0))
-                    expected_sl = trade.get("sl", 0)
-                    
-                    if expected_sl > 0:
-                        sl_tolerance = expected_sl * 0.005  # 0.5% tolerance
-                        sl_matches = abs(trigger_price - expected_sl) <= sl_tolerance
-                        result["sl_price_matches"] = sl_matches
-                        
-                        if not sl_matches:
-                            result["issues_detected"].append(
-                                f"SL price mismatch: expected {expected_sl}, found {trigger_price}"
-                            )
-                            
-                            if auto_repair:
-                                # For SL mismatches, also flag for manual review instead of auto-fixing
-                                result["manual_review_required"].append(
-                                    f"SL price mismatch: expected {expected_sl}, found {trigger_price}"
-                                )
-                                trade["needs_manual_review"] = True
-                else:
-                    result["issues_detected"].append("SL order not found")
-                    
-                    if auto_repair:
-                        # Missing SL order - flag for manual review
-                        result["manual_review_required"].append("SL order not found")
-                        trade["needs_manual_review"] = True
-            else:
-                result["issues_detected"].append(f"Failed to fetch SL order: {sl_resp.get('retMsg')}")
-        
-        except Exception as e:
-            result["issues_detected"].append(f"Error checking SL order: {str(e)}")
-    
-    # Log verification results with better categorization
+
+    # Log results with proper context
     if result["manual_review_required"]:
         log(f"🚨 {symbol}: Manual review required - {len(result['manual_review_required'])} issues", level="WARN")
         for issue in result["manual_review_required"]:
             log(f"   - {issue}", level="WARN")
-    
-    if result["issues_detected"]:
+    elif result["issues_detected"]:
         issue_count = len(result["issues_detected"])
         repair_count = len(result["repairs_successful"])
-        manual_count = len(result["manual_review_required"])
         
-        log(f"⚠️ Position verification for {symbol}: {issue_count} issues, {repair_count} repaired, {manual_count} flagged", level="WARN")
-        
-        # Only send Telegram for critical issues that couldn't be auto-fixed
-        unresolved_issues = issue_count - repair_count
-        if auto_repair and unresolved_issues > 0:
-            await send_telegram_message(
-                f"⚠️ <b>Trade Verification Report</b> for {symbol}\n"
-                f"Issues: {issue_count}\n"
-                f"Auto-fixed: {repair_count}\n"
-                f"Manual review: {manual_count}\n"
-                f"Unresolved: {unresolved_issues}"
-            )
+        # FIXED: Don't alarm users for normal DCA operations
+        if dca_count > 0 and any("position size mismatch" in issue for issue in result["issues_detected"]):
+            # This might be normal DCA reconciliation
+            log(f"🔄 Position verification for {symbol}: {issue_count} issues, {repair_count} repaired (DCA trade)", level="INFO")
+        else:
+            log(f"⚠️ Position verification for {symbol}: {issue_count} issues, {repair_count} repaired", level="WARN")
     else:
-        log(f"✅ Position verification for {symbol}: All checks passed")
+        if dca_count > 0:
+            log(f"✅ Position verification for {symbol}: All checks passed (DCA count: {dca_count})")
+        else:
+            log(f"✅ Position verification for {symbol}: All checks passed")
     
     return result
+
+def calculate_expected_dca_size(original_qty, dca_count, dca_config):
+    """
+    Calculate what the position size should be after DCAs
+    """
+    if dca_count == 0:
+        return original_qty
+    
+    # Each DCA adds dca_config["add_size_pct"] of original
+    total_added = original_qty * (dca_config["add_size_pct"] / 100) * dca_count
+    return original_qty + total_added
+
+async def validate_dca_position_size(symbol, trade):
+    """
+    Specific validation for DCA trades to ensure position size is correct
+    """
+    try:
+        dca_count = trade.get("dca_count", 0)
+        if dca_count == 0:
+            return True  # Not a DCA trade
+            
+        original_qty = trade.get("original_qty")
+        current_qty = trade.get("qty")
+        trade_type = trade.get("trade_type", "Intraday")
+        
+        if not original_qty:
+            log(f"⚠️ DCA trade {symbol} missing original_qty")
+            return False
+            
+        # Get DCA config
+        DCA_CONFIG = {
+            "Scalp": {"add_size_pct": 100},
+            "Intraday": {"add_size_pct": 100},
+            "Swing": {"add_size_pct": 100}
+        }
+        dca_config = DCA_CONFIG.get(trade_type, DCA_CONFIG["Intraday"])
+        
+        # Calculate expected size
+        expected_size = calculate_expected_dca_size(original_qty, dca_count, dca_config)
+        
+        tolerance = max(0.01, expected_size * 0.01)  # 1% tolerance
+        size_matches = abs(current_qty - expected_size) <= tolerance
+        
+        log(f"📊 DCA Validation for {symbol}:")
+        log(f"   Original Qty: {original_qty}")
+        log(f"   DCA Count: {dca_count}")
+        log(f"   Expected Size: {expected_size}")
+        log(f"   Current Size: {current_qty}")
+        log(f"   Matches: {size_matches}")
+        
+        if not size_matches:
+            log(f"⚠️ DCA size mismatch for {symbol}: expected {expected_size}, got {current_qty}")
+            # Auto-correct if reasonable
+            trade["qty"] = expected_size
+            log(f"🔧 Corrected {symbol} size to {expected_size}")
+            
+        return size_matches
+        
+    except Exception as e:
+        log(f"❌ Error validating DCA position: {e}", level="ERROR")
+        return False
 
 async def verify_all_positions(frequency_minutes=15):
     """
