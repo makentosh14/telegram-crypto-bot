@@ -113,6 +113,85 @@ async def log_exit_for_reentry(symbol, trade, price, reason):
     update_reentry_performance(symbol, success=(profit_pct > 0), profit_pct=profit_pct)
     log(f"📤 Reentry log: {symbol} | Reason: {reason} | Profit: {profit_pct:.2f}%")
 
+async def recover_position_sync(symbol, trade):
+    """
+    Try to recover position synchronization issues
+    Returns: True if recovered, False if failed
+    """
+    try:
+        log(f"🔧 Attempting position recovery for {symbol}")
+        
+        # Check current position with extended timeout
+        position_resp = await signed_request("GET", "/v5/position/list", {
+            "category": "linear",
+            "symbol": symbol
+        })
+        
+        if position_resp.get("retCode") != 0:
+            log(f"❌ API error during recovery: {position_resp.get('retMsg')}")
+            return False
+        
+        positions = position_resp.get("result", {}).get("list", [])
+        
+        # Look for any position
+        for pos in positions:
+            position_size = abs(float(pos.get("size", 0)))
+            if position_size > 0:
+                # Position found - update trade data
+                trade["qty"] = position_size
+                avg_price = float(pos.get("avgPrice", 0))
+                if avg_price > 0:
+                    trade["entry_price"] = avg_price
+                
+                unrealized_pnl = pos.get("unrealisedPnl", "0")
+                
+                log(f"✅ Position recovered: {position_size} @ {avg_price:.6f}")
+                log(f"📊 Unrealized PnL: {unrealized_pnl}")
+                
+                # Reset verification failures
+                if "verification_failures" in trade:
+                    del trade["verification_failures"]
+                
+                return True
+        
+        # No position found - check recent order history
+        log(f"🔍 No position found, checking recent orders for {symbol}")
+        
+        orders_resp = await signed_request("GET", "/v5/order/history", {
+            "category": "linear",
+            "symbol": symbol,
+            "limit": 10
+        })
+        
+        if orders_resp.get("retCode") == 0:
+            orders = orders_resp.get("result", {}).get("list", [])
+            
+            # Look for recent filled orders
+            current_time = int(time.time() * 1000)
+            for order in orders:
+                if order.get("orderStatus") == "Filled":
+                    order_time = int(order.get("updatedTime", 0))
+                    time_diff = current_time - order_time
+                    
+                    # If order was filled within last 30 minutes
+                    if time_diff < 1800000:  # 30 minutes in milliseconds
+                        log(f"📋 Recent fill found: {order.get('side')} {order.get('qty')} @ {order.get('avgPrice')}")
+                        log(f"🕐 Filled {time_diff // 60000} minutes ago")
+                        
+                        # Position might have been closed externally
+                        if order.get("side") in ["Sell", "Buy"] and float(order.get("qty", 0)) >= trade.get("qty", 0) * 0.8:
+                            log(f"💡 Large exit order detected - position likely closed")
+                            trade["exited"] = True
+                            trade["exit_reason"] = "external_closure_detected"
+                            trade["exit_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                            return True
+        
+        return False
+        
+    except Exception as e:
+        log(f"❌ Error in position recovery: {e}")
+        return False
+
 
 async def handle_any_exit(symbol, trade, exit_price, exit_reason, score=None):
     """Unified exit handler for reentry tracking"""
@@ -930,10 +1009,27 @@ async def verify_trade_integrity():
                     break
                     
             if not position_exists:
-                log(f"⚠️ Trade {symbol} exists in bot but not on exchange", level="WARN")
-                await send_telegram_message(f"⚠️ <b>Integrity Check Failed</b>: {symbol} not found on exchange")
-                trade["exited"] = True
-                save_active_trades()
+                    # Try recovery before marking as failed
+                    recovery_success = await recover_position_sync(symbol, trade)
+                    
+                    if not recovery_success:
+                        # Recovery failed - proceed with failure counting
+                        verification_failures = trade.get("verification_failures", 0) + 1
+                        trade["verification_failures"] = verification_failures
+                        trade["last_verification_fail"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        if verification_failures >= 3:
+                            log(f"🗑️ Removing {symbol} after {verification_failures} failed recoveries", level="WARN")
+                            await send_telegram_message(f"🗑️ <b>Trade Removed</b>: {symbol} not found after {verification_failures} recovery attempts")
+                            trade["exited"] = True
+                            trade["exit_reason"] = "position_recovery_failed"
+                            trade["exit_time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                            save_active_trades()
+                        else:
+                            log(f"⚠️ {symbol}: Recovery attempt {verification_failures}/3 failed")
+                    else:
+                        log(f"✅ {symbol}: Position successfully recovered")
+                        save_active_trades()
                 
         except Exception as e:
             log(f"❌ Error in trade integrity check for {symbol}: {e}", level="ERROR")
