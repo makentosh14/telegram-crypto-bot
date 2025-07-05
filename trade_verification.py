@@ -288,8 +288,8 @@ async def verify_all_positions(frequency_minutes=15):
                     log(f"❌ Error in position verification cycle: {e}", level="ERROR")
                     log(traceback.format_exc(), level="ERROR")
         
-        # Wait for next cycle
-        await asyncio.sleep(frequency_minutes * 60)
+                # Wait for next cycle
+                await asyncio.sleep(frequency_minutes * 60)
 
 def recover_missing_trades():
     """
