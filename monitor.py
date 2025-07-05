@@ -29,7 +29,6 @@ from strategy_performance import log_strategy_result
 from sl_tp_utils import evaluate_score_exit
 from dca_manager import dca_manager
 from auto_exit_handler import auto_exit_past_sl
-from trade_verification import validate_dca_position_size
 
 # FIXED PERCENTAGES for SL/TP - Add this after the imports
 FIXED_PERCENTAGES = {
@@ -78,7 +77,7 @@ from enhanced_exit import (
     should_trail_stop_enhanced,
     execute_partial_exit_with_retry
 )
-from trade_verification import verify_position_and_orders
+from trade_verification import verify_position_and_orders, validate_dca_position_size
 
 PERSIST_PATH = "monitor_active_trades.json"
 active_trades = {}
