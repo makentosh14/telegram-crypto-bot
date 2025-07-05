@@ -1207,9 +1207,9 @@ async def monitor_trades(live_candles):
 
                     if trade.get("dca_count", 0) > 0:
                         await validate_dca_position_size(symbol, trade)
-                
-            except Exception as e:
-                log(f"❌ Error in monitor_trades: {e}", level="ERROR")
+                        
+                except Exception as e:
+                  log(f"❌ Error in monitor_trades: {e}", level="ERROR")
             
             # 1. SL Check (only if needed and not too frequent)
             if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
