@@ -11,7 +11,7 @@ from symbol_info import round_qty
 from error_handler import send_telegram_message
 from universal_trailing_stop_fix import update_trade_after_dca
 from config import DCA_FAST_BUFFER          # <-- NEW
-from trade_verification import verify_position_and_orders # <-- NEW
+from trade_verification import verify_position_and_orders, validate_dca_position_size # <-- NEW
 from auto_exit_handler import auto_exit_past_sl
 
 # DCA Configuration - Exact position size matching
@@ -196,6 +196,30 @@ class DCAManager:
             actual_avg_price = None
             
             log(f"🔍 Verifying position after DCA for {symbol}...")
+            try:
+                validation_result = await validate_dca_position_size(symbol, trade)
+    
+                if validation_result:
+                    log(f"✅ DCA position validation passed for {symbol}")
+                else:
+                    log(f"⚠️ DCA position validation failed for {symbol} - flagging for review", level="WARN")
+                    trade["needs_manual_review"] = True
+                    trade["dca_validation_failed"] = True
+                    trade["validation_timestamp"] = datetime.utcnow().isoformat()
+        
+                    # Send alert about validation failure
+                    await send_telegram_message(
+                        f"⚠️ DCA Validation Failed\n"
+                        f"Symbol: {symbol}\n"
+                        f"Expected: {trade.get('qty')}\n"
+                        f"Manual review required"
+                    )
+        
+            except Exception as validation_error:
+                log(f"❌ Error during DCA validation for {symbol}: {validation_error}", level="ERROR")
+                # Don't fail the DCA, just log the validation error
+                trade["validation_error"] = str(validation_error)
+            
             for attempt in range(3):
                 try:
                     pos_resp = await signed_request("GET", "/v5/position/list", {
