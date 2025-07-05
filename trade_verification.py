@@ -281,15 +281,22 @@ async def verify_all_positions(frequency_minutes=15):
                         dca_valid = await validate_dca_position_size(symbol, trade)
                         if dca_valid:
                             dca_validated_count += 1
+
+                    # Brief pause to avoid rate limits
+                    await asyncio.sleep(0.5)
+
+                except Exception as e:
+                    log(f"❌ Error verifying {symbol}: {e}", level="ERROR")
+                    continue
             
                     log(f"✅ Position verification cycle complete - verified {verified_count} trades")
             
-                except Exception as e:
-                    log(f"❌ Error in position verification cycle: {e}", level="ERROR")
-                    log(traceback.format_exc(), level="ERROR")
+            except Exception as e:
+                log(f"❌ Error in position verification cycle: {e}", level="ERROR")
+                log(traceback.format_exc(), level="ERROR")
         
-                # Wait for next cycle
-                await asyncio.sleep(frequency_minutes * 60)
+            # Wait for next cycle
+            await asyncio.sleep(frequency_minutes * 60)
 
 def recover_missing_trades():
     """
