@@ -266,6 +266,7 @@ async def verify_all_positions(frequency_minutes=15):
                 
             trades_snapshot = dict(active_trades)  # Create a copy
             verified_count = 0
+            dca_validated_count = 0
             
             for symbol, trade in trades_snapshot.items():
                 if trade.get("exited"):
@@ -275,9 +276,14 @@ async def verify_all_positions(frequency_minutes=15):
                     # Verify this position and orders
                     await verify_position_and_orders(symbol, trade, auto_repair=True)
                     verified_count += 1
+
+                    if trade.get("dca_count", 0) > 0:
+                        dca_valid = await validate_dca_position_size(symbol, trade)
+                        if dca_valid:
+                            dca_validated_count += 1
                     
                     # Brief pause to avoid rate limits
-                    await asyncio.sleep(0.5)
+                   await asyncio.sleep(frequency_minutes * 60)
                     
                 except Exception as e:
                     log(f"❌ Error verifying {symbol}: {e}", level="ERROR")
