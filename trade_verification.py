@@ -283,7 +283,7 @@ async def verify_all_positions(frequency_minutes=15):
                             dca_validated_count += 1
                     
                     # Brief pause to avoid rate limits
-                   await asyncio.sleep(frequency_minutes * 60)
+                await asyncio.sleep(frequency_minutes * 60)
                     
                 except Exception as e:
                     log(f"❌ Error verifying {symbol}: {e}", level="ERROR")
