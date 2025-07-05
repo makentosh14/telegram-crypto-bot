@@ -29,6 +29,7 @@ from strategy_performance import log_strategy_result
 from sl_tp_utils import evaluate_score_exit
 from dca_manager import dca_manager
 from auto_exit_handler import auto_exit_past_sl
+from trade_verification import validate_dca_position_size
 
 # FIXED PERCENTAGES for SL/TP - Add this after the imports
 FIXED_PERCENTAGES = {
@@ -1204,6 +1205,12 @@ async def monitor_trades(live_candles):
             
                         # Mark as modified for saving
                         trade["modified"] = True
+
+                    if trade.get("dca_count", 0) > 0:
+                        await validate_dca_position_size(symbol, trade)
+                
+            except Exception as e:
+                log(f"❌ Error in monitor_trades: {e}", level="ERROR")
             
             # 1. SL Check (only if needed and not too frequent)
             if not trade.get("sl_order_id") and not trade.get("tp1_hit"):
