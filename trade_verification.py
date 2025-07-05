@@ -7,6 +7,7 @@ import asyncio
 import traceback
 from datetime import datetime
 from logger import log, write_log
+from bybit_api import signed_request
 from error_handler import send_telegram_message
 
 async def verify_position_and_orders(symbol, trade, auto_repair=True):
@@ -289,7 +290,7 @@ async def verify_all_positions(frequency_minutes=15):
                     log(f"❌ Error verifying {symbol}: {e}", level="ERROR")
                     continue
             
-                    log(f"✅ Position verification cycle complete - verified {verified_count} trades")
+            log(f"✅ Position verification cycle complete - verified {verified_count} trades")
             
         except Exception as e:
             log(f"❌ Error in position verification cycle: {e}", level="ERROR")
