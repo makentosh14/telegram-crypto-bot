@@ -186,16 +186,71 @@ class DCAManager:
             order_data = result.get("result", {})
             dca_price = float(order_data.get("avgPrice") or order_data.get("price") or current_price)
             
-            # Calculate new average entry price
-            total_cost = (entry_price * original_qty) + (dca_price * add_size)
-            new_total_qty = current_qty + add_size
-            new_avg_entry = total_cost / new_total_qty
+            # CRITICAL FIX: Wait for order settlement
+            log("⏳ Waiting for DCA order settlement...")
+            await asyncio.sleep(3)  # Give Bybit time to update position
             
-            # Update trade data
+            # CRITICAL FIX: Verify position with retries before calculating new values
+            position_verified = False
+            actual_total_qty = new_total_qty  # fallback
+            actual_avg_price = None
+            
+            log(f"🔍 Verifying position after DCA for {symbol}...")
+            for attempt in range(3):
+                try:
+                    pos_resp = await signed_request("GET", "/v5/position/list", {
+                        "category": "linear",
+                        "symbol": symbol
+                    })
+                    
+                    if pos_resp.get("retCode") == 0:
+                        positions = pos_resp.get("result", {}).get("list", [])
+                        
+                        for pos in positions:
+                            position_size = abs(float(pos.get("size", 0)))
+                            if position_size > 0:
+                                actual_total_qty = position_size
+                                actual_avg_price = float(pos.get("avgPrice", 0))
+                                
+                                log(f"✅ Position verified: {actual_total_qty} @ {actual_avg_price:.6f}")
+                                position_verified = True
+                                break
+                    
+                    if position_verified:
+                        break
+                        
+                    log(f"⚠️ Position verification attempt {attempt + 1}/3 failed")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+                        
+                except Exception as e:
+                    log(f"❌ Position verification attempt {attempt + 1}: {e}")
+                    if attempt < 2:
+                        await asyncio.sleep(2)
+            
+            if not position_verified:
+                log(f"❌ Could not verify position after DCA - using calculated values", level="WARN")
+                # Still proceed but with calculated values
+            
+            # Calculate new average entry price (use verified or calculated)
+            if actual_avg_price and actual_avg_price > 0:
+                # Use actual average price from exchange
+                new_avg_entry = actual_avg_price
+                new_total_qty = actual_total_qty
+                log(f"📊 Using verified values: {new_total_qty} @ {new_avg_entry:.6f}")
+            else:
+                # Fall back to calculated values
+                total_cost = (entry_price * current_qty) + (dca_price * add_size)
+                new_total_qty = current_qty + add_size
+                new_avg_entry = total_cost / new_total_qty
+                log(f"📊 Using calculated values: {new_total_qty} @ {new_avg_entry:.6f}")
+            
+            # Update trade data with verified/calculated values
             trade["entry_price"] = new_avg_entry
             trade["qty"] = new_total_qty
             trade["dca_count"] = trade.get("dca_count", 0) + 1
             trade["last_dca_time"] = datetime.utcnow().isoformat()
+            trade["position_verified"] = position_verified
             
             # Store original quantity if first DCA
             if "original_qty" not in trade:
