@@ -1183,6 +1183,18 @@ async def monitor_trades(live_candles):
             # Update cycle count
             trade["cycles"] = trade.get("cycles", 0) + 1
 
+            dca_count = trade.get("dca_count", 0)
+            if dca_count >= 2:  # Hard limit: maximum 2 DCAs
+                log(f"🔒 DCA blocked for {symbol}: Maximum 2 DCAs already reached ({dca_count})")
+                continue
+
+            # Check position size multiplier
+            original_qty = trade.get("original_qty") or trade.get("qty", 0)
+            current_qty = trade.get("qty", 0)
+            if original_qty > 0 and current_qty >= original_qty * 2.0:
+                log(f"🔒 DCA blocked for {symbol}: Position already 2x original size")
+                continue
+
             # Check for DCA opportunity (only if not in profit)
             if not trade.get("tp1_hit"):
             # Get account balance for DCA calculation
