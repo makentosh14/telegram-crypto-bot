@@ -136,8 +136,10 @@ DCA_MAX_RISK_MULTIPLIER = 2.0  # Maximum total risk after all DCAs (2x original)
 DCA_COOLDOWN_MINUTES = 5  # Minimum time between DCA additions
 
 # DCA Risk Limits
-DCA_MAX_BALANCE_USAGE = 0.50  # Maximum 15% of balance for all DCA positions
-DCA_DAILY_LIMIT = 20  # Maximum DCA operations per day
+DCA_MAX_COUNT_PER_TRADE = 2      # Maximum 2 DCAs per trade
+DCA_MAX_POSITION_MULTIPLIER = 2.0 # Position can't grow more than 2x
+DCA_DAILY_LIMIT = 8              # Maximum 8 DCA operations per day
+DCA_MAX_BALANCE_USAGE = 0.25  # Maximum DCA operations per day
 
 ENABLE_FAST_DROP_PROTECTION = True  # Master switch for fast drop protection
 FAST_DROP_PROTECTION = {
