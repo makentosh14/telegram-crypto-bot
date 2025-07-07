@@ -1190,17 +1190,21 @@ async def monitor_trades(live_candles):
     
                 if await dca_manager.check_dca_opportunity(symbol, trade, current_price):
                     # Execute DCA
-                    updated_trade = await dca_manager.execute_dca_add(
+                    dca_result = await dca_manager.execute_dca_add(
                         symbol=symbol,
                         trade=trade,
                         current_price=current_price,
                         account_balance=balance
                     )
         
-                    if updated_trade:
-                        # Update the trade in active_trades
-                        active_trades[symbol] = updated_trade
+                    if dca_result:
+                        # The trade is already updated by reference, just save
                         save_active_trades()
+                        log(f"✅ DCA executed and saved for {symbol}")
+        
+                        # Verify position size after DCA
+                        await asyncio.sleep(2)  # Let exchange update
+                        await validate_dca_position_size(symbol, trade)
             
                         # Mark as modified for saving
                         trade["modified"] = True
