@@ -72,8 +72,25 @@ class DCAManager:
             
             # Check if we've already done maximum DCA adds
             dca_count = trade.get("dca_count", 0)
+
+            # Check 1: Trade-specific limit
             if dca_count >= dca_config["max_adds"]:
+                log(f"🚫 DCA blocked for {symbol}: Trade limit reached ({dca_count}/{dca_config['max_adds']})")
                 return False
+
+            # Check 2: Global safety limit (never exceed 2 DCAs)
+            if dca_count >= MAX_DCA_COUNT_GLOBAL:
+                log(f"🔒 DCA blocked for {symbol}: Global safety limit reached ({dca_count}/{MAX_DCA_COUNT_GLOBAL})")
+                return False
+
+            # Check 3: Position size multiplier limit
+            original_qty = trade.get("original_qty") or trade.get("qty")
+            current_qty = trade.get("qty")
+            if current_qty >= original_qty * MAX_POSITION_MULTIPLIER:
+                log(f"🔒 DCA blocked for {symbol}: Position size limit reached ({current_qty:.6f} >= {original_qty * MAX_POSITION_MULTIPLIER:.6f})")
+                return False
+
+            log(f"✅ DCA check passed for {symbol}: {dca_count}/{MAX_DCA_COUNT_GLOBAL} DCAs used")
 
             # --- NEW: block DCA only when price is BEYOND the SL by more than buffer
             sl_price = trade.get("original_sl")
