@@ -14,30 +14,36 @@ from config import DCA_FAST_BUFFER          # <-- NEW
 from trade_verification import verify_position_and_orders, validate_dca_position_size # <-- NEW
 from auto_exit_handler import auto_exit_past_sl
 
-# DCA Configuration - Exact position size matching
+# SAFE DCA Configuration - Maximum 2 entries for ALL trade types
 DCA_CONFIG = {
     "Scalp": {
-        "trigger_drop_pct": 0.4,    # Trigger DCA at -0.5% drop
-        "add_size_pct": 100,        # Add exactly 100% of original position
-        "max_adds": 2,              # Maximum 2 DCA adds
+        "trigger_drop_pct": 0.4,    # Trigger DCA at -0.4% drop
+        "add_size_pct": 50,         # Add 50% of original position (safer)
+        "max_adds": 2,              # 🔒 MAXIMUM 2 DCA adds
         "new_sl_adjustment": 0.6,   # New SL at 0.6% below average entry
-        "new_tp_adjustment": 0.9    # New TP at 1.0% above average entry
+        "new_tp_adjustment": 0.9    # New TP at 0.9% above average entry
     },
     "Intraday": {
-        "trigger_drop_pct": 0.6,    # Trigger DCA at -0.8% drop
-        "add_size_pct": 100,        # Add exactly 100% of original position
-        "max_adds": 3,              # Maximum 3 DCA adds
+        "trigger_drop_pct": 0.6,    # Trigger DCA at -0.6% drop
+        "add_size_pct": 50,         # Add 50% of original position (safer)
+        "max_adds": 2,              # 🔒 MAXIMUM 2 DCA adds
         "new_sl_adjustment": 0.8,   # New SL at 0.8% below average entry
-        "new_tp_adjustment": 1.2    # New TP at 1.5% above average entry
+        "new_tp_adjustment": 1.2    # New TP at 1.2% above average entry
     },
     "Swing": {
-        "trigger_drop_pct": 1.3,    # Trigger DCA at -1.5% drop
-        "add_size_pct": 100,        # Add exactly 100% of original position
-        "max_adds": 3,              # Maximum 3 DCA adds
-        "new_sl_adjustment": 1.5,   # New SL at 1.2% below average entry
-        "new_tp_adjustment": 3.5    # New TP at 3.0% above average entry
+        "trigger_drop_pct": 1.0,    # Trigger DCA at -1.0% drop
+        "add_size_pct": 50,         # Add 50% of original position (safer)
+        "max_adds": 2,              # 🔒 MAXIMUM 2 DCA adds
+        "new_sl_adjustment": 1.0,   # New SL at 1.0% below average entry
+        "new_tp_adjustment": 2.0    # New TP at 2.0% above average entry
     }
 }
+
+# SAFETY CONSTANTS
+MAX_DCA_COUNT_GLOBAL = 2           # 🔒 Global maximum DCAs per trade
+MAX_DCA_PER_DAY = 10              # Maximum DCAs across all trades per day
+DCA_COOLDOWN_SECONDS = 300        # 5 minutes between DCAs
+MAX_POSITION_MULTIPLIER = 2.0     # Position can't grow more than 2x original
 
 class DCAManager:
     def __init__(self):
