@@ -275,6 +275,10 @@ class DCAManager:
             trade["dca_count"] = trade.get("dca_count", 0) + 1
             trade["last_dca_time"] = datetime.utcnow().isoformat()
             trade["position_verified"] = position_verified
+
+            from monitor import save_active_trades
+            save_active_trades()
+            log(f"💾 SAVED: Updated {symbol} qty from {current_qty} to {new_total_qty}")
             
             # Store original quantity if first DCA
             if "original_qty" not in trade:
