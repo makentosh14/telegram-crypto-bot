@@ -137,13 +137,14 @@ async def verify_position_and_orders(symbol, trade, auto_repair=True):
                 # Only auto-fix small differences (< 5%)
                 if size_diff_pct < 5.0:
                     result["repairs_attempted"].append("Update trade position size to match exchange")
+                    old_qty = trade["qty"]
                     trade["qty"] = position_size
                     from monitor import save_active_trades
                     save_active_trades()
                     result["repairs_successful"].append(f"Updated position size to {position_size}")
-                    log(f"🔧 {symbol}: Updated position size {current_expected_size} → {position_size}")
+                    log(f"🔧 {symbol}: Auto-fixed size {old_qty} → {position_size}")
                 else:
-                    # Large difference - flag for manual review
+                    # Large difference - flag for manual review but don't auto-fix
                     result["manual_review_required"].append(
                         f"Large position size difference ({size_diff_pct:.2f}%)"
                     )
