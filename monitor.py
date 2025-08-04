@@ -4,6 +4,7 @@
 import json
 import os
 import time
+startup_time = time.time()
 import asyncio
 import traceback
 from datetime import datetime, timedelta
