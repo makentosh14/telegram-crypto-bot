@@ -43,7 +43,7 @@ from pattern_discovery import pattern_discovery_scan
 from pattern_matcher import pattern_match_scan
 from exit_manager import detect_momentum_surge
 from trade_verification import verify_all_positions
-from active_trade_scanner import high_frequency_scanner
+from active_trade_scanner import high_frequency_monitoring as high_frequency_scanner
 from risk_manager import load_risk_state, update_risk_metrics
 from symbol_utils import get_symbol_category
 from ai_memory import periodic_cleanup
@@ -2014,4 +2014,5 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
+
 
