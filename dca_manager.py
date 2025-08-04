@@ -9,7 +9,6 @@ from logger import log, write_log
 from bybit_api import place_market_order, place_stop_loss_with_retry, signed_request
 from symbol_info import round_qty
 from error_handler import send_telegram_message
-from universal_trailing_stop_fix import update_trade_after_dca
 from config import DCA_FAST_BUFFER          # <-- NEW
 from trade_verification import verify_position_and_orders, validate_dca_position_size # <-- NEW
 from auto_exit_handler import auto_exit_past_sl
