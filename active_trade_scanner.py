@@ -174,7 +174,7 @@ async def get_recent_candles(symbol, interval="1", limit=20):
         log(f"❌ HF SCANNER: Error getting candles for {symbol}: {e}", level="ERROR")
         return []
 
-async def high_frequency_monitoring():
+async def high_frequency_monitoring(live_candles=None):
     """Main high frequency monitoring loop"""
     while True:
         try:
