@@ -83,7 +83,7 @@ def track_active_trade(symbol, trade_data):
     log(f"📊 Now tracking {symbol}: {trade_data.get('direction')} @ {trade_data.get('entry_price')}")
     save_active_trades()
 
-async def monitor_trades():
+async def monitor_trades(live_candles=None):
     """
     MAIN MONITORING FUNCTION - FIXED VERSION
     Uses unified exit manager to prevent double logic
