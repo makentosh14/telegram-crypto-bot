@@ -117,28 +117,64 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
             )
         else:
             # Calculate position size with fixed risk
+            # In calculate_quantity function, find this section and replace:
+
+            # Calculate position size with fixed risk
             risk_amount = account_balance * risk_pct
-            
+
+            # FIXED: Add validation for risk_amount
+            if risk_amount is None or risk_amount <= 0:
+                log(f"❌ Invalid risk amount for {symbol}: {risk_amount}", level="ERROR")
+                return 0
+
             # Calculate risk per unit
             if price <= 0 or sl_price <= 0 or price == sl_price:
                 log(f"❌ Invalid prices for position sizing: Entry={price}, SL={sl_price}", level="ERROR")
                 return 0
-            
+
             risk_per_unit = abs(price - sl_price) / price
-            
+
+            # FIXED: Add validation for risk_per_unit
+            if risk_per_unit is None or risk_per_unit <= 0:
+                log(f"❌ Invalid risk per unit for {symbol}: {risk_per_unit}", level="ERROR")
+                return 0
+
             # Default leverage
             leverage = 3 if market_type == "linear" else 1
-            
+
             # Calculate position value and size
             position_value = risk_amount / risk_per_unit
+
+            # FIXED: Add validation for position_value
+            if position_value is None or position_value <= 0:
+                log(f"❌ Invalid position value for {symbol}: {position_value}", level="ERROR")
+                return 0
+
+            # FIXED: Validate price before division
+            if price is None or price <= 0:
+                log(f"❌ Invalid price for position sizing: {price}", level="ERROR")
+                return 0
+
+            # NOW SAFE: Calculate position size
             position_size = position_value / price
-            
-            # Apply leverage for futures
+
+            # FIXED: Validate position_size result
+            if position_size is None or position_size <= 0:
+                log(f"❌ Invalid position size calculated for {symbol}: {position_size}", level="ERROR")
+                return 0
+
+            # Apply leverage for futures with validation
             if market_type == "linear":
-                position_size *= leverage
-        
-        # Round to appropriate precision
-        position_size = round_qty(symbol, position_size)
+                if leverage is None or leverage <= 0:
+                    leverage = 3
+                    log(f"⚠️ Invalid leverage for {symbol}, using default: {leverage}")
+    
+                position_size = position_size * leverage
+    
+                # Final validation after leverage
+                if position_size is None or position_size <= 0:
+                    log(f"❌ Position size invalid after leverage for {symbol}: {position_size}", level="ERROR")
+                    return 0
         
         # Log detailed calculation
         log(f"📊 Position sizing for {symbol}:")
