@@ -75,6 +75,32 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
     Returns:
         float: Calculated position size
     """
+
+    try:
+        # CRITICAL FIX: Add comprehensive null checks for SUNUSDT error
+        if price is None:
+            log(f"❌ Entry price is None for {symbol}", level="ERROR")
+            return 0
+        if sl_price is None:
+            log(f"❌ Stop loss price is None for {symbol}", level="ERROR")
+            return 0
+        if account_balance is None:
+            log(f"❌ Account balance is None for {symbol}", level="ERROR")
+            return 0
+    
+        # Convert to float and validate
+        try:
+            price = float(price)
+            sl_price = float(sl_price)
+            account_balance = float(account_balance)
+        except (ValueError, TypeError) as e:
+            log(f"❌ Invalid numeric values for {symbol}: {e}", level="ERROR")
+            return 0
+    
+        if price <= 0 or sl_price <= 0 or account_balance <= 0:
+            log(f"❌ Invalid values for {symbol}: price={price}, sl={sl_price}, balance={account_balance}", level="ERROR")
+            return 0
+                                
     try:
         # Use dynamic risk calculation if not provided
         if risk_pct is None:
