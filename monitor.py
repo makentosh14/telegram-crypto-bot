@@ -288,6 +288,104 @@ async def check_and_restore_sl(symbol, trade):
         log(f"❌ Error checking SL for {symbol}: {e}", level="ERROR")
         return False
 
+async def get_current_price(symbol, live_candles=None):
+    """
+    Get current price for symbol with comprehensive null checks
+    FIXED VERSION - Prevents NoneType multiplication errors
+    """
+    try:
+        # Method 1: Try live candles first
+        if live_candles and symbol in live_candles:
+            for tf in ['1', '5', '15']:  # Try different timeframes
+                if tf in live_candles[symbol] and live_candles[symbol][tf]:
+                    candles = live_candles[symbol][tf]
+                    if candles and len(candles) > 0:
+                        last_candle = candles[-1]
+                        if 'close' in last_candle:
+                            price = float(last_candle['close'])
+                            if price > 0:
+                                return price
+        
+        # Method 2: Fetch from API
+        from bybit_api import signed_request
+        result = await signed_request("GET", "/v5/market/tickers", {
+            "category": "linear",
+            "symbol": symbol
+        })
+        
+        if result and result.get("retCode") == 0:
+            tickers = result.get("result", {}).get("list", [])
+            if tickers and len(tickers) > 0:
+                ticker = tickers[0]
+                price = float(ticker.get("lastPrice", 0))
+                if price > 0:
+                    return price
+        
+        log(f"⚠️ Could not get price for {symbol}", level="WARN")
+        return None
+        
+    except Exception as e:
+        log(f"❌ Error getting current price for {symbol}: {e}", level="ERROR")
+        return None
+
+async def get_current_price_enhanced(symbol, live_candles=None):
+    """
+    Enhanced price fetching with additional validation
+    FIXED VERSION - Prevents NoneType errors
+    """
+    try:
+        # Use the base function with null checks
+        price = await get_current_price(symbol, live_candles)
+        
+        if price is None:
+            log(f"⚠️ Price is None for {symbol}, trying backup methods", level="WARN")
+            
+            # Backup method: Try websocket candles module
+            try:
+                from websocket_candles import live_candles as ws_candles
+                if ws_candles and symbol in ws_candles:
+                    for tf in ['1', '5']:
+                        if tf in ws_candles[symbol] and ws_candles[symbol][tf]:
+                            candles = ws_candles[symbol][tf]
+                            if candles and len(candles) > 0:
+                                last_candle = candles[-1]
+                                if 'close' in last_candle:
+                                    backup_price = float(last_candle['close'])
+                                    if backup_price > 0:
+                                        log(f"✅ Got backup price for {symbol}: {backup_price}")
+                                        return backup_price
+            except Exception as backup_error:
+                log(f"⚠️ Backup price method failed for {symbol}: {backup_error}", level="WARN")
+            
+            return None
+        
+        # Validate the price
+        if not isinstance(price, (int, float)):
+            log(f"❌ Invalid price type for {symbol}: {type(price)}", level="ERROR")
+            return None
+        
+        if price <= 0:
+            log(f"❌ Invalid price value for {symbol}: {price}", level="ERROR")
+            return None
+        
+        return float(price)
+        
+    except Exception as e:
+        log(f"❌ Error in enhanced price fetch for {symbol}: {e}", level="ERROR")
+        return None
+
+async def get_symbol_price(symbol, category="linear"):
+    """
+    Wrapper function for backward compatibility
+    FIXED VERSION with null checks
+    """
+    try:
+        price = await get_current_price_enhanced(symbol)
+        return price
+    except Exception as e:
+        log(f"❌ Error in get_symbol_price for {symbol}: {e}", level="ERROR")
+        return None
+
 # This function should already exist - if not, add it:
 async def recover_active_trades_from_exchange():
     """Recover active trades from exchange"""
