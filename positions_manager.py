@@ -190,7 +190,7 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
                     return 0
 
             precision = get_precision(symbol)
-            position_size = round(position_size, precision
+            position_size = round(position_size, precision)
         
         # Log detailed calculation
         log(f"📊 Position sizing for {symbol}:")
