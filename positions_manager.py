@@ -181,9 +181,9 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
                 position_size = position_size * leverage
     
                 # Final validation after leverage
-            if position_size is None or position_size <= 0:
-                log(f"❌ Position size invalid after leverage for {symbol}: {position_size}", level="ERROR")
-                return 0
+                if position_size is None or position_size <= 0:
+                    log(f"❌ Position size invalid after leverage for {symbol}: {position_size}", level="ERROR")
+                    return 0
 
             precision = get_precision(symbol)
             position_size = round(position_size, precision
