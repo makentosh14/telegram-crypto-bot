@@ -109,6 +109,10 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
         if price <= 0 or sl_price <= 0 or account_balance <= 0:
             log(f"❌ Invalid values for {symbol}: price={price}, sl={sl_price}, balance={account_balance}", level="ERROR")
             return 0
+
+    except Exception as e:
+        log(f"❌ Error: {e}", level="ERROR")
+        return 0
                                 
     try:
         # Use dynamic risk calculation if not provided
