@@ -120,8 +120,8 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
             # In calculate_quantity function, find this section and replace:
 
             # Calculate position size with fixed risk
-            risk_amount = account_balance * risk_pct
-
+            risk_amount = account_balance * (risk_pct / 100)
+            
             # FIXED: Add validation for risk_amount
             if risk_amount is None or risk_amount <= 0:
                 log(f"❌ Invalid risk amount for {symbol}: {risk_amount}", level="ERROR")
@@ -172,9 +172,12 @@ async def calculate_quantity(symbol, price, sl_price, account_balance,
                 position_size = position_size * leverage
     
                 # Final validation after leverage
-                if position_size is None or position_size <= 0:
-                    log(f"❌ Position size invalid after leverage for {symbol}: {position_size}", level="ERROR")
-                    return 0
+            if position_size is None or position_size <= 0:
+                log(f"❌ Position size invalid after leverage for {symbol}: {position_size}", level="ERROR")
+                return 0
+
+            precision = get_precision(symbol)
+            position_size = round(position_size, precision
         
         # Log detailed calculation
         log(f"📊 Position sizing for {symbol}:")
