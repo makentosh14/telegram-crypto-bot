@@ -1,56 +1,41 @@
-#!/usr/bin/env python3
-# test_fix.py - Test the unified exit manager
+# test_fix.py
+import asyncio
+from positions_manager import calculate_quantity, get_account_balance
 
-def test_imports():
-    """Test that all imports work correctly"""
-    try:
-        from unified_exit_manager import process_trade_exits, validate_exit_configuration
-        print("✅ unified_exit_manager imports successful")
-        
-        # Test configuration validation
-        if validate_exit_configuration():
-            print("✅ Configuration validation passed")
-        else:
-            print("❌ Configuration validation failed")
-            
+async def test_fixed_calculation():
+    print("Testing fixed calculation...")
+    
+    # Test with actual values from your logs
+    symbol = "ENAUSDT"
+    price = 0.7175
+    sl_price = 0.7117600000000001
+    
+    # Get balance (should now handle None safely)
+    balance = await get_account_balance()
+    print(f"Balance: {balance}")
+    
+    # Calculate quantity (should now handle None safely)
+    qty = await calculate_quantity(
+        symbol=symbol,
+        price=price,
+        sl_price=sl_price,
+        account_balance=balance,
+        candles_by_tf={},
+        trade_type="Scalp",
+        strategy="core_strategy", 
+        confidence=74.6,
+        risk_pct=1.0,  # 1% risk
+        market_type="linear"
+    )
+    
+    print(f"Calculated quantity: {qty}")
+    
+    if qty > 0:
+        print("✅ Fix successful!")
         return True
-        
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        return False
-    except Exception as e:
-        print(f"❌ Other error: {e}")
-        return False
-
-def test_no_conflicts():
-    """Test that conflicting imports are removed"""
-    import os
-    
-    conflicts_found = False
-    
-    # Check if conflicting files are disabled
-    if os.path.exists("universal_trailing_stop_fix.py"):
-        print("⚠️ universal_trailing_stop_fix.py still active (should be .disabled)")
-        conflicts_found = True
     else:
-        print("✅ universal_trailing_stop_fix.py disabled")
-        
-    if os.path.exists("enhanced_exit.py"):
-        print("⚠️ enhanced_exit.py still active (should be .disabled)")
-        conflicts_found = True
-    else:
-        print("✅ enhanced_exit.py disabled")
-    
-    return not conflicts_found
+        print("❌ Still issues")
+        return False
 
 if __name__ == "__main__":
-    print("🧪 Testing Trading Bot Fix...")
-    print("=" * 40)
-    
-    imports_ok = test_imports()
-    conflicts_ok = test_no_conflicts()
-    
-    if imports_ok and conflicts_ok:
-        print("\n✅ All tests passed! Bot is ready to run.")
-    else:
-        print("\n❌ Some tests failed. Please fix the issues above.")
+    asyncio.run(test_fixed_calculation())
