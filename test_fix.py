@@ -19,7 +19,6 @@ try:
         get_market_sentiment,
         calculate_ema_fixed,
         validate_short_signal,
-        validate_short_signal_fixed,
         monitor_btc_trend_accuracy,
         monitor_altseason_status,
         btc_analyzer,
