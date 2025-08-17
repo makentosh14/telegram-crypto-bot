@@ -1059,109 +1059,78 @@ async def monitor_altseason_status():
 
 # Enhanced validation functions
 
-def validate_short_signal(symbol, candles_by_tf, trend_context, indicator_scores):
+async def validate_short_signal(symbol, candles_by_tf):
     """
-    Strict validation for short signals to prevent false entries
-    This function maintains backward compatibility with existing main.py imports
+    Unified async short signal validator with full macro + micro logic:
+    - BTC trend, confidence, sentiment, volatility regime, altseason
+    - Bullish candle filter (5m)
+    - Bearish indicator scoring
+    - Price/indicator divergence (15m)
     """
     try:
-        # Get BTC trend details
-        btc_trend = trend_context.get('btc_trend', 'neutral')
-        btc_confidence = trend_context.get('btc_confidence', 0)
-        
-        # 1. BTC must be in confirmed downtrend or ranging
-        if btc_trend not in ['downtrend', 'ranging']:
-            log(f"❌ {symbol}: BTC in {btc_trend}, not suitable for shorts")
+        # Ensure required candles are present
+        if '5' not in candles_by_tf or '15' not in candles_by_tf:
+            log(f"❌ {symbol}: Missing required timeframes (5m/15m)")
             return False
-        
-        # 2. If downtrend, check confidence
+
+        # Fetch full trend context (cached async call)
+        context = await get_trend_context_cached()
+        btc_trend = context.get('btc_trend', 'neutral')
+        btc_confidence = context.get('btc_confidence', 0)
+        sentiment = context.get('sentiment', 'neutral')
+        regime = context.get('regime', 'calm')
+        altseason_strength = context.get('altseason_strength', 0)
+        is_altseason = context.get('altseason', False)
+
+        # Step 1: BTC trend and confidence check
+        if btc_trend not in ['downtrend', 'ranging']:
+            log(f"❌ {symbol}: BTC trend is {btc_trend}, not short-friendly")
+            return False
         if btc_trend == 'downtrend' and btc_confidence < 65:
             log(f"❌ {symbol}: BTC downtrend confidence too low ({btc_confidence:.1f}%)")
             return False
-        
-        # 3. Check immediate price action (last 5 candles) - this is key!
-        if '5' in candles_by_tf:
-            recent_candles = candles_by_tf['5'][-5:]
-            bullish_candles = sum(1 for c in recent_candles if float(c['close']) > float(c['open']))
-            
-            if bullish_candles > 2:
-                log(f"❌ {symbol}: Too many recent bullish candles ({bullish_candles}/5)")
-                return False
-        
-        # 4. Require multiple bearish indicators (reduced from 3 to 2)
-        strong_bearish = sum(1 for k, v in indicator_scores.items() if v < -1.0)
-        if strong_bearish < 2:
-            log(f"❌ {symbol}: Insufficient bearish indicators ({strong_bearish})")
-            return False
-        
-        # 5. Check for divergence (price up, indicators down)
-        if '15' in candles_by_tf:
-            candles = candles_by_tf['15']
-            if len(candles) >= 5:
-                # FIX #8: Proper candle ordering check
-                closes = [float(c['close']) for c in candles[-5:]]  # Last 5 candles
-                price_trend = closes[-1] > closes[0]  # Price going up
-                indicator_trend = sum(v for v in indicator_scores.values()) < -2
-                
-                if price_trend and not indicator_trend:
-                    log(f"❌ {symbol}: Price/indicator divergence detected")
-                    return False
-        
-        log(f"✅ {symbol}: Short signal validated")
-        return True
-        
-    except Exception as e:
-        log(f"❌ Error validating short signal for {symbol}: {e}", level="ERROR")
-        return False
 
-
-async def validate_short_signal_fixed(symbol, candles_by_tf):
-    """
-    Enhanced short signal validation with fixed logic (async version)
-    Addresses various validation issues mentioned in the fixes
-    """
-    try:
-        if not candles_by_tf or '15' not in candles_by_tf:
-            log(f"❌ {symbol}: Missing 15min candles for validation")
+        # Step 2: Recent bullish candles (5m)
+        recent_candles = candles_by_tf['5'][-5:]
+        bullish_candles = sum(1 for c in recent_candles if float(c['close']) > float(c['open']))
+        if bullish_candles > 2:
+            log(f"❌ {symbol}: Too many recent bullish candles ({bullish_candles}/5)")
             return False
-        
-        # Get trend context first
-        context = await get_trend_context_cached()
-        
-        # Enhanced bearish validation
+
+        # Step 3: Macro indicator scoring (custom logic)
         indicator_scores = {}
-        
-        # 1. BTC trend alignment
-        if context['btc_trend'] == 'downtrend':
-            indicator_scores['btc_trend'] = -1.5
-        elif context['btc_trend'] == 'ranging':
-            indicator_scores['btc_trend'] = -0.5
-        else:
-            indicator_scores['btc_trend'] = 0.5
-        
-        # 2. Market sentiment
-        if context['sentiment'] == 'bearish':
-            indicator_scores['sentiment'] = -1.2
-        elif context['sentiment'] == 'neutral':
-            indicator_scores['sentiment'] = -0.3
-        else:
-            indicator_scores['sentiment'] = 0.3
-        
-        # 3. Volatility regime
-        if context['regime'] == 'volatile':
-            indicator_scores['regime'] = -0.8
-        else:
-            indicator_scores['regime'] = 0.2
-        
-        # 4. Altseason consideration
-        if context['altseason'] and context['altseason_strength'] > 0.7:
-            indicator_scores['altseason'] = 0.8  # Bullish for alts
-        else:
-            indicator_scores['altseason'] = -0.2
-        
-        # Use the synchronous validate_short_signal function
-        return validate_short_signal(symbol, candles_by_tf, context, indicator_scores)
-        
+
+        # BTC trend impact
+        indicator_scores['btc_trend'] = -1.5 if btc_trend == 'downtrend' else (-0.5 if btc_trend == 'ranging' else 0.3)
+
+        # Sentiment
+        indicator_scores['sentiment'] = -1.2 if sentiment == 'bearish' else (-0.3 if sentiment == 'neutral' else 0.3)
+
+        # Volatility regime
+        indicator_scores['regime'] = -0.8 if regime == 'volatile' else 0.2
+
+        # Altseason impact
+        indicator_scores['altseason'] = 0.8 if is_altseason and altseason_strength > 0.7 else -0.2
+
+        # Step 4: Require at least 2 strong bearish indicators
+        strong_bearish = sum(1 for v in indicator_scores.values() if v < -1.0)
+        if strong_bearish < 2:
+            log(f"❌ {symbol}: Not enough strong bearish indicators ({strong_bearish})")
+            return False
+
+        # Step 5: Check divergence (price rising, indicators bearish)
+        candles_15m = candles_by_tf['15'][-5:]
+        close_prices = [float(c['close']) for c in candles_15m]
+        price_up = close_prices[-1] > close_prices[0]
+        indicator_trend_down = sum(indicator_scores.values()) < -2
+
+        if price_up and not indicator_trend_down:
+            log(f"❌ {symbol}: Price rising while indicators not strongly bearish")
+            return False
+
+        log(f"✅ {symbol}: Short signal validated (macro + micro aligned)")
+        return True
+
     except Exception as e:
         log(f"❌ Error validating short signal for {symbol}: {e}", level="ERROR")
         return False
@@ -1205,3 +1174,4 @@ __all__ = [
     'btc_analyzer',
     'altseason_detector'
 ]
+
