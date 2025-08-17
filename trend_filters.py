@@ -739,11 +739,7 @@ async def get_trend_context_cached():
 
 
 async def detect_market_regime():
-    """
-    Detect current market regime
-    FIX #11: Return 'volatile' instead of 'trending' on API failure
-    Returns: 'trending', 'ranging', or 'volatile'
-    """
+    """Detect current market regime - Enhanced to handle all expected values"""
     try:
         # Get BTC volatility data
         kline_resp = await signed_request("GET", "/v5/market/kline", {
@@ -753,14 +749,12 @@ async def detect_market_regime():
             "limit": "100"
         })
         
-        # FIX #11: Return 'volatile' (safer) when API call fails
         if kline_resp.get("retCode") != 0:
-            return "volatile"
+            return "volatile"  # Default to volatile on API error
             
         candles = kline_resp.get("result", {}).get("list", [])
-        # FIX #11: Return 'volatile' when insufficient data
         if len(candles) < 50:
-            return "volatile"
+            return "volatile"  # Default to volatile with insufficient data
             
         # Calculate ATR for volatility
         highs = [float(c[2]) for c in candles[:50]]
@@ -780,18 +774,22 @@ async def detect_market_regime():
         atr = sum(tr_values[-14:]) / 14 if len(tr_values) >= 14 else 0
         atr_pct = (atr / closes[-1]) * 100 if closes[-1] > 0 else 0
         
-        # Determine regime based on volatility
-        if atr_pct > 3:
+        # Enhanced regime detection with three categories
+        if atr_pct >= 4.0:  # High volatility
             return "volatile"
-        elif atr_pct < 1:
-            return "ranging"
-        else:
-            return "trending"
+        elif atr_pct < 1.5:  # Very low volatility - tight range
+            # Check for ranging behavior
+            price_range = (max(closes[-20:]) - min(closes[-20:])) / min(closes[-20:])
+            if price_range < 0.03:  # Less than 3% range in last 20 periods
+                return "ranging"  # Tight ranging market
+            else:
+                return "stable"  # Low volatility but not tight range
+        else:  # Medium volatility
+            return "stable"
             
     except Exception as e:
         log(f"❌ Error detecting market regime: {e}", level="ERROR")
-        # FIX #11: Return 'volatile' (safer) on any error
-        return "volatile"
+        return "volatile"  # Safe default
 
 
 async def get_market_sentiment():
@@ -1174,4 +1172,5 @@ __all__ = [
     'btc_analyzer',
     'altseason_detector'
 ]
+
 
