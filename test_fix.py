@@ -1,507 +1,264 @@
-# test_fix.py - Comprehensive test suite for trend_filters.py
-# FIXED VERSION - Addresses all identified issues
+# pattern_matcher_debug.py
+# Comprehensive diagnostic tool for pattern matching issues
 
-import asyncio
-import sys
-import traceback
 import json
-import numpy as np
+import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from logger import log
 
-# Import all functions from trend_filters.py
-try:
-    from trend_filters import (
-        get_trend_context,
-        get_trend_context_cached, 
-        get_btc_trend,
-        detect_market_regime,
-        get_market_sentiment,
-        calculate_ema_fixed,
-        validate_short_signal,
-        monitor_btc_trend_accuracy,
-        monitor_altseason_status,
-        btc_analyzer,
-        altseason_detector,
-        cleanup_caches_periodically
-    )
-    print("✅ Successfully imported all trend_filters functions")
-except ImportError as e:
-    print(f"❌ Failed to import trend_filters: {e}")
-    sys.exit(1)
+def diagnose_pattern_matcher():
+    """
+    Comprehensive diagnosis of why pattern matcher isn't finding patterns
+    """
+    print("🔍 PATTERN MATCHER DIAGNOSTIC")
+    print("=" * 50)
+    
+    # Issue 1: Check if pattern database exists and has data
+    check_pattern_database()
+    
+    # Issue 2: Check pattern discovery vs pattern matching
+    check_pattern_flow()
+    
+    # Issue 3: Check cooldown issues
+    check_cooldown_issues()
+    
+    # Issue 4: Check pattern detection functionality
+    check_pattern_detection()
+    
+    # Issue 5: Check similarity thresholds
+    check_similarity_thresholds()
+    
+    print("\n💡 RECOMMENDATIONS:")
+    provide_recommendations()
 
-# Import logger if available
-try:
-    from logger import log
-except ImportError:
-    def log(msg, level="INFO"):
-        print(f"[{level}] {msg}")
-
-class TrendFiltersTestSuite:
-    """Comprehensive test suite for trend_filters.py functionality"""
+def check_pattern_database():
+    """Check if pattern database exists and has content"""
+    print("\n1. 📁 PATTERN DATABASE CHECK")
     
-    def __init__(self):
-        self.test_results = {
-            "passed": 0,
-            "failed": 0,
-            "errors": []
-        }
-        self.test_candles = self._generate_test_candles()
-    
-    def _generate_test_candles(self) -> Dict[str, List[Dict]]:
-        """Generate realistic test candle data for different timeframes"""
-        base_price = 45000.0
-        candles_data = {}
-        
-        timeframes = ['5', '15', '1H', '4H', '1D']
-        
-        for tf in timeframes:
-            candles = []
-            current_price = base_price
-            
-            # Generate 100 candles for each timeframe
-            for i in range(100):
-                # Create realistic price movement
-                change_percent = np.random.normal(0, 0.02)  # 2% volatility
-                new_price = current_price * (1 + change_percent)
-                
-                # Ensure realistic OHLC relationships
-                high = max(current_price, new_price) * (1 + abs(np.random.normal(0, 0.005)))
-                low = min(current_price, new_price) * (1 - abs(np.random.normal(0, 0.005)))
-                volume = np.random.uniform(1000000, 5000000)
-                
-                # Create candle dict with proper format
-                candle = {
-                    'open': str(current_price),
-                    'high': str(high),
-                    'low': str(low),
-                    'close': str(new_price),
-                    'volume': str(volume),
-                    'timestamp': str(int((datetime.now() - timedelta(minutes=(100-i))).timestamp() * 1000))
-                }
-                
-                candles.append(candle)
-                current_price = new_price
-            
-            candles_data[tf] = candles
-        
-        return candles_data
-    
-    def run_test(self, test_func, test_name):
-        """Run a single test with error handling"""
+    # Check pattern_match_memory.json (used by pattern_matcher.py)
+    match_db_path = "pattern_match_memory.json"
+    if os.path.exists(match_db_path):
         try:
-            print(f"\n🧪 Running test: {test_name}")
+            with open(match_db_path, 'r') as f:
+                match_data = json.load(f)
+            print(f"✅ Pattern match database exists: {len(match_data)} entries")
             
-            # Check if it's an async function
-            if asyncio.iscoroutinefunction(test_func):
-                result = asyncio.run(test_func())
+            if len(match_data) == 0:
+                print("❌ ISSUE: Pattern match database is EMPTY!")
+                print("   This is why no matches are found - there's nothing to match against!")
             else:
-                result = test_func()
+                print(f"📊 Sample patterns in database: {list(match_data.keys())[:5]}")
+                
+        except Exception as e:
+            print(f"❌ Error reading pattern match database: {e}")
+    else:
+        print("❌ ISSUE: pattern_match_memory.json does NOT exist!")
+        print("   This is a MAJOR issue - no database to match against!")
+    
+    # Check pattern_memory.json (used by pattern_discovery.py)  
+    discovery_db_path = "pattern_memory.json"
+    if os.path.exists(discovery_db_path):
+        try:
+            with open(discovery_db_path, 'r') as f:
+                discovery_data = json.load(f)
+            print(f"✅ Pattern discovery database exists: {len(discovery_data)} patterns")
             
-            if result:
-                print(f"✅ {test_name} - PASSED")
-                self.test_results["passed"] += 1
+            if len(discovery_data) > 0:
+                recent_patterns = [p for p in discovery_data if 
+                                 datetime.fromisoformat(p['timestamp'].replace('Z', '+00:00')) > 
+                                 datetime.now() - timedelta(days=7)]
+                print(f"📅 Recent patterns (last 7 days): {len(recent_patterns)}")
+            
+        except Exception as e:
+            print(f"❌ Error reading pattern discovery database: {e}")
+    else:
+        print("❌ Pattern discovery database (pattern_memory.json) does NOT exist!")
+
+def check_pattern_flow():
+    """Check the flow from pattern discovery to pattern matching"""
+    print("\n2. 🔄 PATTERN FLOW CHECK")
+    
+    print("   Pattern Discovery (pattern_discovery.py)")
+    print("   ↓ saves patterns to → pattern_memory.json")
+    print("   ↓")
+    print("   Pattern Matcher (pattern_matcher.py)") 
+    print("   ↓ loads patterns from → pattern_match_memory.json")
+    print("   ↓ finds matches")
+    
+    print("\n❌ MAJOR ISSUE IDENTIFIED:")
+    print("   Pattern Discovery saves to: pattern_memory.json")
+    print("   Pattern Matcher loads from:  pattern_match_memory.json")
+    print("   These are DIFFERENT FILES! The pattern matcher can't see discovered patterns!")
+
+def check_cooldown_issues():
+    """Check if cooldown is preventing matches"""
+    print("\n3. ⏰ COOLDOWN CHECK")
+    
+    match_db_path = "pattern_match_memory.json"
+    if os.path.exists(match_db_path):
+        try:
+            with open(match_db_path, 'r') as f:
+                match_data = json.load(f)
+            
+            if match_data:
+                now = datetime.now()
+                active_cooldowns = 0
+                
+                for symbol, patterns in match_data.items():
+                    for pattern, timestamp_str in patterns.items():
+                        try:
+                            match_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                            hours_since = (now - match_time).total_seconds() / 3600
+                            
+                            if hours_since < 6:  # MATCH_COOLDOWN = 6 hours
+                                active_cooldowns += 1
+                        except:
+                            continue
+                
+                print(f"⏰ Active cooldowns preventing matches: {active_cooldowns}")
+                if active_cooldowns > 20:
+                    print("❌ ISSUE: Too many active cooldowns may be blocking matches!")
             else:
-                print(f"❌ {test_name} - FAILED")
-                self.test_results["failed"] += 1
-                self.test_results["errors"].append(test_name)
-        except Exception as e:
-            print(f"❌ {test_name} - ERROR: {e}")
-            print(f"   Traceback: {traceback.format_exc()}")
-            self.test_results["failed"] += 1
-            self.test_results["errors"].append(f"{test_name}: {str(e)}")
-    
-    # ==================== COMPONENT TESTS ====================
-    
-    def test_btc_analyzer_exists(self):
-        """Test that btc_analyzer exists and has required methods"""
-        try:
-            # Check if btc_analyzer exists
-            assert btc_analyzer is not None, "btc_analyzer is None"
-            
-            # Check if it has analyze_btc_trend method
-            assert hasattr(btc_analyzer, 'analyze_btc_trend'), "Missing analyze_btc_trend method"
-            print(f"  ✅ BTC analyzer has analyze_btc_trend method")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ BTC analyzer test failed: {e}")
-            return False
-    
-    def test_altseason_detector_exists(self):
-        """Test that altseason_detector exists and has required methods"""
-        try:
-            # Check if altseason_detector exists
-            assert altseason_detector is not None, "altseason_detector is None"
-            
-            # Check if it has detect_altseason method
-            assert hasattr(altseason_detector, 'detect_altseason'), "Missing detect_altseason method"
-            print(f"  ✅ Altseason detector has detect_altseason method")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Altseason detector test failed: {e}")
-            return False
-    
-    def test_validate_short_signal_sync(self):
-        """Test synchronous short signal validation with FIXED data format"""
-        try:
-            # Create test context
-            test_context = {
-                'btc_trend': 'downtrend',
-                'btc_confidence': 70,
-                'sentiment': 'bearish',
-                'regime': 'volatile',
-                'altseason': False,
-                'altseason_strength': 0.3
-            }
-            
-            # Create test indicator scores
-            test_scores = {
-                'btc_trend': -1.5,
-                'sentiment': -1.2,
-                'regime': -0.8,
-                'altseason': -0.2
-            }
-            
-            # Test validation with properly formatted candles
-            try:
-                result = validate_short_signal("BTCUSDT", self.test_candles, test_context, test_scores)
-                print(f"  📊 Short signal validation result: {result}")
-                print(f"  📊 Test context: {test_context}")
-                print(f"  📊 Test scores: {test_scores}")
+                print("✅ No cooldown data (database empty)")
                 
-                # Result should be boolean
-                assert isinstance(result, bool), f"Validation should return boolean, got {type(result)}"
+        except Exception as e:
+            print(f"❌ Error checking cooldowns: {e}")
+    else:
+        print("✅ No cooldown file exists")
+
+def check_pattern_detection():
+    """Check if pattern detection is working"""
+    print("\n4. 🔍 PATTERN DETECTION CHECK")
+    
+    print("   Pattern detector should be finding patterns like:")
+    print("   - hammer, doji, engulfing, morning_star, etc.")
+    print("   - If detect_pattern() returns None consistently, that's an issue")
+    print("   - Check your pattern_detector.py logs for pattern detection activity")
+
+def check_similarity_thresholds():
+    """Check if similarity thresholds are too strict"""
+    print("\n5. 📊 SIMILARITY THRESHOLD CHECK")
+    
+    print("   Current thresholds in pattern_matcher.py:")
+    print("   - Alert threshold: 70% similarity (match_score > 0.7)")
+    print("   - Trade threshold: 85% similarity (match_score > 0.85)")
+    print("   - These might be TOO STRICT for crypto markets")
+    print("   - Consider lowering to 50% and 70% respectively")
+
+def provide_recommendations():
+    """Provide specific recommendations to fix the issues"""
+    
+    print("1. 🔧 FIX DATABASE MISMATCH:")
+    print("   Update pattern_matcher.py to load from 'pattern_memory.json' instead of 'pattern_match_memory.json'")
+    print("   OR modify pattern_discovery.py to save to 'pattern_match_memory.json'")
+    
+    print("\n2. 📊 LOWER SIMILARITY THRESHOLDS:")
+    print("   In pattern_matcher.py, change:")
+    print("   - if match_score > 0.7: → if match_score > 0.5:")
+    print("   - if match_score > 0.85: → if match_score > 0.7:")
+    
+    print("\n3. 🕒 REDUCE COOLDOWN:")
+    print("   MATCH_COOLDOWN = 6 hours might be too long")
+    print("   Consider reducing to 2-3 hours for more frequent matches")
+    
+    print("\n4. 🔍 ADD DEBUG LOGGING:")
+    print("   Add more logging to see what's happening in pattern_match_scan()")
+    
+    print("\n5. 📈 CHECK PATTERN DISCOVERY:")
+    print("   Verify that pattern_discovery_scan() is actually finding and saving patterns")
+
+# Quick fix functions
+def fix_database_path():
+    """Generate code to fix the database path mismatch"""
+    print("\n🔧 QUICK FIX - Update pattern_matcher.py:")
+    print("Change line:")
+    print("   PATTERN_DB_PATH = \"pattern_match_memory.json\"")
+    print("To:")
+    print("   PATTERN_DB_PATH = \"pattern_memory.json\"")
+
+def add_debug_logging():
+    """Generate enhanced logging for pattern_matcher.py"""
+    
+    debug_code = '''
+# Add this enhanced debug version to pattern_matcher.py:
+
+async def pattern_match_scan_debug(symbols):
+    """Enhanced debug version with detailed logging"""
+    pattern_stats["scans"] += 1
+    
+    log(f"🔍 PATTERN MATCHER: Starting scan of {len(symbols)} symbols")
+    
+    # Load pattern database and recent matches
+    patterns_db = load_pattern_memory()
+    
+    log(f"📊 Pattern database loaded: {len(patterns_db)} patterns")
+    if patterns_db:
+        pattern_types = list(patterns_db.keys())
+        log(f"   Available patterns: {pattern_types[:10]}...")  # Show first 10
+    else:
+        log("❌ CRITICAL: Pattern database is EMPTY! No patterns to match against!")
+        return
+    
+    matches_found = 0
+    patterns_detected = 0
+    symbols_with_candles = 0
+    
+    for symbol in symbols:
+        try:
+            # Get candles and detect pattern
+            from websocket_candles import live_candles
+            
+            if symbol not in live_candles or not live_candles[symbol].get("5"):
+                continue
                 
-                return True
+            symbols_with_candles += 1
+            candles = list(live_candles[symbol]["5"])
+            if len(candles) < 30:
+                continue
                 
-            except Exception as validation_error:
-                # Check if the error is the "list indices must be integers" error
-                if "list indices must be integers or slices, not str" in str(validation_error):
-                    print(f"  ❌ CRITICAL ERROR: {validation_error}")
-                    print(f"  🔍 This error indicates candles are being accessed incorrectly")
-                    print(f"  💡 The candles should be accessed by index, not string keys")
-                    # This is the main issue we need to fix
-                    return False
+            # Detect current pattern
+            current_pattern = detect_pattern(candles)
+            if current_pattern:
+                patterns_detected += 1
+                log(f"🎯 Pattern detected on {symbol}: {current_pattern}")
+                
+                # Check if this pattern exists in database
+                if current_pattern in patterns_db:
+                    log(f"✅ {symbol}: Pattern {current_pattern} exists in database")
+                    
+                    # Check cooldown
+                    cooldown_check = check_cooldown_status(symbol, current_pattern)
+                    if not cooldown_check['blocked']:
+                        # Analyze context and similarity
+                        match_score = analyze_pattern_match(symbol, current_pattern, candles, patterns_db)
+                        if match_score > 0.5:  # Lowered threshold for debugging
+                            matches_found += 1
+                            log(f"🎊 MATCH FOUND: {symbol} - {current_pattern} (score: {match_score:.2f})")
+                    else:
+                        log(f"⏰ {symbol}: Pattern {current_pattern} in cooldown ({cooldown_check['hours_left']:.1f}h left)")
                 else:
-                    print(f"  ⚠️ Validation failed with different error: {validation_error}")
-                    # Other errors might be acceptable for now
-                    return True
+                    log(f"❌ {symbol}: Pattern {current_pattern} NOT in database")
             
         except Exception as e:
-            print(f"    ❌ Short signal validation test failed: {e}")
-            return False
+            log(f"❌ Pattern match error for {symbol}: {e}", level="ERROR")
+            continue
     
-    # ==================== ASYNC TESTS ====================
+    log(f"📈 SCAN SUMMARY:")
+    log(f"   Symbols with candles: {symbols_with_candles}/{len(symbols)}")
+    log(f"   Patterns detected: {patterns_detected}")
+    log(f"   Matches found: {matches_found}")
     
-    async def test_get_trend_context(self):
-        """Test main trend context function"""
-        try:
-            context = await get_trend_context()
-            
-            # Check required fields
-            required_fields = ['btc_trend', 'btc_strength', 'btc_confidence', 
-                             'sentiment', 'regime', 'altseason', 'timestamp']
-            
-            for field in required_fields:
-                assert field in context, f"Missing field in context: {field}"
-                print(f"  ✅ Context has {field}: {context[field]}")
-            
-            # Check data types and ranges
-            assert context['btc_trend'] in ['uptrend', 'downtrend', 'ranging', 'neutral'], \
-                f"Invalid BTC trend: {context['btc_trend']}"
-            
-            assert 0 <= context['btc_strength'] <= 2, \
-                f"BTC strength out of range: {context['btc_strength']}"
-            
-            assert 0 <= context['btc_confidence'] <= 100, \
-                f"BTC confidence out of range: {context['btc_confidence']}"
-            
-            assert context['sentiment'] in ['bullish', 'bearish', 'neutral'], \
-                f"Invalid sentiment: {context['sentiment']}"
-            
-            # FIXED: Based on your error, the regime can be 'ranging' too
-            # This might come from a different part of your codebase
-            assert context['regime'] in ['volatile', 'stable', 'ranging'], \
-                f"Invalid regime: {context['regime']}"
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Trend context test failed: {e}")
-            return False
+    if patterns_detected == 0:
+        log("❌ No patterns detected - check pattern_detector.py")
+    elif matches_found == 0 and patterns_detected > 0:
+        log("❌ Patterns detected but no matches - check database or thresholds")
+'''
     
-    async def test_get_trend_context_cached(self):
-        """Test cached trend context function"""
-        try:
-            # Test caching by calling twice
-            start_time = datetime.now()
-            context1 = await get_trend_context_cached()
-            first_call_time = (datetime.now() - start_time).total_seconds()
-            
-            start_time = datetime.now()
-            context2 = await get_trend_context_cached()
-            second_call_time = (datetime.now() - start_time).total_seconds()
-            
-            print(f"  ⏱️ First call: {first_call_time:.3f}s, Second call: {second_call_time:.3f}s")
-            
-            # Second call should be faster (cached)
-            # Note: This might not always be true due to various factors
-            # so we'll just check that both calls return valid data
-            
-            assert context1 is not None, "First context call failed"
-            assert context2 is not None, "Second context call failed"
-            
-            # Both should have same structure
-            assert set(context1.keys()) == set(context2.keys()), "Context structure differs"
-            
-            print(f"  📊 Cached context: {json.dumps(context2, indent=2, default=str)}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Cached trend context test failed: {e}")
-            return False
-    
-    async def test_get_btc_trend(self):
-        """Test BTC trend analysis"""
-        try:
-            trend = await get_btc_trend()
-            
-            # Should return valid trend (maps 'neutral' to 'ranging')
-            valid_trends = ['uptrend', 'downtrend', 'ranging']
-            assert trend in valid_trends, f"Invalid trend returned: {trend}"
-            
-            print(f"  📊 Current BTC trend: {trend}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ BTC trend test failed: {e}")
-            return False
-    
-    async def test_detect_market_regime(self):
-        """Test market regime detection"""
-        try:
-            regime = await detect_market_regime()
-            
-            # UPDATED: Function can now return 'volatile', 'stable', or 'ranging'
-            valid_regimes = ['volatile', 'stable', 'ranging']
-            assert regime in valid_regimes, f"Invalid regime returned: {regime}"
-            
-            print(f"  📊 Current market regime: {regime}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Market regime test failed: {e}")
-            return False
-    
-    async def test_get_market_sentiment(self):
-        """Test market sentiment analysis"""
-        try:
-            sentiment = await get_market_sentiment()
-            
-            # Should return valid sentiment
-            valid_sentiments = ['bullish', 'bearish', 'neutral']
-            assert sentiment in valid_sentiments, f"Invalid sentiment returned: {sentiment}"
-            
-            print(f"  📊 Current market sentiment: {sentiment}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Market sentiment test failed: {e}")
-            return False
-    
-    async def test_btc_analyzer_analysis(self):
-        """Test BTC analyzer analysis function"""
-        try:
-            result = await btc_analyzer.analyze_btc_trend()
-            
-            # Check result structure
-            required_fields = ['trend', 'strength', 'confidence', 'details']
-            for field in required_fields:
-                assert field in result, f"Missing field in BTC analysis: {field}"
-            
-            # Check data validity
-            assert result['trend'] in ['uptrend', 'downtrend', 'neutral'], \
-                f"Invalid trend: {result['trend']}"
-            
-            assert 0 <= result['strength'] <= 2, \
-                f"Strength out of range: {result['strength']}"
-            
-            assert 0 <= result['confidence'] <= 100, \
-                f"Confidence out of range: {result['confidence']}"
-            
-            print(f"  📊 BTC Analysis Result: {json.dumps(result, indent=2, default=str)}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ BTC analyzer analysis test failed: {e}")
-            return False
-    
-    async def test_altseason_detector_analysis(self):
-        """Test altseason detector analysis"""
-        try:
-            result = await altseason_detector.detect_altseason()
-            
-            # Check result structure
-            required_fields = ['is_altseason', 'strength', 'season', 'details']
-            for field in required_fields:
-                assert field in result, f"Missing field in altseason analysis: {field}"
-            
-            # Check data validity
-            assert isinstance(result['is_altseason'], bool), \
-                f"is_altseason should be boolean"
-            
-            assert 0 <= result['strength'] <= 1, \
-                f"Strength out of range: {result['strength']}"
-            
-            print(f"  📊 Altseason Analysis: {json.dumps(result, indent=2, default=str)}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Altseason detector test failed: {e}")
-            return False
-    
-    async def test_validate_short_signal_async(self):
-        """Test async short signal validation"""
-        try:
-            # Test with async version - this may also fail due to data format
-            try:
-                result = await validate_short_signal_fixed("BTCUSDT", self.test_candles)
-                print(f"  📊 Async short signal validation result: {result}")
-                
-                # Result should be boolean
-                assert isinstance(result, bool), f"Validation should return boolean, got {type(result)}"
-                
-                return True
-                
-            except Exception as validation_error:
-                # Check if this is the same candles access error
-                if "list indices must be integers or slices, not str" in str(validation_error):
-                    print(f"  ❌ SAME ERROR IN ASYNC VERSION: {validation_error}")
-                    return False
-                else:
-                    print(f"  ⚠️ Async validation failed: {validation_error}")
-                    return True
-            
-        except Exception as e:
-            print(f"    ❌ Async short signal validation test failed: {e}")
-            return False
-    
-    # ==================== UTILITY TESTS ====================
-    
-    def test_calculate_ema_fixed(self):
-        """Test EMA calculation function"""
-        try:
-            # Test with sample data
-            prices = [45000, 45100, 45200, 44900, 45300, 45150, 45250]
-            period = 5
-            
-            result = calculate_ema_fixed(prices, period)
-            
-            # Should return a number
-            assert isinstance(result, (int, float)), f"EMA should return number, got {type(result)}"
-            assert result > 0, f"EMA should be positive, got {result}"
-            
-            print(f"  📊 EMA({period}) of sample prices: {result:.2f}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ EMA calculation test failed: {e}")
-            return False
-    
-    def test_data_structures(self):
-        """Test that test data structures are valid"""
-        try:
-            # Check candles structure
-            assert isinstance(self.test_candles, dict), "Test candles should be dict"
-            assert len(self.test_candles) > 0, "Test candles should not be empty"
-            
-            # Check timeframes
-            for tf, candles in self.test_candles.items():
-                assert isinstance(candles, list), f"Candles for {tf} should be list"
-                assert len(candles) > 0, f"Candles for {tf} should not be empty"
-                
-                # Check first candle structure
-                candle = candles[0]
-                required_keys = ['open', 'high', 'low', 'close', 'volume']
-                for key in required_keys:
-                    assert key in candle, f"Candle missing {key}"
-                    # All values should be strings (as per API format)
-                    assert isinstance(candle[key], str), f"Candle {key} should be string"
-            
-            print(f"  📊 Test data structure: {len(self.test_candles)} timeframes")
-            print(f"  📊 Sample candle keys: {list(self.test_candles['5'][0].keys())}")
-            
-            return True
-        except Exception as e:
-            print(f"    ❌ Data structure test failed: {e}")
-            return False
-    
-    # ==================== MAIN TEST RUNNER ====================
-    
-    def run_all_tests(self):
-        """Run all tests and generate report"""
-        print("=" * 80)
-        print("🚀 STARTING COMPREHENSIVE TREND_FILTERS TEST SUITE")
-        print("=" * 80)
-        
-        # Test data structure first
-        self.run_test(self.test_data_structures, "Data Structure Validation")
-        
-        # Component existence tests
-        self.run_test(self.test_btc_analyzer_exists, "BTC Analyzer Exists")
-        self.run_test(self.test_altseason_detector_exists, "Altseason Detector Exists")
-        
-        # Utility function tests
-        self.run_test(self.test_calculate_ema_fixed, "EMA Calculation")
-        
-        # CRITICAL: Test short signal validation (sync) - This contains the main bug
-        self.run_test(self.test_validate_short_signal_sync, "Short Signal Validation (Sync)")
-        
-        # Async function tests
-        self.run_test(self.test_get_trend_context, "Trend Context")
-        self.run_test(self.test_get_trend_context_cached, "Trend Context Cached")
-        self.run_test(self.test_get_btc_trend, "BTC Trend")
-        self.run_test(self.test_detect_market_regime, "Market Regime Detection")
-        self.run_test(self.test_get_market_sentiment, "Market Sentiment")
-        self.run_test(self.test_btc_analyzer_analysis, "BTC Analyzer Analysis")
-        self.run_test(self.test_altseason_detector_analysis, "Altseason Detector Analysis")
-        
-        # Critical async test
-        self.run_test(self.test_validate_short_signal_async, "Short Signal Validation (Async)")
-        
-        # Generate final report
-        self.generate_report()
-    
-    def generate_report(self):
-        """Generate test report"""
-        print("\n" + "=" * 80)
-        print("📊 TEST RESULTS SUMMARY")
-        print("=" * 80)
-        
-        total_tests = self.test_results["passed"] + self.test_results["failed"]
-        pass_rate = (self.test_results["passed"] / total_tests * 100) if total_tests > 0 else 0
-        
-        print(f"Total Tests: {total_tests}")
-        print(f"✅ Passed: {self.test_results['passed']}")
-        print(f"❌ Failed: {self.test_results['failed']}")
-        print(f"📈 Pass Rate: {pass_rate:.1f}%")
-        
-        if self.test_results["errors"]:
-            print(f"\n🚨 FAILED TESTS:")
-            for error in self.test_results["errors"]:
-                print(f"  • {error}")
-        
-        # Specific recommendations based on errors
-        if any("list indices must be integers" in error for error in self.test_results["errors"]):
-            print(f"\n🔧 CRITICAL BUG IDENTIFIED:")
-            print(f"  The 'list indices must be integers or slices, not str' error")
-            print(f"  indicates that candles are being accessed incorrectly in validate_short_signal()")
-            print(f"  Check the candle data structure and ensure proper indexing.")
-        
-        print("=" * 80)
+    return debug_code
 
 if __name__ == "__main__":
-    # Run the comprehensive test suite
-    test_suite = TrendFiltersTestSuite()
-    test_suite.run_all_tests()
+    diagnose_pattern_matcher()
+    print("\n" + "="*50)
+    fix_database_path()
+    print("\n" + "="*50)
+    print("Enhanced debug code generated above ☝️")
