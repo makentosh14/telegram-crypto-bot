@@ -15,9 +15,9 @@ pattern_stats = {
 
 # Pattern match memory (to avoid duplicate triggers)
 recent_pattern_matches = {}
-MATCH_COOLDOWN = 6  # hours before allowing same pattern to trigger again
+MATCH_COOLDOWN = 2  # hours before allowing same pattern to trigger again
 
-PATTERN_DB_PATH = "pattern_match_memory.json"
+PATTERN_DB_PATH = "pattern_memory.json"
 
 def load_pattern_memory():
     if os.path.exists(PATTERN_DB_PATH):
@@ -87,7 +87,7 @@ async def pattern_match_scan(symbols):
             # Check for context similarity
             match_score = calculate_context_similarity(current_context, pattern_data["context"])
             
-            if match_score > 0.7:  # 70% similarity threshold
+            if match_score > 0.5:  # 70% similarity threshold
                 pattern_stats["matches"] += 1
                 
                 # Record match to prevent repeat triggers
@@ -101,7 +101,7 @@ async def pattern_match_scan(symbols):
                 await send_pattern_match_alert(symbol, current_pattern, pattern_data, match_score)
                 
                 # Potentially trigger trade
-                if match_score > 0.85:  # Higher threshold for trade execution
+                if match_score > 0.7:  # Higher threshold for trade execution
                     trade_result = await execute_pattern_trade(symbol, pattern_data, current_pattern)
                     if trade_result:
                         pattern_stats["trades"] += 1
