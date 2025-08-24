@@ -1,515 +1,587 @@
-# pattern_backfill.py - Historical Pattern Discovery and Testing System
+# pattern_backfill.py - Historical Pattern Discovery and Testing (leak-proof)
+# Rewritten to avoid data leakage, paginate klines, split train/test by time,
+# and include a simple P&L simulator.
 
 import asyncio
 import json
 import os
+import math
+import time
 from datetime import datetime, timedelta
 from collections import defaultdict
-import time
+from typing import List, Dict, Any, Optional
+
 from logger import log
 from bybit_api import signed_request
 from pattern_detector import detect_pattern
 from score import score_symbol
 
+ISO = "%Y-%m-%dT%H:%M:%S"
+
+# --- Backtest parameters (tweak here) ---
+DISCOVERY_WINDOW_MIN = 20          # number of 1m bars in the *future* outcome window
+PATTERN_MIN_BARS_5M = 10           # use last 10 x 5m bars to detect candle pattern
+SIM_TP_PCT = 0.015                 # 1.5% take-profit
+SIM_SL_PCT = 0.010                 # 1.0% stop-loss
+SIM_MAX_MINUTES = 60               # fail-safe timeout (minutes after entry)
+FEE_PCT = 0.0006                   # 0.06% taker fee per side
+SLIP_PCT = 0.0002                  # 0.02% slippage per side
+
+WRITE_LIVE = os.getenv("BACKTEST_WRITE_MEMORY", "0") == "1"
+LIVE_DB_FILE = "pattern_memory.json"
+BACKFILL_DB_FILE = "pattern_discovered_backfill.json"
+REPORT_FILE = "pattern_backfill_report.json"
+
+def iso_to_ms(s: str) -> int:
+    # tolerate "2025-08-24T21:10:00" and "2025-08-24 21:10:00"
+    s = s.replace("Z", "").replace(" ", "T")
+    dt = datetime.fromisoformat(s)
+    return int(dt.timestamp() * 1000)
+
+def ms_to_iso(ms: int) -> str:
+    return datetime.utcfromtimestamp(ms / 1000).isoformat()
+
 class PatternBackfillSystem:
     def __init__(self):
-        self.discovered_patterns = []
-        self.backtest_results = []
-        self.symbol_data_cache = {}
-        
-    async def run_full_backfill(self, symbols, days=30):
-        """
-        Complete backfill process:
-        1. Download historical data
-        2. Discover patterns 
-        3. Test pattern matching
-        4. Generate performance report
-        """
+        self.discovered_patterns: List[Dict[str, Any]] = []
+        self.backtest_results: List[Dict[str, Any]] = []
+        self.symbol_data_cache: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+    # ---------------------------
+    # End-to-end backfill runner
+    # ---------------------------
+    async def run_full_backfill(self, symbols: List[str], days: int = 30):
         log(f"🚀 Starting {days}-day pattern backfill for {len(symbols)} symbols")
-        
-        # Step 1: Download historical data
+
         await self.download_historical_data(symbols, days)
-        
-        # Step 2: Discover patterns from historical moves
-        await self.discover_historical_patterns(symbols, days)
-        
-        # Step 3: Test pattern matching on different time period
-        await self.backtest_pattern_matching(symbols, days)
-        
-        # Step 4: Generate comprehensive report
+        await self.discover_historical_patterns(symbols)
+        await self.backtest_pattern_matching()
         self.generate_backfill_report()
-        
+
         log("✅ Backfill process completed!")
 
-    async def download_historical_data(self, symbols, days):
-        """Download historical candle data for all symbols and timeframes"""
-        log(f"📥 Downloading {days} days of historical data...")
-        
-        end_time = int(time.time() * 1000)  # Current time in ms
-        start_time = end_time - (days * 24 * 60 * 60 * 1000)  # X days ago
-        
-        timeframes = ['1', '3', '5', '15', '30', '60', '240']  # All needed timeframes
-        
+    # ---------------------------
+    # Historical data download
+    # ---------------------------
+    async def download_historical_data(self, symbols: List[str], days: int):
+        log(f"📥 Downloading {days} days of historical data.")
+        end_time = int(time.time() * 1000)
+        start_time = end_time - (days * 24 * 60 * 60 * 1000)
+
+        timeframes = ['1', '3', '5', '15', '30', '60', '240']
+
         for symbol in symbols:
-            log(f"📊 Downloading {symbol}...")
+            log(f"📊 Downloading {symbol}.")
             self.symbol_data_cache[symbol] = {}
-            
+
             for tf in timeframes:
                 try:
-                    # Convert timeframe to Bybit format
-                    interval_map = {
-                        '1': '1', '3': '3', '5': '5', '15': '15',
-                        '30': '30', '60': '60', '240': '240'
-                    }
-                    
-                    interval = interval_map[tf]
+                    interval = tf  # Bybit uses same strings: '1','3','5','15','30','60','240'
                     candles = await self.fetch_historical_candles(
                         symbol, interval, start_time, end_time
                     )
-                    
                     if candles:
                         self.symbol_data_cache[symbol][tf] = candles
                         log(f"   ✅ {symbol} {tf}m: {len(candles)} candles")
                     else:
                         log(f"   ❌ {symbol} {tf}m: No data")
-                        
-                    await asyncio.sleep(0.1)  # Rate limiting
-                    
+                    await asyncio.sleep(0.05)
                 except Exception as e:
                     log(f"❌ Error downloading {symbol} {tf}m: {e}", level="ERROR")
                     continue
-            
-            await asyncio.sleep(0.5)  # Prevent API overload
-        
+
+            await asyncio.sleep(0.2)
+
         log("✅ Historical data download completed")
 
-    async def fetch_historical_candles(self, symbol, interval, start_time, end_time):
-        """Fetch historical candles from Bybit API"""
+    async def fetch_historical_candles(self, symbol: str, interval: str, start_time: int, end_time: int):
+        """
+        Paginated download from /v5/market/kline (Bybit).
+        Prior code fetched once and silently truncated to 1000 rows. Fixed with cursor pagination.
+        """
         try:
-            params = {
-                "category": "linear",
-                "symbol": symbol,
-                "interval": interval,
-                "start": start_time,
-                "end": end_time,
-                "limit": 1000  # Max per request
-            }
-            
-            result = await signed_request("GET", "/v5/market/kline", params)
-            
-            if result.get("retCode") == 0:
-                klines = result.get("result", {}).get("list", [])
-                
-                # Convert to your standard format
-                candles = []
-                for kline in klines:
+            candles: List[Dict[str, Any]] = []
+            cursor: Optional[str] = None
+
+            while True:
+                params = {
+                    "category": "linear",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "start": start_time,
+                    "end": end_time,
+                    "limit": 1000
+                }
+                if cursor:
+                    params["cursor"] = cursor
+
+                result = await signed_request("GET", "/v5/market/kline", params)
+                if result.get("retCode") != 0:
+                    log(f"API Error: {result}", level="ERROR")
+                    break
+
+                klines = result.get("result", {}).get("list", []) or []
+                for k in klines:
                     candles.append({
-                        "timestamp": int(kline[0]),
-                        "open": float(kline[1]),
-                        "high": float(kline[2]),
-                        "low": float(kline[3]),
-                        "close": float(kline[4]),
-                        "volume": float(kline[5])
+                        "timestamp": int(k[0]),
+                        "open": float(k[1]),
+                        "high": float(k[2]),
+                        "low": float(k[3]),
+                        "close": float(k[4]),
+                        "volume": float(k[5]),
                     })
-                
-                # Sort chronologically (oldest first)
-                candles.sort(key=lambda x: x["timestamp"])
-                return candles
-            else:
-                log(f"API Error: {result}", level="ERROR")
-                return []
-                
+
+                cursor = result.get("result", {}).get("nextPageCursor")
+                if not cursor or not klines:
+                    break
+
+                await asyncio.sleep(0.02)
+
+            candles.sort(key=lambda x: x["timestamp"])
+            return candles
+
         except Exception as e:
             log(f"Error fetching candles: {e}", level="ERROR")
             return []
 
-    async def discover_historical_patterns(self, symbols, days):
-        """Replay pattern discovery on historical data"""
-        log("🔍 Discovering patterns from historical data...")
-        
-        MIN_MOVE_PCT = 2.0  # Same as your pattern_discovery.py
-        
+    # ---------------------------
+    # Pattern discovery (leak-proof)
+    # ---------------------------
+    async def discover_historical_patterns(self, symbols: List[str]):
+        """
+        Detect patterns using ONLY data available up to time t,
+        then measure the outcome in the NEXT DISCOVERY_WINDOW_MIN 1m bars.
+        The previous code labeled outcomes using the *same* window as the features,
+        which inflates win-rates. Fixed here.
+        """
+        log("🔍 Discovering patterns from historical data (leak-proof).")
+
         for symbol in symbols:
             if symbol not in self.symbol_data_cache:
                 continue
-                
+
             try:
-                # Use 1-minute candles for move detection
                 candles_1m = self.symbol_data_cache[symbol].get('1', [])
-                if len(candles_1m) < 100:
+                if len(candles_1m) < 120:
                     continue
-                
-                # Sliding window to detect significant moves
-                window_size = 20
-                for i in range(window_size, len(candles_1m) - 10):  # Leave buffer for future moves
-                    
-                    window = candles_1m[i-window_size:i]
-                    open_price = window[0]['open']
-                    high = max(c['high'] for c in window)
-                    low = min(c['low'] for c in window)
-                    
-                    move_up = ((high - open_price) / open_price) * 100
-                    move_down = ((open_price - low) / open_price) * 100
-                    
-                    # Check if significant move occurred
-                    if max(move_up, move_down) >= MIN_MOVE_PCT:
-                        direction = "pump" if move_up >= move_down else "dump"
-                        move_pct = move_up if direction == "pump" else move_down
-                        
-                        # Build candles_by_tf at this point in time
-                        candles_by_tf = self.build_historical_candles_by_tf(
-                            symbol, candles_1m[i]['timestamp']
+
+                i = PATTERN_MIN_BARS_5M  # start after we can build a 5m context
+                # Ensure we have room for the future window
+                last_valid = len(candles_1m) - (DISCOVERY_WINDOW_MIN + 1)
+
+                while i < last_valid:
+                    ts = candles_1m[i]["timestamp"]
+
+                    # Build candles_by_tf strictly up to time ts
+                    candles_by_tf = self.build_historical_candles_by_tf(symbol, ts)
+                    if not candles_by_tf:
+                        i += 1
+                        continue
+
+                    # Detect pattern on the last PATTERN_MIN_BARS_5M x 5m candles
+                    pattern_candles = candles_by_tf.get('5', [])[-PATTERN_MIN_BARS_5M:]
+                    if len(pattern_candles) < max(3, PATTERN_MIN_BARS_5M):
+                        i += 1
+                        continue
+
+                    detected_pattern = detect_pattern(pattern_candles)
+                    if not detected_pattern:
+                        i += 1
+                        continue
+
+                    # Entry is next bar OPEN after detection time
+                    entry_idx = self._find_first_bar_index(candles_1m, ts)
+                    if entry_idx is None or entry_idx + DISCOVERY_WINDOW_MIN >= len(candles_1m):
+                        i += 1
+                        continue
+
+                    entry_open = candles_1m[entry_idx]["open"]
+
+                    # Outcome measured ONLY in the next window
+                    nxt = candles_1m[entry_idx : entry_idx + DISCOVERY_WINDOW_MIN]
+                    max_high = max(c["high"] for c in nxt)
+                    min_low  = min(c["low"]  for c in nxt)
+
+                    move_up = (max_high - entry_open) / entry_open * 100.0
+                    move_down = (entry_open - min_low) / entry_open * 100.0
+                    direction = "pump" if move_up >= move_down else "dump"
+                    move_pct = round(move_up if direction == "pump" else move_down, 2)
+
+                    # Score/context at that time (best-effort; wrapped in try)
+                    try:
+                        score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
+                            symbol, candles_by_tf
                         )
-                        
-                        if not candles_by_tf:
-                            continue
-                        
-                        # Detect pattern that was present before the move
-                        pattern_candles = candles_by_tf.get('5', [])[-10:]  # Last 10 candles
-                        if len(pattern_candles) >= 3:
-                            detected_pattern = detect_pattern(pattern_candles)
-                            
-                            if detected_pattern:
-                                # Calculate score and context at that time
-                                try:
-                                    score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
-                                        symbol, candles_by_tf
-                                    )
-                                    
-                                    # Record this pattern discovery
-                                    pattern_record = {
-                                        "timestamp": datetime.fromtimestamp(candles_1m[i]['timestamp'] / 1000).isoformat(),
-                                        "symbol": symbol,
-                                        "direction": direction,
-                                        "move_pct": round(move_pct, 2),
-                                        "trade_type": trade_type,
-                                        "pattern": detected_pattern,
-                                        "score": score,
-                                        "tf_scores": tf_scores,
-                                        "indicator_scores": indicator_scores,
-                                        "used_indicators": used_indicators,
-                                        "context": {
-                                            "rsi": tf_scores.get('rsi'),
-                                            "macd": tf_scores.get('macd'),
-                                            "supertrend": tf_scores.get('supertrend')
-                                        }
-                                    }
-                                    
-                                    self.discovered_patterns.append(pattern_record)
-                                    
-                                except Exception as e:
-                                    # Skip if scoring fails
-                                    continue
-                    
-                    # Skip ahead to avoid overlapping patterns
-                    if max(move_up, move_down) >= MIN_MOVE_PCT:
-                        i += 10  # Skip 10 candles ahead
-            
+                    except Exception:
+                        score, tf_scores, trade_type, indicator_scores, used_indicators = 0, {}, "Unknown", {}, []
+
+                    record = {
+                        "timestamp": ms_to_iso(ts),
+                        "symbol": symbol,
+                        "direction": direction,
+                        "move_pct": move_pct,
+                        "trade_type": trade_type,
+                        "pattern": detected_pattern,
+                        "score": score,
+                        "tf_scores": tf_scores,
+                        "indicator_scores": indicator_scores,
+                        "used_indicators": used_indicators,
+                        # lightweight context stub (you can expand)
+                        "context": {
+                            "window_min": DISCOVERY_WINDOW_MIN,
+                            "entry_open": round(entry_open, 8),
+                        }
+                    }
+                    self.discovered_patterns.append(record)
+
+                    # Real skip to avoid overlapping detections
+                    i += 10
+                # end while
+
             except Exception as e:
                 log(f"❌ Pattern discovery error for {symbol}: {e}", level="ERROR")
                 continue
-        
+
         log(f"✅ Discovered {len(self.discovered_patterns)} historical patterns")
 
-    def build_historical_candles_by_tf(self, symbol, timestamp):
-        """Build candles_by_tf dictionary at a specific historical timestamp"""
-        candles_by_tf = {}
-        
-        for tf in ['1', '3', '5', '15', '30', '60', '240']:
-            if tf in self.symbol_data_cache[symbol]:
-                # Get candles up to this timestamp
-                all_candles = self.symbol_data_cache[symbol][tf]
-                historical_candles = [
-                    c for c in all_candles 
-                    if c['timestamp'] <= timestamp
-                ]
-                
-                if len(historical_candles) >= 30:  # Ensure enough data
-                    candles_by_tf[tf] = historical_candles[-100:]  # Last 100 candles
-        
-        return candles_by_tf if candles_by_tf else None
+    def _find_first_bar_index(self, candles_1m: List[Dict[str, Any]], ts_ms: int) -> Optional[int]:
+        """First bar with timestamp >= ts_ms (entry bar)."""
+        lo, hi = 0, len(candles_1m) - 1
+        ans = None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if candles_1m[mid]["timestamp"] >= ts_ms:
+                ans = mid
+                hi = mid - 1
+            else:
+                lo = mid + 1
+        return ans
 
-    async def backtest_pattern_matching(self, symbols, days):
-        """Test pattern matching on a different time period"""
-        log("🧪 Backtesting pattern matching...")
-        
+    def build_historical_candles_by_tf(self, symbol: str, timestamp: int):
+        """Build candles_by_tf dictionary strictly up to a timestamp (no peeking)."""
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for tf in ['1', '3', '5', '15', '30', '60', '240']:
+            series = self.symbol_data_cache.get(symbol, {}).get(tf)
+            if not series:
+                continue
+            hist = [c for c in series if c["timestamp"] <= timestamp]
+            if len(hist) >= 30:
+                out[tf] = hist[-100:]
+        return out or None
+
+    # ---------------------------
+    # Backtest (time-split) + P&L
+    # ---------------------------
+    async def backtest_pattern_matching(self):
+        """
+        Train on older half (by time), test on newer half (by time).
+        Predict majority direction per pattern; simulate trade with TP/SL.
+        """
+        log("🧪 Backtesting pattern matching (time split + P&L).")
+
         if not self.discovered_patterns:
             log("❌ No patterns to test - run discovery first")
             return
-        
-        # Use patterns from first half to test on second half
-        mid_point = len(self.discovered_patterns) // 2
-        training_patterns = self.discovered_patterns[:mid_point]
-        testing_period = self.discovered_patterns[mid_point:]
-        
-        log(f"📊 Training on {len(training_patterns)} patterns")
-        log(f"🧪 Testing on {len(testing_period)} patterns")
-        
-        # Group training patterns by type
-        pattern_performance = defaultdict(list)
-        for pattern_record in training_patterns:
-            pattern_type = pattern_record.get('pattern')
-            if pattern_type:
-                pattern_performance[pattern_type].append(pattern_record)
-        
-        # Test each pattern in testing period
-        correct_predictions = 0
-        total_predictions = 0
-        
-        for test_record in testing_period:
-            test_pattern = test_record.get('pattern')
-            actual_direction = test_record.get('direction')
-            actual_move = test_record.get('move_pct')
-            
-            if test_pattern not in pattern_performance:
-                continue  # No historical data for this pattern
-            
-            # Predict based on historical performance
-            historical_data = pattern_performance[test_pattern]
-            predicted_direction, predicted_move, confidence = self.make_pattern_prediction(
-                historical_data, test_record
-            )
-            
-            if predicted_direction and confidence > 0.5:
-                total_predictions += 1
-                
-                # Check if prediction was correct
-                direction_correct = predicted_direction == actual_direction
-                move_close = abs(predicted_move - actual_move) < 2.0  # Within 2%
-                
-                if direction_correct:
-                    correct_predictions += 1
-                    
-                # Record backtest result
+
+        # Split by time (not by list index)
+        times = sorted(iso_to_ms(r["timestamp"]) for r in self.discovered_patterns)
+        mid_time = times[len(times)//2]
+
+        training = [r for r in self.discovered_patterns if iso_to_ms(r["timestamp"]) <= mid_time]
+        testing  = [r for r in self.discovered_patterns if iso_to_ms(r["timestamp"]) >  mid_time]
+
+        log(f"📊 Training on {len(training)} patterns; 🧪 Testing on {len(testing)} patterns")
+
+        # Group training by pattern type
+        train_by_pattern: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for r in training:
+            if r.get("pattern"):
+                train_by_pattern[r["pattern"]].append(r)
+
+        correct = 0
+        total = 0
+
+        for test in testing:
+            pat = test["pattern"]
+            symbol = test["symbol"]
+            ts_ms = iso_to_ms(test["timestamp"])
+
+            hist = train_by_pattern.get(pat)
+            if not hist or len(hist) < 5:
+                continue
+
+            pred_dir, pred_move, conf = self.make_pattern_prediction(hist)
+
+            if pred_dir and conf >= 0.55:
+                total += 1
+                actual_dir = test["direction"]
+                if pred_dir == actual_dir:
+                    correct += 1
+
+                # Simulate a trade in the predicted direction from next 1m open
+                pnl_pct, exit_reason = self.simulate_trade(symbol, ts_ms, pred_dir)
                 self.backtest_results.append({
-                    "symbol": test_record.get('symbol'),
-                    "pattern": test_pattern,
-                    "predicted_direction": predicted_direction,
-                    "actual_direction": actual_direction,
-                    "predicted_move": predicted_move,
-                    "actual_move": actual_move,
-                    "confidence": confidence,
-                    "correct": direction_correct,
-                    "timestamp": test_record.get('timestamp')
+                    "symbol": symbol,
+                    "pattern": pat,
+                    "timestamp": test["timestamp"],
+                    "predicted_direction": pred_dir,
+                    "actual_direction": actual_dir,
+                    "confidence": conf,
+                    "predicted_move": pred_move,
+                    "actual_move": test["move_pct"],
+                    "pnl_pct": pnl_pct,
+                    "exit": exit_reason,
+                    "correct": pred_dir == actual_dir
                 })
-        
-        accuracy = correct_predictions / total_predictions if total_predictions > 0 else 0
-        log(f"🎯 Backtest Results: {correct_predictions}/{total_predictions} ({accuracy:.1%} accuracy)")
 
-    def make_pattern_prediction(self, historical_data, current_context):
-        """Make prediction based on historical pattern performance"""
-        if not historical_data:
-            return None, 0, 0
-        
-        # Calculate historical performance
-        directions = [r.get('direction') for r in historical_data]
-        moves = [r.get('move_pct', 0) for r in historical_data]
-        
-        # Most common direction
-        pump_count = directions.count('pump')
-        dump_count = directions.count('dump')
-        
-        if pump_count > dump_count:
-            predicted_direction = 'pump'
-            confidence = pump_count / len(directions)
-            relevant_moves = [m for r, m in zip(historical_data, moves) if r.get('direction') == 'pump']
+        acc = (correct / total) if total > 0 else 0.0
+        log(f"🎯 Backtest Results: {correct}/{total} ({acc:.1%} accuracy)")
+
+    def make_pattern_prediction(self, historical_data: List[Dict[str, Any]]):
+        """Majority direction + average move from training set (simple baseline)."""
+        dirs = [r.get("direction") for r in historical_data]
+        pumps = dirs.count("pump")
+        dumps = dirs.count("dump")
+        if pumps >= dumps:
+            pred = "pump"
+            conf = pumps / max(1, len(dirs))
+            moves = [r.get("move_pct", 0) for r in historical_data if r.get("direction") == "pump"]
         else:
-            predicted_direction = 'dump'
-            confidence = dump_count / len(directions)
-            relevant_moves = [m for r, m in zip(historical_data, moves) if r.get('direction') == 'dump']
-        
-        predicted_move = sum(relevant_moves) / len(relevant_moves) if relevant_moves else 0
-        
-        return predicted_direction, predicted_move, confidence
+            pred = "dump"
+            conf = dumps / max(1, len(dirs))
+            moves = [r.get("move_pct", 0) for r in historical_data if r.get("direction") == "dump"]
+        pred_move = (sum(moves) / len(moves)) if moves else 0.0
+        return pred, pred_move, conf
 
+    def simulate_trade(self, symbol: str, ts_ms: int, direction: str):
+        """
+        One-shot TP/SL simulator:
+        - Enter at next 1m bar open after ts_ms
+        - Long: stop first policy if both TP/SL hit within a bar (conservative)
+        - Includes fees + slippage both sides
+        """
+        series = self.symbol_data_cache.get(symbol, {}).get('1', [])
+        if not series:
+            return 0.0, "no_data"
+
+        entry_idx = self._find_first_bar_index(series, ts_ms)
+        if entry_idx is None or entry_idx + 1 >= len(series):
+            return 0.0, "no_entry"
+
+        entry_open = series[entry_idx]["open"]
+        # Apply slippage on entry
+        if direction == "pump":
+            entry_px = entry_open * (1 + SLIP_PCT)
+            tp = entry_px * (1 + SIM_TP_PCT)
+            sl = entry_px * (1 - SIM_SL_PCT)
+        else:
+            entry_px = entry_open * (1 - SLIP_PCT)
+            tp = entry_px * (1 - SIM_TP_PCT)
+            sl = entry_px * (1 + SIM_SL_PCT)
+
+        horizon_end = min(len(series), entry_idx + 1 + SIM_MAX_MINUTES)
+        exit_px = series[horizon_end - 1]["close"]  # default timed exit
+        exit_reason = "timeout"
+
+        for i in range(entry_idx + 1, horizon_end):
+            hi = series[i]["high"]
+            lo = series[i]["low"]
+
+            if direction == "pump":
+                # stop-first policy when both are inside same bar (worst case)
+                if lo <= sl:
+                    exit_px = sl * (1 - SLIP_PCT)  # slippage on exit
+                    exit_reason = "stop"
+                    break
+                if hi >= tp:
+                    exit_px = tp * (1 + SLIP_PCT)
+                    exit_reason = "tp"
+                    break
+            else:
+                if hi >= sl:
+                    exit_px = sl * (1 + SLIP_PCT)
+                    exit_reason = "stop"
+                    break
+                if lo <= tp:
+                    exit_px = tp * (1 - SLIP_PCT)
+                    exit_reason = "tp"
+                    break
+
+        # PnL with fees both sides
+        gross = (exit_px - entry_px) / entry_px if direction == "pump" else (entry_px - exit_px) / entry_px
+        net = gross - (2 * FEE_PCT) - (2 * SLIP_PCT)
+        return round(net * 100.0, 3), exit_reason
+
+    # ---------------------------
+    # Reporting
+    # ---------------------------
     def generate_backfill_report(self):
-        """Generate comprehensive backfill performance report"""
-        log("📊 Generating backfill report...")
-        
-        # Save discovered patterns to file
+        log("📊 Generating backfill report.")
+
+        # Save discovered patterns (no live write unless opted in)
         self.save_discovered_patterns()
-        
-        # Generate statistics
+
         pattern_stats = self.analyze_pattern_performance()
         backtest_stats = self.analyze_backtest_results()
-        
-        # Print comprehensive report
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("🎯 PATTERN BACKFILL REPORT")
-        print("="*60)
-        
+        print("=" * 60)
+
         print(f"\n📚 PATTERN DISCOVERY:")
         print(f"   Total patterns discovered: {len(self.discovered_patterns)}")
         print(f"   Unique pattern types: {len(pattern_stats['pattern_types'])}")
         print(f"   Average move size: {pattern_stats['avg_move']:.2f}%")
-        print(f"   Win rate: {pattern_stats['win_rate']:.1%}")
-        
-        print(f"\n🔥 TOP PERFORMING PATTERNS:")
+        print(f"   (directional) Pump ratio: {pattern_stats['pump_ratio']:.1%}")
+
+        print(f"\n🔥 TOP PATTERNS BY SAMPLE SIZE:")
         for pattern, stats in pattern_stats['top_patterns'][:5]:
-            print(f"   {pattern}: {stats['win_rate']:.1%} win rate, {stats['avg_move']:+.1f}% avg move, {stats['count']} samples")
-        
+            print(f"   {pattern}: n={stats['count']}, avg move {stats['avg_move']:+.2f}%")
+
         if self.backtest_results:
             print(f"\n🧪 BACKTEST RESULTS:")
             print(f"   Total predictions: {len(self.backtest_results)}")
             print(f"   Accuracy: {backtest_stats['accuracy']:.1%}")
-            print(f"   Average confidence: {backtest_stats['avg_confidence']:.1%}")
-            
-            print(f"\n📈 BEST PATTERN PREDICTIONS:")
-            for result in backtest_stats['best_predictions'][:3]:
-                print(f"   {result['pattern']} on {result['symbol']}: {result['confidence']:.1%} confidence, {'✅' if result['correct'] else '❌'}")
-        
-        print("\n" + "="*60)
-        
-        # Save full report to file
+            print(f"   Profit factor: {backtest_stats['profit_factor']:.2f}")
+            print(f"   Avg trade: {backtest_stats['avg_trade_pct']:+.3f}%")
+            print(f"   Win rate: {backtest_stats['win_rate']:.1%}")
+
+            print(f"\n📈 BEST PREDICTIONS (by confidence):")
+            for r in backtest_stats['best_predictions'][:3]:
+                print(f"   {r['pattern']} on {r['symbol']}: {r['confidence']:.1%} confidence, "
+                      f"{'✅' if r['correct'] else '❌'}, PnL {r['pnl_pct']:+.2f}% ({r['exit']})")
+
+        print("\n" + "=" * 60)
         self.save_backfill_report(pattern_stats, backtest_stats)
 
     def save_discovered_patterns(self):
-        """Save discovered patterns to the pattern database"""
-        pattern_file = "pattern_memory.json"
-        
-        # Load existing patterns
-        existing_patterns = []
-        if os.path.exists(pattern_file):
+        """Write to a separate file by default to avoid contaminating live DB."""
+        out_file = LIVE_DB_FILE if WRITE_LIVE else BACKFILL_DB_FILE
+
+        existing = []
+        if os.path.exists(out_file):
             try:
-                with open(pattern_file, 'r') as f:
-                    existing_patterns = json.load(f)
-            except:
-                existing_patterns = []
-        
-        # Add new patterns
-        all_patterns = existing_patterns + self.discovered_patterns
-        
-        # Save combined patterns
-        with open(pattern_file, 'w') as f:
-            json.dump(all_patterns, f, indent=2)
-        
-        log(f"✅ Saved {len(self.discovered_patterns)} new patterns to {pattern_file}")
+                with open(out_file, "r") as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = []
+
+        all_rows = existing + self.discovered_patterns
+        with open(out_file, "w") as f:
+            json.dump(all_rows, f, indent=2)
+
+        log(f"✅ Saved {len(self.discovered_patterns)} new patterns to '{out_file}'")
 
     def analyze_pattern_performance(self):
-        """Analyze performance of discovered patterns"""
         if not self.discovered_patterns:
-            return {}
-        
-        pattern_groups = defaultdict(list)
-        for record in self.discovered_patterns:
-            pattern_type = record.get('pattern')
-            if pattern_type:
-                pattern_groups[pattern_type].append(record)
-        
-        # Calculate stats for each pattern
-        pattern_stats = {}
-        for pattern, records in pattern_groups.items():
-            moves = [r.get('move_pct', 0) for r in records]
-            profitable = sum(1 for m in moves if m > 1.0)
-            
-            pattern_stats[pattern] = {
-                'count': len(records),
-                'win_rate': profitable / len(records),
-                'avg_move': sum(moves) / len(moves),
-                'max_move': max(moves),
-                'min_move': min(moves)
+            return {"pattern_types": {}, "avg_move": 0.0, "pump_ratio": 0.0, "top_patterns": []}
+
+        groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for r in self.discovered_patterns:
+            if r.get("pattern"):
+                groups[r["pattern"]].append(r)
+
+        stats = {}
+        all_moves = []
+        all_dirs = []
+        for pat, rows in groups.items():
+            moves = [r.get("move_pct", 0.0) for r in rows]
+            stats[pat] = {
+                "count": len(rows),
+                "avg_move": sum(moves) / max(1, len(moves)),
+                "max_move": max(moves) if moves else 0.0,
+                "min_move": min(moves) if moves else 0.0,
             }
-        
-        # Overall stats
-        all_moves = [r.get('move_pct', 0) for r in self.discovered_patterns]
-        overall_profitable = sum(1 for m in all_moves if m > 1.0)
-        
-        # Top performing patterns
-        top_patterns = sorted(
-            pattern_stats.items(), 
-            key=lambda x: x[1]['win_rate'] * x[1]['count'], 
-            reverse=True
-        )
-        
+            all_moves.extend(moves)
+            all_dirs.extend([r.get("direction") for r in rows])
+
+        pump_ratio = all_dirs.count("pump") / max(1, len(all_dirs))
+        top = sorted(stats.items(), key=lambda kv: kv[1]["count"], reverse=True)
+
         return {
-            'pattern_types': pattern_stats,
-            'avg_move': sum(all_moves) / len(all_moves),
-            'win_rate': overall_profitable / len(all_moves),
-            'top_patterns': top_patterns
+            "pattern_types": stats,
+            "avg_move": (sum(all_moves) / max(1, len(all_moves))) if all_moves else 0.0,
+            "pump_ratio": pump_ratio,
+            "top_patterns": top,
         }
 
     def analyze_backtest_results(self):
-        """Analyze backtest prediction results"""
         if not self.backtest_results:
-            return {}
-        
-        correct = sum(1 for r in self.backtest_results if r['correct'])
-        total = len(self.backtest_results)
-        
-        confidences = [r['confidence'] for r in self.backtest_results]
-        avg_confidence = sum(confidences) / len(confidences)
-        
-        # Best predictions
-        best_predictions = sorted(
-            self.backtest_results,
-            key=lambda x: x['confidence'],
-            reverse=True
-        )
-        
+            return {
+                "accuracy": 0.0,
+                "profit_factor": 0.0,
+                "avg_trade_pct": 0.0,
+                "win_rate": 0.0,
+                "best_predictions": [],
+            }
+
+        acc = sum(1 for r in self.backtest_results if r["correct"]) / len(self.backtest_results)
+        wins = [r["pnl_pct"] for r in self.backtest_results if r["pnl_pct"] > 0]
+        losses = [abs(r["pnl_pct"]) for r in self.backtest_results if r["pnl_pct"] <= 0]
+        pf = (sum(wins) / max(1e-9, sum(losses))) if losses else float("inf")
+        avg_trade = sum(r["pnl_pct"] for r in self.backtest_results) / len(self.backtest_results)
+        wr = len(wins) / len(self.backtest_results) if self.backtest_results else 0.0
+
+        best = sorted(self.backtest_results, key=lambda r: r["confidence"], reverse=True)
+
         return {
-            'accuracy': correct / total if total > 0 else 0,
-            'avg_confidence': avg_confidence,
-            'best_predictions': best_predictions
+            "accuracy": acc,
+            "profit_factor": pf if pf != float("inf") else 999.0,
+            "avg_trade_pct": avg_trade,
+            "win_rate": wr,
+            "best_predictions": best,
         }
 
-    def save_backfill_report(self, pattern_stats, backtest_stats):
-        """Save detailed backfill report to file"""
+    def save_backfill_report(self, pattern_stats: Dict[str, Any], backtest_stats: Dict[str, Any]):
         report = {
-            'timestamp': datetime.now().isoformat(),
-            'discovered_patterns': len(self.discovered_patterns),
-            'pattern_stats': pattern_stats,
-            'backtest_results': backtest_stats,
-            'detailed_results': self.backtest_results
+            "timestamp": datetime.now().isoformat(),
+            "discovered_patterns": len(self.discovered_patterns),
+            "pattern_stats": pattern_stats,
+            "backtest_stats": backtest_stats,
+            "results": self.backtest_results,
+            "write_mode": "live" if WRITE_LIVE else "read_only"
         }
-        
-        with open('pattern_backfill_report.json', 'w') as f:
+        with open(REPORT_FILE, "w") as f:
             json.dump(report, f, indent=2)
-        
-        log("✅ Detailed report saved to pattern_backfill_report.json")
+        log(f"✅ Detailed report saved to {REPORT_FILE}")
 
-# USAGE FUNCTIONS
 
+# --------- USAGE HELPERS (optional) ---------
 async def run_quick_backfill(symbols=None, days=7):
-    """Quick backfill for testing - 1 week of data"""
     if symbols is None:
         symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT']
-    
     backfill = PatternBackfillSystem()
     await backfill.run_full_backfill(symbols, days)
 
+
 async def run_full_backfill(symbols=None, days=30):
-    """Full backfill - 30 days of data"""
     if symbols is None:
-        # Load your symbols from scanner or use top coins
         try:
             from scanner import fetch_symbols
             symbols = await fetch_symbols()
-            symbols = symbols[:50]  # Limit to top 50 for speed
-        except:
+            symbols = symbols[:50]
+        except Exception:
             symbols = [
                 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT',
                 'XRPUSDT', 'DOTUSDT', 'UNIUSDT', 'LINKUSDT', 'LTCUSDT'
             ]
-    
     backfill = PatternBackfillSystem()
     await backfill.run_full_backfill(symbols, days)
 
+
 async def run_extended_backfill(symbols=None, days=60):
-    """Extended backfill - 60 days for maximum pattern discovery"""
     if symbols is None:
         try:
             from scanner import fetch_symbols
             symbols = await fetch_symbols()
-        except:
-            symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']  # Minimal set for extended run
-    
+        except Exception:
+            symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
     backfill = PatternBackfillSystem()
     await backfill.run_full_backfill(symbols, days)
 
-# STANDALONE EXECUTION
+
 if __name__ == "__main__":
     import sys
-    
     if len(sys.argv) > 1:
         if sys.argv[1] == "quick":
             asyncio.run(run_quick_backfill())
@@ -520,5 +592,5 @@ if __name__ == "__main__":
     else:
         print("Usage:")
         print("  python pattern_backfill.py quick    # 7 days, 5 symbols")
-        print("  python pattern_backfill.py full     # 30 days, 50 symbols")  
+        print("  python pattern_backfill.py full     # 30 days, 50 symbols")
         print("  python pattern_backfill.py extended # 60 days, all symbols")
