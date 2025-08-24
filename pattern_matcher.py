@@ -38,7 +38,7 @@ def load_pattern_memory():
         log("⚠️ Pattern database not found - will be created as patterns are discovered")
     return []
 
-def save_pattern_memory(data):
+def save_cooldown_memory(data):
     """Save pattern match memory (cooldowns)"""
     try:
         # Note: This saves cooldown data, not the main pattern database
@@ -137,9 +137,11 @@ async def pattern_match_scan(symbols):
                 
                 if similarity_score > 0.4:  # 40% similarity threshold (lowered for crypto volatility)
                     matches_found += 1
+                    pattern_stats["matches"] += 1
                     
                     # Record this match to prevent repeats
                     record_pattern_match(symbol, current_pattern)
+                    save_cooldown_memory(recent_pattern_matches)
                     
                     # Send alert with prediction
                     await send_enhanced_pattern_alert(
@@ -324,7 +326,7 @@ async def send_enhanced_pattern_alert(symbol, pattern, similarity, predicted_mov
     await send_telegram_message(message)
     log(f"🧬 Pattern prediction sent: {symbol} - {pattern} (similarity: {similarity:.2f})")
 
-async def execute_pattern_based_trade(symbol, predicted_direction, predicted_move, pattern):
+async def execute_pattern_based_trade(symbol, predicted_direction, predicted_move, pattern, similarity_score=None):
     """Execute trade based on pattern prediction with your existing trade system"""
     try:
         # Convert to your trade direction format
@@ -377,8 +379,11 @@ async def execute_pattern_based_trade(symbol, predicted_direction, predicted_mov
                 "pattern_based": True,
                 "pattern_type": pattern,
                 "predicted_move": predicted_move,
+                "similarity_score": similarity_score,
                 "similarity_score": None  # Will be set by caller
             }
+
+            await execute_pattern_based_trade(symbol, predicted_direction, predicted_move, current_pattern, similarity_score)
             
             # Track the trade
             from monitor import track_active_trade
