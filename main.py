@@ -806,23 +806,28 @@ async def process_pump_signal(pump_signal, trend_context):
         }
         
         # Track the active trade with all parameters
-        track_active_trade(
-            symbol=symbol,
-            trade_type=trade_type,
-            initial_score=base_score,
-            entry_price=trade['entry_price'],
-            direction="Long",
-            trailing_pct=trailing_pct,
-            tp1_target=trade.get("tp1_price"),
-            tp1_pct=tp1_pct,
-            tp2=trade.get("tp2_price"),
-            sl=trade.get("sl_price"),
-            qty=trade.get("qty"),
-            sl_order_id=trade.get("sl_order_id"),
-            exit_tranches=trade.get("exit_tranches"),
-            has_pump_potential=True,
-            range_break_details=details
-        )
+        trade_data = {
+            "score_history": [score],
+            "trade_type": trade_type,
+            "entry_price": trade['entry_price'],
+            "direction": direction,
+            "cycles": 0,
+            "exited": False,
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "qty": trade.get("qty"),
+            "sl_order_id": trade.get("sl_order_id"),
+            "trailing_pct": trade.get("trailing_pct"),
+            "tp1_target": trade.get("tp1_price"),
+            "tp1_pct": tp1_pct,
+            "tp2": trade.get("tp2_price"),
+            "sl_price": trade.get("sl_price"),
+            "original_sl": trade.get("sl_price"),
+            "exit_tranches": trade.get("exit_tranches"),
+            "has_pump_potential": pump_potential if 'pump_potential' in locals() else False,
+            "range_break_details": range_break_details if 'range_break_details' in locals() else None
+        }
+
+        track_active_trade(symbol, trade_data)
         
         log(f"✅ Pump trade executed for {symbol} with SL: {trade['sl_price']}, TP1: {trade['tp1_price']}")
     else:
@@ -1004,23 +1009,28 @@ async def process_break_signal(break_signal, trend_context):
             'range_levels': range_details
         }
         
-        track_active_trade(
-            symbol=symbol,
-            trade_type=trade_type,
-            initial_score=base_score,
-            entry_price=trade['entry_price'],
-            direction=direction,
-            trailing_pct=trailing_pct,
-            tp1_target=trade['tp1_price'],
-            tp1_pct=tp1_pct,
-            tp2=trade.get("tp2_price"),
-            sl=trade['sl_price'],
-            qty=trade['qty'],
-            sl_order_id=trade.get('sl_order_id'),
-            exit_tranches=trade.get("exit_tranches"),
-            has_pump_potential=False,
-            range_break_details=range_details
-        )
+        trade_data = {
+            "score_history": [score],
+            "trade_type": trade_type,
+            "entry_price": trade['entry_price'],
+            "direction": direction,
+            "cycles": 0,
+            "exited": False,
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            "qty": trade.get("qty"),
+            "sl_order_id": trade.get("sl_order_id"),
+            "trailing_pct": trade.get("trailing_pct"),
+            "tp1_target": trade.get("tp1_price"),
+            "tp1_pct": tp1_pct,
+            "tp2": trade.get("tp2_price"),
+            "sl_price": trade.get("sl_price"),
+            "original_sl": trade.get("sl_price"),
+            "exit_tranches": trade.get("exit_tranches"),
+            "has_pump_potential": pump_potential if 'pump_potential' in locals() else False,
+            "range_break_details": range_break_details if 'range_break_details' in locals() else None
+        }
+
+        track_active_trade(symbol, trade_data)
         
         log(f"✅ Range break trade executed for {symbol} with SL: {trade['sl_price']}, TP1: {trade['tp1_price']}")
     else:
@@ -1439,23 +1449,28 @@ async def scan_for_new_signals(symbols,trend_context):
                 write_log(f"TRADE SENT: {symbol} | Entry: {trade['entry_price']} | SL: {trade['sl_price']} | TP1: {trade['tp1_price']}")
 
             
-                track_active_trade(
-                    symbol=symbol,
-                    trade_type=trade_type,
-                    initial_score=score,
-                    entry_price=trade['entry_price'],
-                    direction=direction,
-                    trailing_pct=trade.get("trailing_pct"),
-                    tp1_target=trade.get("tp1_price"),  # Store the actual TP1 price
-                    tp1_pct=tp1_pct,             # Store the TP1 percentage used
-                    tp2=trade.get("tp2_price"),  # Now including TP2 for bigger targets
-                    sl=trade.get("sl_price"),
-                    qty=trade.get("qty"),
-                    sl_order_id=trade.get("sl_order_id"),
-                    exit_tranches=trade.get("exit_tranches"),  # Pass exit tranches
-                    has_pump_potential=pump_potential, # Pass pump potential flag
-                    range_break_details=range_break_details if range_break_bonus > 0 else None  # Add this line
-                )
+                trade_data = {
+                    "score_history": [score],
+                    "trade_type": trade_type,
+                    "entry_price": trade['entry_price'],
+                    "direction": direction,
+                    "cycles": 0,
+                    "exited": False,
+                    "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                    "qty": trade.get("qty"),
+                    "sl_order_id": trade.get("sl_order_id"),
+                    "trailing_pct": trade.get("trailing_pct"),
+                    "tp1_target": trade.get("tp1_price"),
+                    "tp1_pct": tp1_pct,
+                    "tp2": trade.get("tp2_price"),
+                    "sl_price": trade.get("sl_price"),
+                    "original_sl": trade.get("sl_price"),
+                    "exit_tranches": trade.get("exit_tranches"),
+                    "has_pump_potential": pump_potential if 'pump_potential' in locals() else False,
+                    "range_break_details": range_break_details if 'range_break_details' in locals() else None
+                }
+
+                track_active_trade(symbol, trade_data)
 
                 from monitor import active_trades
                 if symbol in active_trades:
@@ -1631,21 +1646,28 @@ async def scan_for_new_signals(symbols,trend_context):
                 await send_telegram_message(msg)
 
                 if mr_trade:
-                    track_active_trade(
-                        symbol=symbol,
-                        trade_type="Scalp",
-                        initial_score=rev_score,
-                        entry_price=price,
-                        direction=rev_dir,
-                        trailing_pct=trailing_pct,
-                        tp1_target=mr_trade.get("tp1_price"),
-                        tp1_pct=tp1_pct,
-                        tp2=mr_trade.get("tp2_price"),  # Now including TP2
-                        sl=mr_trade.get("sl_price"),
-                        qty=mr_trade.get("qty"),
-                        sl_order_id=mr_trade.get("sl_order_id"),
-                        exit_tranches=mr_trade.get("exit_tranches")
-                    )
+                    trade_data = {
+                        "score_history": [score],
+                        "trade_type": trade_type,
+                        "entry_price": trade['entry_price'],
+                        "direction": direction,
+                        "cycles": 0,
+                        "exited": False,
+                        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                        "qty": trade.get("qty"),
+                        "sl_order_id": trade.get("sl_order_id"),
+                        "trailing_pct": trade.get("trailing_pct"),
+                        "tp1_target": trade.get("tp1_price"),
+                        "tp1_pct": tp1_pct,
+                        "tp2": trade.get("tp2_price"),
+                        "sl_price": trade.get("sl_price"),
+                        "original_sl": trade.get("sl_price"),
+                        "exit_tranches": trade.get("exit_tranches"),
+                        "has_pump_potential": pump_potential if 'pump_potential' in locals() else False,
+                        "range_break_details": range_break_details if 'range_break_details' in locals() else None
+                    }
+
+                    track_active_trade(symbol, trade_data)
 
         # ✅ Additional Strategy: Breakout Sniper Logic
         if True:
@@ -1709,22 +1731,28 @@ async def scan_for_new_signals(symbols,trend_context):
                 await send_telegram_message(msg)
 
                 if bo_trade:
-                    track_active_trade(
-                        symbol=symbol,
-                        trade_type="Scalp",
-                        initial_score=bo_score,
-                        entry_price=price,
-                        direction=bo_dir,
-                        trailing_pct=trailing_pct,
-                        tp1_target=bo_trade.get("tp1_price"),
-                        tp1_pct=tp1_pct,
-                        tp2=bo_trade.get("tp2_price"),  # Now including TP2
-                        sl=bo_trade.get("sl_price"),
-                        qty=bo_trade.get("qty"),
-                        sl_order_id=bo_trade.get("sl_order_id"),
-                        exit_tranches=bo_trade.get("exit_tranches"),
-                        has_pump_potential=bo_pump_potential
-                    )        
+                    trade_data = {
+                        "score_history": [score],
+                        "trade_type": trade_type,
+                        "entry_price": trade['entry_price'],
+                        "direction": direction,
+                        "cycles": 0,
+                        "exited": False,
+                        "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                        "qty": trade.get("qty"),
+                        "sl_order_id": trade.get("sl_order_id"),
+                        "trailing_pct": trade.get("trailing_pct"),
+                        "tp1_target": trade.get("tp1_price"),
+                        "tp1_pct": tp1_pct,
+                        "tp2": trade.get("tp2_price"),
+                        "sl_price": trade.get("sl_price"),
+                        "original_sl": trade.get("sl_price"),
+                        "exit_tranches": trade.get("exit_tranches"),
+                        "has_pump_potential": pump_potential if 'pump_potential' in locals() else False,
+                        "range_break_details": range_break_details if 'range_break_details' in locals() else None
+                    }
+
+                    track_active_trade(symbol, trade_data)      
 
         try:
             # Scan for both breaks and pumps
@@ -2014,5 +2042,6 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
+
 
 
