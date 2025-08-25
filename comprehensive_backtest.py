@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 import pandas as pd
+import bisect
+import random
 from datetime import datetime, timedelta
 from collections import defaultdict
 import time
@@ -19,6 +21,9 @@ from pattern_matcher import pattern_match_scan
 from range_break_detector import range_break_detector
 from trend_filters import get_trend_context_cached
 from trade_executor import calculate_dynamic_sl_tp
+
+FEE_PCT = 0.0006     # 0.06% taker per side
+SLIP_PCT = 0.0002    # 0.02% slippage per side
 
 class ComprehensiveBacktester:
     def __init__(self):
@@ -55,6 +60,7 @@ class ComprehensiveBacktester:
                 'enabled': True
             }
         }
+        
 
     async def run_comprehensive_backtest(self, symbols, days=30, initial_balance=10000):
         """Run complete backtest on all strategies"""
@@ -76,87 +82,78 @@ class ComprehensiveBacktester:
         log("✅ Comprehensive backtest completed!")
 
     async def download_all_historical_data(self, symbols, days):
-        """Download all historical data needed for backtesting"""
-        log(f"📥 Downloading {days} days of data for backtesting...")
-        
+        log(f"📥 Downloading {days} days of data for backtesting (concurrent)…")
         end_time = int(time.time() * 1000)
-        start_time = end_time - (days * 24 * 60 * 60 * 1000)
-        
-        timeframes = ['1', '3', '5', '15', '30', '60', '240']
-        
-        for i, symbol in enumerate(symbols):
-            log(f"📊 [{i+1}/{len(symbols)}] Downloading {symbol}...")
-            self.historical_data[symbol] = {}
-            
-            for tf in timeframes:
-                try:
-                    candles = await self.fetch_historical_candles(
-                        symbol, tf, start_time, end_time
-                    )
-                    
-                    if candles and len(candles) > 100:
-                        self.historical_data[symbol][tf] = candles
-                    
-                    await asyncio.sleep(0.05)  # Rate limiting
-                    
-                except Exception as e:
-                    log(f"❌ Error downloading {symbol} {tf}m: {e}")
-                    continue
-            
-            await asyncio.sleep(0.2)
-        
-        valid_symbols = len([s for s in symbols if s in self.historical_data and self.historical_data[s]])
-        log(f"✅ Downloaded data for {valid_symbols}/{len(symbols)} symbols")
+        start_time = end_time - days * 24 * 60 * 60 * 1000
+        timeframes = ['1', '5', '15', '60']  # keep only what you use
+
+        sem = asyncio.Semaphore(10)  # tune 6–12
+
+        async def fetch_one(sym, tf):
+            async with sem:
+                candles = await self.fetch_historical_candles(sym, tf, start_time, end_time)
+                if candles and len(candles) > 100:
+                    self.historical_data.setdefault(sym, {})[tf] = candles
+
+        tasks = [asyncio.create_task(fetch_one(sym, tf)) for sym in symbols for tf in timeframes]
+        await asyncio.gather(*tasks)
+
+        # Build timestamp arrays for fast slicing (used later by bisect)
+        self._ts_index = {}
+        for sym, tfs in self.historical_data.items():
+            self._ts_index[sym] = {tf: [c['timestamp'] for c in arr] for tf, arr in tfs.items()}
+
+        log(f"✅ Downloaded data for {len(self.historical_data)}/{len(symbols)} symbols")
 
     async def fetch_historical_candles(self, symbol, interval, start_time, end_time):
-        """Fetch historical candles with pagination for large datasets"""
-        all_candles = []
-        current_start = start_time
-        
-        while current_start < end_time:
-            try:
-                params = {
-                    "category": "linear",
-                    "symbol": symbol,
-                    "interval": interval,
-                    "start": current_start,
-                    "end": min(current_start + (200 * self.get_interval_ms(interval)), end_time),
-                    "limit": 200
-                }
-                
-                result = await signed_request("GET", "/v5/market/kline", params)
-                
-                if result.get("retCode") == 0:
-                    klines = result.get("result", {}).get("list", [])
-                    
-                    if not klines:
-                        break
-                    
-                    # Convert format
-                    candles = []
-                    for kline in klines:
-                        candles.append({
-                            "timestamp": int(kline[0]),
-                            "open": float(kline[1]),
-                            "high": float(kline[2]),
-                            "low": float(kline[3]),
-                            "close": float(kline[4]),
-                            "volume": float(kline[5])
-                        })
-                    
-                    all_candles.extend(candles)
-                    current_start = int(klines[0][0]) + 1  # Next batch
-                    
-                else:
-                    break
-                    
-            except Exception as e:
-                log(f"Error fetching batch: {e}")
+        candles, cursor = [], None
+        first = True
+        while True:
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": interval,
+                "start": start_time,
+                "end": end_time,
+                "limit": 1000,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            if first:
+                log(f"🔗 GET /v5/market/kline {symbol} {interval}m "
+                    f"{datetime.utcfromtimestamp(start_time/1000).isoformat()}→"
+                    f"{datetime.utcfromtimestamp(end_time/1000).isoformat()} UTC")
+                first = False
+
+            result = await signed_request("GET", "/v5/market/kline", params)
+            if result.get("retCode") != 0:
+                log(f"❌ API error {symbol} {interval}m: {result}", level="ERROR")
                 break
-        
-        # Sort chronologically
-        all_candles.sort(key=lambda x: x["timestamp"])
-        return all_candles
+
+            kl = result.get("result", {}).get("list", []) or []
+            for k in kl:
+                candles.append({
+                    "timestamp": int(k[0]),
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                })
+
+            cursor = result.get("result", {}).get("nextPageCursor")
+            if not cursor or not kl:
+                break
+            await asyncio.sleep(0.02)
+
+        candles.sort(key=lambda x: x["timestamp"])
+        log(f"✅ {symbol} {interval}m: {len(candles)} candles")
+        return candles
+
+    def latency_ms():
+        # 3s mean, 1s std, clamp to [0, 12000] ms
+        v = random.normalvariate(3000, 1000)
+        return int(min(12000, max(0, v)))
 
     def get_interval_ms(self, interval):
         """Get milliseconds for interval"""
@@ -165,6 +162,16 @@ class ComprehensiveBacktester:
             '30': 1800000, '60': 3600000, '240': 14400000
         }
         return interval_map.get(interval, 60000)
+
+    def get_next_open(self, symbol, timestamp):
+        """Open of the first 1m candle strictly after `timestamp`."""
+        series = self.historical_data.get(symbol, {}).get('1')
+        if not series:
+            return None
+        ts_list = self._ts_index[symbol]['1']
+        i = bisect.bisect_right(ts_list, timestamp)
+        return series[i]['open'] if 0 <= i < len(series) else None
+
 
     async def backtest_all_strategies(self, symbols, days, initial_balance):
         """Run backtest simulation across all strategies"""
@@ -190,6 +197,12 @@ class ComprehensiveBacktester:
                 log(f"📈 Progress: {progress:.1f}% ({i}/{len(sorted_timestamps)})")
             
             current_time = datetime.fromtimestamp(timestamp / 1000)
+
+            # small random latency (2–6s)
+            delay_ms = 1000 * 2
+            entry_price = self.get_next_open(symbol, timestamp + delay_ms)
+            if not entry_price:
+                continue
             
             # Check exits first
             trades_to_close = []
@@ -272,6 +285,7 @@ class ComprehensiveBacktester:
                                         'confidence': signal.get('confidence', 60),
                                         'sl_price': signal.get('sl_price'),
                                         'tp1_price': signal.get('tp1_price'),
+                                        'reserved_margin': risk_amount,
                                         'trade_type': signal.get('trade_type', 'Intraday')
                                     }
                                     
@@ -287,7 +301,7 @@ class ComprehensiveBacktester:
         for trade in open_trades.values():
             exit_result = self.force_close_trade(trade, final_timestamp)
             pnl = exit_result['pnl']
-            current_balance += pnl
+            current_balance += (trade['reserved_margin'] + pnl)
             
             completed_trade = {
                 **trade,
@@ -323,11 +337,15 @@ class ComprehensiveBacktester:
                 return None
             
             direction = determine_direction(tf_scores, indicator_scores)
-            confidence = calculate_confidence(score, tf_scores, indicator_scores, used_indicators)
+
+            try:
+                trend_ctx = await get_trend_context_cached()
+            except Exception:
+                trend_ctx = {"btc_trend":"ranging","regime":"volatile"}
+            confidence = calculate_confidence(score, tf_scores, indicator_scores, used_indicators, trend_ctx, trade_type)
             
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
+            entry_price = self.get_next_open(symbol, timestamp)  # use next-open (see patch #3)
+            if not entry_price: return None
             
             # Calculate SL/TP
             sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
@@ -523,24 +541,18 @@ class ComprehensiveBacktester:
     # HELPER FUNCTIONS
 
     def get_candles_at_timestamp(self, symbol, timestamp):
-        """Get candles_by_tf at specific timestamp"""
+        """Fast slice: last 100 candles per TF up to timestamp (using bisect)."""
         if symbol not in self.historical_data:
             return None
-        
-        candles_by_tf = {}
-        
-        for tf in ['1', '3', '5', '15', '30', '60', '240']:
-            if tf in self.historical_data[symbol]:
-                # Get all candles up to this timestamp
-                candles = [
-                    c for c in self.historical_data[symbol][tf]
-                    if c['timestamp'] <= timestamp
-                ]
-                
-                if len(candles) >= 30:
-                    candles_by_tf[tf] = candles[-100:]  # Last 100 candles
-        
-        return candles_by_tf if candles_by_tf else None
+        out = {}
+        for tf, series in self.historical_data[symbol].items():
+            ts_list = self._ts_index[symbol].get(tf)
+            if not ts_list:
+                continue
+            i = bisect.bisect_right(ts_list, timestamp)
+            if i >= 30:
+                out[tf] = series[max(0, i-100):i]
+        return out or None
 
     def get_price_at_timestamp(self, symbol, timestamp):
         """Get price at specific timestamp"""
@@ -555,39 +567,55 @@ class ComprehensiveBacktester:
         
         return None
 
+    def _pnl_with_costs(self, entry, exit_, direction, notional):
+        gross = (exit_ - entry)/entry if direction == "Long" else (entry - exit_)/entry
+        net = gross - (2*FEE_PCT) - (2*SLIP_PCT)
+        return notional * net
+
     def check_trade_exit(self, trade, current_timestamp):
-        """Check if trade should be exited"""
-        current_price = self.get_price_at_timestamp(trade['symbol'], current_timestamp)
-        if not current_price:
+        # use the full 1m candle at ts (needs high/low)
+        series = self.historical_data.get(trade['symbol'], {}).get('1')
+        if not series:
             return None
-        
-        entry_price = trade['entry_price']
-        direction = trade['direction']
-        sl_price = trade.get('sl_price')
-        tp1_price = trade.get('tp1_price')
-        
-        # Check SL hit
-        if sl_price:
-            if (direction == "Long" and current_price <= sl_price) or \
-               (direction == "Short" and current_price >= sl_price):
-                pnl = self.calculate_pnl(entry_price, sl_price, direction, trade['position_value'])
-                return {'exit_price': sl_price, 'reason': 'stop_loss', 'pnl': pnl}
-        
-        # Check TP hit
-        if tp1_price:
-            if (direction == "Long" and current_price >= tp1_price) or \
-               (direction == "Short" and current_price <= tp1_price):
-                pnl = self.calculate_pnl(entry_price, tp1_price, direction, trade['position_value'])
-                return {'exit_price': tp1_price, 'reason': 'take_profit', 'pnl': pnl}
-        
-        # Time-based exit (24 hours for Intraday, 1 hour for Scalp)
-        duration_hours = (current_timestamp - trade['entry_timestamp']) / (1000 * 60 * 60)
-        max_duration = {'Scalp': 1, 'Intraday': 24, 'Swing': 168}  # hours
-        
+        ts_list = self._ts_index[trade['symbol']]['1']
+        i = bisect.bisect_left(ts_list, current_timestamp)
+        if i >= len(series) or series[i]['timestamp'] != current_timestamp:
+            return None
+
+        c = series[i]
+        hi, lo, close = c['high'], c['low'], c['close']
+        entry, sl, tp = trade['entry_price'], trade.get('sl_price'), trade.get('tp1_price')
+        dirn = trade['direction']
+
+        # stop-first (conservative intrabar path)
+        if dirn == "Long":
+            if sl and lo <= sl:
+                exit_px = sl * (1 - SLIP_PCT)
+                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
+                return {'exit_price': exit_px, 'reason': 'stop_loss', 'pnl': pnl}
+            if tp and hi >= tp:
+                exit_px = tp * (1 + SLIP_PCT)
+                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
+                return {'exit_price': exit_px, 'reason': 'take_profit', 'pnl': pnl}
+        else:
+            if sl and hi >= sl:
+                exit_px = sl * (1 + SLIP_PCT)
+                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
+                return {'exit_price': exit_px, 'reason': 'stop_loss', 'pnl': pnl}
+            if tp and lo <= tp:
+                exit_px = tp * (1 - SLIP_PCT)
+                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
+                return {'exit_price': exit_px, 'reason': 'take_profit', 'pnl': pnl}
+
+        # time exit
+        duration_hours = (current_timestamp - trade['entry_timestamp']) / 3_600_000
+        max_duration = {'Scalp': 1, 'Intraday': 24, 'Swing': 168}
         if duration_hours >= max_duration.get(trade['trade_type'], 24):
-            pnl = self.calculate_pnl(entry_price, current_price, direction, trade['position_value'])
-            return {'exit_price': current_price, 'reason': 'time_exit', 'pnl': pnl}
-        
+            # apply exit slippage too
+            slip_factor = (1 + SLIP_PCT) if dirn == "Long" else (1 - SLIP_PCT)
+            exit_px = close * slip_factor
+            pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
+            return {'exit_price': exit_px, 'reason': 'time_exit', 'pnl': pnl}
         return None
 
     def force_close_trade(self, trade, timestamp):
