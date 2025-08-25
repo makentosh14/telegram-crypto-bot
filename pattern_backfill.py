@@ -87,83 +87,77 @@ class EnhancedPatternBackfillSystem:
             }
 
     async def download_historical_data(self, symbols: List[str], days: int):
-        log(f"📥 Downloading {days} days of enhanced historical data with volume analysis")
+        log(f"📥 Downloading {days} days of data (concurrent)")
         end_time = int(time.time() * 1000)
-        start_time = end_time - (days * 24 * 60 * 60 * 1000)
+        start_time = end_time - days * 24 * 60 * 60 * 1000
+        timeframes = ['1','5','15','60']
 
-        timeframes = ['1', '5', '15', '60']  # Focus on most relevant timeframes
+        sem = asyncio.Semaphore(10)  # tune to avoid 429s
 
-        for symbol in symbols:
-            log(f"📊 Downloading {symbol} with volume validation")
-            self.symbol_data_cache[symbol] = {}
+    async def fetch_one(symbol, tf):
+        async with sem:
+            self.symbol_data_cache.setdefault(symbol, {})
+            await self.paginate_klines_with_volume(symbol, tf, start_time, end_time)
 
-            for tf in timeframes:
-                await self.paginate_klines_with_volume(symbol, tf, start_time, end_time)
-                await asyncio.sleep(0.1)  # Realistic rate limiting
+    tasks = [fetch_one(sym, tf) for sym in symbols for tf in timeframes]
+    await asyncio.gather(*tasks)
+    log("✅ Historical data download completed")
+
+    async def fetch_klines_cursor(symbol: str, interval: str, start_ms: int, end_ms: int):
+    candles, cursor = [], None
+    first = True
+    while True:
+        params = {
+            "category": "linear",
+            "symbol": symbol,
+            "interval": interval,   # '1','5','15','60'
+            "start": start_ms,
+            "end": end_ms,
+            "limit": 1000,
+        }
+        if cursor:
+            params["cursor"] = cursor
+        if first:
+            log(f"🔗 GET /v5/market/kline {symbol} {interval}m "
+                f"{datetime.utcfromtimestamp(start_ms/1000).isoformat()}→"
+                f"{datetime.utcfromtimestamp(end_ms/1000).isoformat()} UTC")
+            first = False
+
+        resp = await signed_request("GET", "/v5/market/kline", params)
+        if resp.get("retCode") != 0:
+            log(f"❌ API error {symbol}[{interval}]: {resp}", level="ERROR"); break
+        lst = resp.get("result", {}).get("list", []) or []
+        for k in lst:
+            candles.append({
+                "timestamp": int(k[0]),
+                "open": float(k[1]),
+                "high": float(k[2]),
+                "low": float(k[3]),
+                "close": float(k[4]),
+                "volume": float(k[5]),
+                "turnover": float(k[6]) if len(k) > 6 else float(k[5]) * float(k[4]),
+            })
+        cursor = resp.get("result", {}).get("nextPageCursor")
+        if not cursor or not lst:
+            break
+        await asyncio.sleep(0.02)
+    candles.sort(key=lambda x: x["timestamp"])
+    return candles
 
     async def paginate_klines_with_volume(self, symbol: str, interval: str, start_ms: int, end_ms: int):
-        """Enhanced kline fetching with volume analysis"""
-        all_klines = []
-        current_start = start_ms
-        
-        # Calculate volume statistics for filtering
-        volume_samples = []
+        # 1) fetch everything fast
+        all_klines = await fetch_klines_cursor(symbol, interval, start_ms, end_ms)
+        self.symbol_data_cache.setdefault(symbol, {})[interval] = all_klines
 
-        while current_start < end_ms:
-            params = {
-                "category": "linear",
-                "symbol": symbol,
-                "interval": interval,
-                "start": current_start,
-                "limit": 200
-            }
-
-            try:
-                response = await signed_request("GET", "/v5/market/kline", params)
-                if response.get("retCode") != 0:
-                    log(f"❌ API error for {symbol}[{interval}]: {response.get('retMsg')}")
-                    break
-
-                klines = response.get("result", {}).get("list", [])
-                if not klines:
-                    break
-
-                # Enhanced kline processing with volume validation
-                for k in klines:
-                    volume = float(k[5])
-                    kline_data = {
-                        "timestamp": int(k[0]),
-                        "open": float(k[1]),
-                        "high": float(k[2]),
-                        "low": float(k[3]),
-                        "close": float(k[4]),
-                        "volume": volume,
-                        "turnover": float(k[6]) if len(k) > 6 else volume * float(k[4])
-                    }
-                    all_klines.append(kline_data)
-                    volume_samples.append(volume)
-
-                current_start = int(klines[-1][0]) + 60000
-
-            except Exception as e:
-                log(f"❌ Error fetching {symbol}[{interval}]: {e}")
-                break
-
-        # Calculate volume statistics for realistic filtering
+        # 2) compute avg volume once, then filter (optional; can be skipped in FAST_MODE)
+        volume_samples = [k["volume"] for k in all_klines]
         if volume_samples:
             avg_volume = sum(volume_samples) / len(volume_samples)
-            self.market_conditions[symbol]["avg_volume"] = avg_volume
-            
-            # Filter out low-volume periods
-            filtered_klines = [
-                k for k in all_klines 
-                if k["volume"] >= avg_volume * MIN_VOLUME_RATIO
-            ]
-            
-            log(f"📊 {symbol}[{interval}]: {len(filtered_klines)}/{len(all_klines)} bars passed volume filter")
-            all_klines = filtered_klines
-
-        self.symbol_data_cache[symbol][interval] = all_klines
+            self.market_conditions.setdefault(symbol, {})["avg_volume"] = avg_volume
+            filtered = [k for k in all_klines if k["volume"] >= avg_volume * MIN_VOLUME_RATIO]
+            log(f"📊 {symbol}[{interval}]: {len(filtered)}/{len(all_klines)} bars passed volume filter")
+            # keep both: filtered for signal speed, full for accurate PnL windows if you want
+            self.symbol_data_cache[symbol][interval + "_filtered"] = filtered
 
     async def discover_historical_patterns_enhanced(self, symbols: List[str]):
         """Enhanced pattern discovery with better validation"""
@@ -172,12 +166,14 @@ class EnhancedPatternBackfillSystem:
         for symbol in symbols:
             log(f"🎯 Analyzing {symbol} with enhanced pattern detection")
             
-            # Get 5m data for pattern detection
-            bars_5m = self.symbol_data_cache.get(symbol, {}).get("5", [])
-            bars_1m = self.symbol_data_cache.get(symbol, {}).get("1", [])
-            
-            if len(bars_5m) < PATTERN_MIN_BARS_5M or len(bars_1m) < DISCOVERY_WINDOW_MIN:
-                continue
+            next_scan_earliest_ms = -1
+            for i in range(PATTERN_MIN_BARS_5M, len(bars_5m) - 1):
+                current_time_ms = bars_5m[i]["timestamp"]
+                if current_time_ms < next_scan_earliest_ms:
+                    continue
+                # ... detection succeeds ...
+                self.discovered_patterns.append(pattern_data)
+                next_scan_earliest_ms = current_time_ms + 15 * 60 * 1000  # block next 15m
 
             # Enhanced pattern scanning with overlap prevention
             scanned_timestamps = set()
