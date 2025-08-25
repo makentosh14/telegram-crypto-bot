@@ -146,18 +146,29 @@ class EnhancedPatternBackfillSystem:
         return candles
 
     async def paginate_klines_with_volume(self, symbol: str, interval: str, start_ms: int, end_ms: int):
+        # fetch all pages with cursor
         klines = await self._fetch_klines_cursor(symbol, interval, start_ms, end_ms)
+
+        # store the full series
         self.symbol_data_cache.setdefault(symbol, {})[interval] = klines
 
-        # 2) compute avg volume once, then filter (optional; can be skipped in FAST_MODE)
-        volume_samples = [k["volume"] for k in all_klines]
-        if volume_samples:
-            avg_volume = sum(volume_samples) / len(volume_samples)
-            self.market_conditions.setdefault(symbol, {})["avg_volume"] = avg_volume
-            filtered = [k for k in all_klines if k["volume"] >= avg_volume * MIN_VOLUME_RATIO]
-            log(f"📊 {symbol}[{interval}]: {len(filtered)}/{len(all_klines)} bars passed volume filter")
-            # keep both: filtered for signal speed, full for accurate PnL windows if you want
-            self.symbol_data_cache[symbol][interval + "_filtered"] = filtered
+        # average volume (safe even if empty)
+        volumes = [k["volume"] for k in klines]
+        avg_volume = (sum(volumes) / len(volumes)) if volumes else 0.0
+
+        # stash market conditions container
+        if not hasattr(self, "market_conditions"):
+            self.market_conditions = {}
+        self.market_conditions.setdefault(symbol, {})["avg_volume"] = avg_volume
+
+        # optional volume filter (set MIN_VOLUME_RATIO on self, e.g., 0.5)
+        min_ratio = getattr(self, "MIN_VOLUME_RATIO", 0.0)
+        if min_ratio > 0 and avg_volume > 0:
+            filtered = [k for k in klines if k["volume"] >= avg_volume * min_ratio]
+            self.symbol_data_cache[symbol][f"{interval}_filtered"] = filtered
+        else:
+            # keep a filtered key for callers that expect it
+            self.symbol_data_cache[symbol][f"{interval}_filtered"] = klines
 
     async def discover_historical_patterns_enhanced(self, symbols: List[str]):
         """Enhanced pattern discovery with better validation"""
