@@ -7,6 +7,7 @@ import os
 import math
 import time
 import random
+import bisect
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import List, Dict, Any, Optional, Tuple
@@ -170,66 +171,106 @@ class EnhancedPatternBackfillSystem:
             # keep a filtered key for callers that expect it
             self.symbol_data_cache[symbol][f"{interval}_filtered"] = klines
 
-    async def discover_historical_patterns_enhanced(self, symbols: List[str]):
-        """Enhanced pattern discovery with better validation"""
+
+    async def discover_historical_patterns_enhanced(self, symbols: list):
         log("🔍 Enhanced pattern discovery with realistic validation")
-        
+
+        total_found = 0
+
         for symbol in symbols:
             log(f"🎯 Analyzing {symbol} with enhanced pattern detection")
-            
+
+            # Get 5m and 1m series (prefer filtered if present)
+            data = self.symbol_data_cache.get(symbol, {})
+            bars_5m = data.get('5_filtered') or data.get('5') or []
+            bars_1m = data.get('1') or []
+
+            # Basic guards
+            if len(bars_5m) < max(12, PATTERN_MIN_BARS_5M):
+                log(f"   ⚠️ Not enough 5m bars: {len(bars_5m)} — skipping {symbol}")
+                continue
+            if len(bars_1m) < DISCOVERY_WINDOW_MIN + 50:
+                log(f"   ⚠️ Not enough 1m bars: {len(bars_1m)} — skipping {symbol}")
+                continue
+
+            # Precompute 1m timestamps for fast lookup
+            ts_1m = [b["timestamp"] for b in bars_1m]
+
+            # Cooldown-style scanner (no O(N²) any(...))
             next_scan_earliest_ms = -1
-            for i in range(PATTERN_MIN_BARS_5M, len(bars_5m) - 1):
-                current_time_ms = bars_5m[i]["timestamp"]
-                if current_time_ms < next_scan_earliest_ms:
-                    continue
-                # ... detection succeeds ...
-                self.discovered_patterns.append(pattern_data)
-                next_scan_earliest_ms = current_time_ms + 15 * 60 * 1000  # block next 15m
+            i = PATTERN_MIN_BARS_5M
+            last_valid = len(bars_5m) - 1
 
-            # Enhanced pattern scanning with overlap prevention
-            scanned_timestamps = set()
-            
-            for i in range(PATTERN_MIN_BARS_5M, len(bars_5m) - 1):
-                current_time_ms = bars_5m[i]["timestamp"]
-                
-                # Prevent overlapping analysis windows
-                if any(abs(current_time_ms - ts) < 15 * 60 * 1000 for ts in scanned_timestamps):
-                    continue
-                
-                # Enhanced pattern detection with confidence scoring
-                recent_bars = bars_5m[i - PATTERN_MIN_BARS_5M:i]
-                pattern_result = await self.detect_pattern_with_confidence(recent_bars, symbol)
-                
-                if not pattern_result or pattern_result["confidence"] < MIN_PATTERN_CONFIDENCE:
+            while i < last_valid:
+                t5 = bars_5m[i]["timestamp"]
+                if t5 < next_scan_earliest_ms:
+                    i += 1
                     continue
 
-                # Enhanced outcome analysis with market microstructure
-                outcome = await self.analyze_outcome_enhanced(bars_1m, current_time_ms, symbol)
-                if not outcome:
+                # Take last N 5m bars to detect the pattern
+                window_5m = bars_5m[i - PATTERN_MIN_BARS_5M : i]
+                if len(window_5m) < PATTERN_MIN_BARS_5M:
+                    i += 1
                     continue
 
-                # Realistic market condition validation
-                if not self.validate_market_conditions(symbol, current_time_ms, outcome):
+                pattern = detect_pattern(window_5m)
+                if not pattern:
+                    i += 1
                     continue
 
-                pattern_data = {
-                    "timestamp": ms_to_iso(current_time_ms),
+                # Entry is the first 1m bar >= detection time (NO look-ahead)
+                idx_1m = bisect.bisect_left(ts_1m, t5)
+                if idx_1m >= len(ts_1m) or (idx_1m + DISCOVERY_WINDOW_MIN) >= len(bars_1m):
+                    i += 1
+                    continue
+
+                entry_open = float(bars_1m[idx_1m]["open"])
+                future_slice = bars_1m[idx_1m : idx_1m + DISCOVERY_WINDOW_MIN]
+
+                # Outcome window (forward-only)
+                max_high = max(float(c["high"]) for c in future_slice)
+                min_low  = min(float(c["low"])  for c in future_slice)
+                move_up   = (max_high - entry_open) / entry_open * 100.0
+                move_down = (entry_open - min_low)  / entry_open * 100.0
+
+                direction = "pump" if move_up >= move_down else "dump"
+                move_pct  = round(move_up if direction == "pump" else move_down, 2)
+
+                # Optional: quick scoring context (safe-guarded)
+                try:
+                    score, tf_scores, trade_type, indicator_scores, used_indicators = \
+                        enhanced_score_symbol(symbol, {
+                            '1':  bars_1m[max(0, idx_1m-100):idx_1m],
+                            '5':  bars_5m[max(0, i-50):i],
+                            '15': data.get('15', [])[-100:],
+                            '60': data.get('60', [])[-100:],
+                        })
+                except Exception:
+                    score, tf_scores, trade_type, indicator_scores, used_indicators = 0, {}, "Intraday", {}, []
+
+                self.discovered_patterns.append({
+                    "timestamp": ms_to_iso(t5),
                     "symbol": symbol,
-                    "pattern": pattern_result["pattern"],
-                    "confidence": pattern_result["confidence"],
-                    "direction": outcome["direction"],
-                    "move_pct": outcome["move_pct"],
-                    "max_adverse_pct": outcome["max_adverse_pct"],
-                    "time_to_target": outcome["time_to_target"],
-                    "volume_surge": outcome["volume_surge"],
-                    "market_regime": self.classify_market_regime(symbol, current_time_ms),
-                    "volatility_percentile": outcome.get("volatility_percentile", 50)
-                }
+                    "pattern": pattern,
+                    "direction": direction,
+                    "move_pct": move_pct,
+                    "trade_type": trade_type,
+                    "score": score,
+                    "tf_scores": tf_scores,
+                    "indicator_scores": indicator_scores,
+                    "context": {
+                        "entry_open": round(entry_open, 8),
+                        "window_min": DISCOVERY_WINDOW_MIN,
+                    },
+                })
+                total_found += 1
 
-                self.discovered_patterns.append(pattern_data)
-                scanned_timestamps.add(current_time_ms)
+                # Cooldown: prevent overlapping detections (e.g., 15m)
+                next_scan_earliest_ms = t5 + 15 * 60 * 1000
+                i += 10  # real skip forward
 
-        log(f"🎯 Enhanced discovery found {len(self.discovered_patterns)} high-quality patterns")
+        log(f"✅ Discovered {total_found} patterns (enhanced)")
+
 
     async def detect_pattern_with_confidence(self, bars: List[Dict], symbol: str) -> Optional[Dict]:
         """Enhanced pattern detection with confidence scoring"""
