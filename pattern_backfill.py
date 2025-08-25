@@ -100,7 +100,7 @@ class EnhancedPatternBackfillSystem:
             await self.paginate_klines_with_volume(symbol, tf, start_time, end_time)
 
     tasks = [fetch_one(sym, tf) for sym in symbols for tf in timeframes]
-    await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
     log("✅ Historical data download completed")
 
     async def fetch_klines_cursor(symbol: str, interval: str, start_ms: int, end_ms: int):
