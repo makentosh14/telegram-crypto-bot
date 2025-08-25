@@ -86,7 +86,7 @@ class EnhancedPatternBackfillSystem:
                 "correlation_to_btc": random.uniform(0.3, 0.9) if symbol != "BTCUSDT" else 1.0
             }
 
-    async def download_historical_data(self, symbols: List[str], days: int):
+    async def download_historical_data(self, symbols: list, days: int):
         log(f"📥 Downloading {days} days of data (concurrent)")
         end_time = int(time.time() * 1000)
         start_time = end_time - days * 24 * 60 * 60 * 1000
@@ -104,7 +104,7 @@ class EnhancedPatternBackfillSystem:
         await asyncio.gather(*tasks)
         log("✅ Historical data download completed")
 
-    async def fetch_klines_cursor(symbol: str, interval: str, start_ms: int, end_ms: int):
+    async def _fetch_klines_cursor(self, symbol: str, interval: str, start_ms: int, end_ms: int):
         candles, cursor = [], None
         first = True
         while True:
@@ -146,9 +146,8 @@ class EnhancedPatternBackfillSystem:
         return candles
 
     async def paginate_klines_with_volume(self, symbol: str, interval: str, start_ms: int, end_ms: int):
-        # 1) fetch everything fast
-        all_klines = await fetch_klines_cursor(symbol, interval, start_ms, end_ms)
-        self.symbol_data_cache.setdefault(symbol, {})[interval] = all_klines
+        klines = await self._fetch_klines_cursor(symbol, interval, start_ms, end_ms)
+        self.symbol_data_cache.setdefault(symbol, {})[interval] = klines
 
         # 2) compute avg volume once, then filter (optional; can be skipped in FAST_MODE)
         volume_samples = [k["volume"] for k in all_klines]
