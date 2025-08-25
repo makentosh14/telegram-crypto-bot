@@ -12,7 +12,7 @@ from logger import log
 from bybit_api import signed_request
 
 # Import all your strategies
-from score import score_symbol, determine_direction, calculate_confidence
+from score import enhanced_score_symbol, score_symbol, determine_direction, calculate_confidence
 from mean_reversion import score_mean_reversion
 from breakout_sniper import score_breakout_sniper
 from pattern_matcher import pattern_match_scan
