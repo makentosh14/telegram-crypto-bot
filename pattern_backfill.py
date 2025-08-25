@@ -111,7 +111,7 @@ class EnhancedPatternBackfillSystem:
 
         while current_start < end_ms:
             params = {
-                "category": "Linear",
+                "category": "linear",
                 "symbol": symbol,
                 "interval": interval,
                 "start": current_start,
