@@ -104,45 +104,45 @@ class EnhancedPatternBackfillSystem:
     log("✅ Historical data download completed")
 
     async def fetch_klines_cursor(symbol: str, interval: str, start_ms: int, end_ms: int):
-    candles, cursor = [], None
-    first = True
-    while True:
-        params = {
-            "category": "linear",
-            "symbol": symbol,
-            "interval": interval,   # '1','5','15','60'
-            "start": start_ms,
-            "end": end_ms,
-            "limit": 1000,
-        }
-        if cursor:
-            params["cursor"] = cursor
-        if first:
-            log(f"🔗 GET /v5/market/kline {symbol} {interval}m "
-                f"{datetime.utcfromtimestamp(start_ms/1000).isoformat()}→"
-                f"{datetime.utcfromtimestamp(end_ms/1000).isoformat()} UTC")
-            first = False
+        candles, cursor = [], None
+        first = True
+        while True:
+            params = {
+                "category": "linear",
+                "symbol": symbol,
+                "interval": interval,   # '1','5','15','60'
+                "start": start_ms,
+                "end": end_ms,
+                "limit": 1000,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            if first:
+                log(f"🔗 GET /v5/market/kline {symbol} {interval}m "
+                    f"{datetime.utcfromtimestamp(start_ms/1000).isoformat()}→"
+                    f"{datetime.utcfromtimestamp(end_ms/1000).isoformat()} UTC")
+                first = False
 
-        resp = await signed_request("GET", "/v5/market/kline", params)
-        if resp.get("retCode") != 0:
-            log(f"❌ API error {symbol}[{interval}]: {resp}", level="ERROR"); break
-        lst = resp.get("result", {}).get("list", []) or []
-        for k in lst:
-            candles.append({
-                "timestamp": int(k[0]),
-                "open": float(k[1]),
-                "high": float(k[2]),
-                "low": float(k[3]),
-                "close": float(k[4]),
-                "volume": float(k[5]),
-                "turnover": float(k[6]) if len(k) > 6 else float(k[5]) * float(k[4]),
-            })
-        cursor = resp.get("result", {}).get("nextPageCursor")
-        if not cursor or not lst:
-            break
-        await asyncio.sleep(0.02)
-    candles.sort(key=lambda x: x["timestamp"])
-    return candles
+            resp = await signed_request("GET", "/v5/market/kline", params)
+            if resp.get("retCode") != 0:
+                log(f"❌ API error {symbol}[{interval}]: {resp}", level="ERROR"); break
+            lst = resp.get("result", {}).get("list", []) or []
+            for k in lst:
+                candles.append({
+                    "timestamp": int(k[0]),
+                    "open": float(k[1]),
+                    "high": float(k[2]),
+                    "low": float(k[3]),
+                    "close": float(k[4]),
+                    "volume": float(k[5]),
+                    "turnover": float(k[6]) if len(k) > 6 else float(k[5]) * float(k[4]),
+                })
+            cursor = resp.get("result", {}).get("nextPageCursor")
+            if not cursor or not lst:
+                break
+            await asyncio.sleep(0.02)
+        candles.sort(key=lambda x: x["timestamp"])
+        return candles
 
     async def paginate_klines_with_volume(self, symbol: str, interval: str, start_ms: int, end_ms: int):
         # 1) fetch everything fast
