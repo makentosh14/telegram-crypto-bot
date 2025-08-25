@@ -94,15 +94,15 @@ class EnhancedPatternBackfillSystem:
 
         sem = asyncio.Semaphore(10)  # tune to avoid 429s
 
-    async def fetch_one(sym: str, tf: str):
-        async with sem:
-            self.symbol_data_cache.setdefault(sym, {})
-            await self.paginate_klines_with_volume(sym, tf, start_time, end_time)
+        async def fetch_one(sym: str, tf: str):
+            async with sem:
+                self.symbol_data_cache.setdefault(sym, {})
+                await self.paginate_klines_with_volume(sym, tf, start_time, end_time)
 
-    tasks = [asyncio.create_task(fetch_one(sym, tf))
-             for sym in symbols for tf in timeframes]
-    await asyncio.gather(*tasks)
-    log("✅ Historical data download completed")
+        tasks = [asyncio.create_task(fetch_one(sym, tf))
+                 for sym in symbols for tf in timeframes]
+        await asyncio.gather(*tasks)
+        log("✅ Historical data download completed")
 
     async def fetch_klines_cursor(symbol: str, interval: str, start_ms: int, end_ms: int):
         candles, cursor = [], None
