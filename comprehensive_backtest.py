@@ -369,7 +369,7 @@ class ComprehensiveBacktester:
                         else:
                             sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
 
-                # --- LEVERAGE-AWARE SIZING (reserve margin, not full notional) ---
+                  # --- LEVERAGE-AWARE SIZING (reserve margin, not full notional) ---
                 risk_ccy = current_balance * 0.02                   # 2% risk
                 sl_dist_pct = max(1e-6, abs(sl_pct)) / 100.0
                 target_notional = risk_ccy / sl_dist_pct
@@ -402,10 +402,7 @@ class ComprehensiveBacktester:
 
                 # Only take one signal per symbol per timestamp
                 break
-                            
-                except Exception as e:
-                    log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
-                    continue
+                                
         
         # Close any remaining open trades at the end
         final_timestamp = sorted_timestamps[-1] if sorted_timestamps else int(time.time() * 1000)
