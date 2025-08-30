@@ -572,34 +572,32 @@ class ComprehensiveBacktester:
             delay_ms = random.randint(2000, 6000)
             exec_ts = timestamp + delay_ms
             entry_price = self.get_next_open(symbol, exec_ts)
-            if not entry_price:
-                
-                continue
+            if not entry_price is not None:
 
-            # Recompute SL/TP around the real entry
-            try:
-                sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-                    candles_by_tf=candles_by_tf,
-                    price=entry_price,
-                    trade_type=signal.get('trade_type', 'Intraday'),
-                    direction=signal['direction'],
-                    score=signal.get('score', 0),
-                    confidence=signal.get('confidence', 0),
-                    regime='trending'
-                )
-            except Exception:
-                if signal.get('sl_price') and signal.get('tp1_price'):
-                    old_entry = self.get_price_at_timestamp(symbol, timestamp) or entry_price
-                    scale = entry_price / old_entry if old_entry else 1.0
-                    sl_price = signal['sl_price'] * scale
-                    tp1_price = signal['tp1_price'] * scale
-                    sl_pct = abs((entry_price - sl_price) / entry_price) * 100
-                    tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
-                else:
-                    if signal['direction'] == 'Long':
-                        sl_price, tp1_price, sl_pct, tp1_pct = entry_price*0.99, entry_price*1.015, 1.0, 1.5
+                # Recompute SL/TP around the real entry
+                try:
+                    sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                        candles_by_tf=candles_by_tf,
+                        price=entry_price,
+                        trade_type=signal.get('trade_type', 'Intraday'),
+                        direction=signal['direction'],
+                        score=signal.get('score', 0),
+                        confidence=signal.get('confidence', 0),
+                        regime='trending'
+                    )
+                except Exception:
+                    if signal.get('sl_price') and signal.get('tp1_price'):
+                        old_entry = self.get_price_at_timestamp(symbol, timestamp) or entry_price
+                        scale = entry_price / old_entry if old_entry else 1.0
+                        sl_price = signal['sl_price'] * scale
+                        tp1_price = signal['tp1_price'] * scale
+                        sl_pct = abs((entry_price - sl_price) / entry_price) * 100
+                        tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
                     else:
-                        sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
+                        if signal['direction'] == 'Long':
+                            sl_price, tp1_price, sl_pct, tp1_pct = entry_price*0.99, entry_price*1.015, 1.0, 1.5
+                        else:
+                            sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
 
             # Leverage-aware sizing (reserve margin, not full notional)
             risk_ccy = current_balance * 0.02
