@@ -607,29 +607,27 @@ class ComprehensiveBacktester:
             margin = min(target_notional / LEVERAGE, max_margin)
             notional = margin * LEVERAGE
             if margin < 50:
-                continue
+                trade_id += 1
+                trade = {
+                    "id": trade_id,
+                    "strategy": strategy_name,
+                    "symbol": symbol,
+                    "entry_time": datetime.utcfromtimestamp(exec_ts/1000).isoformat(),
+                    "entry_timestamp": exec_ts,
+                    "entry_price": entry_price,
+                    "direction": signal["direction"],
+                    "position_value": notional,
+                    "score": float(signal.get("score", 0)),
+                    "confidence": float(signal.get("confidence", 0)),
+                    "sl_price": sl_price,
+                    "tp1_price": tp1_price,
+                    "trade_type": signal.get("trade_type", "Intraday"),
+                    "reserved_margin": margin,
+                } 
+                open_trades[trade_id] = trade
+                current_balance -= margin
 
-            trade_id += 1
-            trade = {
-                "id": trade_id,
-                "strategy": strategy_name,
-                "symbol": symbol,
-                "entry_time": datetime.utcfromtimestamp(exec_ts/1000).isoformat(),
-                "entry_timestamp": exec_ts,
-                "entry_price": entry_price,
-                "direction": signal["direction"],
-                "position_value": notional,
-                "score": float(signal.get("score", 0)),
-                "confidence": float(signal.get("confidence", 0)),
-                "sl_price": sl_price,
-                "tp1_price": tp1_price,
-                "trade_type": signal.get("trade_type", "Intraday"),
-                "reserved_margin": margin,
-            } 
-            open_trades[trade_id] = trade
-            current_balance -= margin
-
-            break
+                break
 
         except Exception as e:
             return None
