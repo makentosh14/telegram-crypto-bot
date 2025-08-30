@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import bisect
 import random
+import csv
 from datetime import datetime, timedelta
 from collections import defaultdict
 import time
@@ -28,6 +29,8 @@ from trade_executor import calculate_dynamic_sl_tp
 FEE_PCT = 0.0006     # 0.06% taker per side
 SLIP_PCT = 0.0002    # 0.02% slippage per side
 CATEGORY = 'linear'  # 'linear' for USDT-perps, 'spot' for spot
+LEVERAGE = 5
+MAX_HOLD_MIN = {"Scalp": 60, "Intraday": 240, "Swing": 1440}
 
 
 class ComprehensiveBacktester:
@@ -102,6 +105,9 @@ class ComprehensiveBacktester:
             }
         }
 
+        self.sig_stats = defaultdict(lambda: defaultdict(int))
+        self.debug_signals = []
+
     async def run_comprehensive_backtest(self, symbols, days=30, initial_balance=10000):
         """Run complete backtest on all strategies"""
         
@@ -161,42 +167,39 @@ class ComprehensiveBacktester:
 
     async def download_all_historical_data(self, symbols, days):
         log(f"📥 Downloading {days} days of historical data...")
-        end_time = int(time.time() * 1000)
-        start_time = end_time - days * 24 * 60 * 60 * 1000
+        end_ms = int(time.time() * 1000)
+        start_ms = end_ms - days * 24 * 60 * 60 * 1000
 
-        # Only fetch the TFs your strategies need (speeds up a lot)
-        needed_tfs = ['1','3','5','15','30','60','240']
+        needed_tfs = sorted({tf for s in self.strategies.values() if s["enabled"] for tf in s["needs"]})
         sem = asyncio.Semaphore(10)
+        self.historical_data = {}
+        self._ts_index = {}
 
         async def fetch_one(sym, tf):
             async with sem:
-                candles = await self._fetch_klines_cursor(sym, tf, start_time, end_time)
+                candles = await self._fetch_klines_cursor(sym, tf, start_ms, end_ms)  # your cursor fetcher
                 self.historical_data.setdefault(sym, {})[tf] = candles
-                self._ts_index.setdefault(sym, {})[tf] = [c['timestamp'] for c in candles]
+                self._ts_index.setdefault(sym, {})[tf] = [c["timestamp"] for c in candles]
                 log(f"   ✅ {sym} {tf}m: {len(candles)} candles")
 
         tasks = [asyncio.create_task(fetch_one(s, tf)) for s in symbols for tf in needed_tfs]
         await asyncio.gather(*tasks)
+        log("✅ Historical download complete")
 
-    def get_candles_at_timestamp(self, symbol, timestamp):
-        """Get candles for all timeframes at specific timestamp"""
-        candles_by_tf = {}
-        
-        for tf, candles in self.historical_data.get(symbol, {}).items():
-            if not candles:
-                continue
-                
-            ts_list = self._ts_index[symbol][tf]
-            i = bisect.bisect_right(ts_list, timestamp)
-            
-            # Get sufficient candles for analysis (up to last 100)
-            start_idx = max(0, i - 100)
-            end_idx = i
-            
-            if start_idx < end_idx:
-                candles_by_tf[tf] = candles[start_idx:end_idx]
-        
-        return candles_by_tf
+    def _latency_ms(self):
+        v = random.normalvariate(3000, 1000)  # ~3s ±1s, clamped
+        return int(min(12000, max(0, v)))
+
+    def get_candles_at_timestamp(self, symbol, ts):
+        """Last ~100 candles per TF up to ts (fast, via bisect)."""
+        if symbol not in self.historical_data: return None
+        out = {}
+        for tf, series in self.historical_data[symbol].items():
+            ts_list = self._ts_index[symbol].get(tf) or []
+            i = bisect.bisect_right(ts_list, ts)
+            if i >= 30:
+                out[tf] = series[max(0, i-100):i]
+        return out or None
 
     def get_price_at_timestamp(self, symbol, timestamp):
         """Get price at specific timestamp (using 1m candles)"""
@@ -209,16 +212,12 @@ class ComprehensiveBacktester:
         
         return series[i-1]['close'] if i > 0 else None
 
-    def get_next_open(self, symbol, timestamp):
-        """Get next candle open price (for more realistic entry simulation)"""
-        series = self.historical_data.get(symbol, {}).get('1')
-        if not series:
-            return None
-        
-        ts_list = self._ts_index[symbol]['1']
-        i = bisect.bisect_right(ts_list, timestamp)
-        
-        return series[i]['open'] if 0 <= i < len(series) else None
+    def get_next_open(self, symbol, ts):
+        """Open of first 1m candle strictly after ts."""
+        series = self.historical_data.get(symbol, {}).get("1")
+        if not series: return None
+        idx = bisect.bisect_right(self._ts_index[symbol]["1"], ts)
+        return series[idx]["open"] if 0 <= idx < len(series) else None
 
     async def backtest_all_strategies(self, symbols, days, initial_balance):
         """Run backtest simulation across all enabled strategies"""
