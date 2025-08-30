@@ -403,9 +403,9 @@ class ComprehensiveBacktester:
                 # Only take one signal per symbol per timestamp
                 break
                             
-                    except Exception as e:
-                        log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
-                        continue
+                except Exception as e:
+                    log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
+                    continue
         
         # Close any remaining open trades at the end
         final_timestamp = sorted_timestamps[-1] if sorted_timestamps else int(time.time() * 1000)
