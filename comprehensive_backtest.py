@@ -685,6 +685,11 @@ class ComprehensiveBacktester:
             if margin < 50:
                 continue
 
+            break
+
+        except Exception as e:
+            return None
+
 
     async def test_breakout_sniper(self, symbol, candles_by_tf, timestamp):
         """Test breakout sniper strategy"""
