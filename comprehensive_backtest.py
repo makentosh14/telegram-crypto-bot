@@ -567,11 +567,13 @@ class ComprehensiveBacktester:
                 trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
             
             confidence = calculate_confidence(score, tf_scores, trend_ctx, trade_type)
+            strategy_name, signal = max(candidates, key=lambda x: x[1].get('score', 0))
             
             delay_ms = random.randint(2000, 6000)
             exec_ts = timestamp + delay_ms
             entry_price = self.get_next_open(symbol, exec_ts)
             if not entry_price:
+                
                 continue
 
             # Recompute SL/TP around the real entry
