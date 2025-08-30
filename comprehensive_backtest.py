@@ -434,7 +434,12 @@ class ComprehensiveBacktester:
             self.all_trades.append(completed_trade)
             self.strategy_performance[trade['strategy']].append(completed_trade)
 
-        final_balance = current_balance
+        initial_balance = getattr(self, "initial_balance", 0.0)
+        final_balance   = getattr(self, "final_balance", 0.0)
+
+        total_pnl = final_balance - initial_balance        
+        total_return = (total_pnl / initial_balance) * 100.0 if initial_balance else 0.0
+        
         log(f"💰 Final balance: ${final_balance:,.2f}")
         log(f"📈 Total return: {total_return:+.2f}%")
         log(f"📊 Total trades: {len(self.all_trades)}")
