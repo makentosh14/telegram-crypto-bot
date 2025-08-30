@@ -421,6 +421,7 @@ class ComprehensiveBacktester:
 
             pnl = pnl_net(trade['entry_price'], exit_px)
             current_balance += (trade.get('reserved_margin', 0) + pnl)
+            final_balance = current_balance
 
             completed_trade = {
                 **trade,
