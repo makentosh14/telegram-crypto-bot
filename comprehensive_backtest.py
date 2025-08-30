@@ -296,7 +296,7 @@ class ComprehensiveBacktester:
                 if any(trade['symbol'] == symbol for trade in open_trades.values()):
                     continue
                 
-                candles_by_tf = self.get_candles_at_timestamp(symbol, timestamp)
+                candles_by_tf = self._candle_at(symbol, timestamp)
                 if not candles_by_tf or '1' not in candles_by_tf:
                     continue
                 
