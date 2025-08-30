@@ -593,11 +593,11 @@ class ComprehensiveBacktester:
                     tp1_price = signal['tp1_price'] * scale
                     sl_pct = abs((entry_price - sl_price) / entry_price) * 100
                     tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
-                 else:
-                     if signal['direction'] == 'Long':
-                         sl_price, tp1_price, sl_pct, tp1_pct = entry_price*0.99, entry_price*1.015, 1.0, 1.5
-                     else:
-                         sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
+                else:
+                    if signal['direction'] == 'Long':
+                        sl_price, tp1_price, sl_pct, tp1_pct = entry_price*0.99, entry_price*1.015, 1.0, 1.5
+                    else:
+                        sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
 
             # Leverage-aware sizing (reserve margin, not full notional)
             risk_ccy = current_balance * 0.02
