@@ -627,7 +627,7 @@ class ComprehensiveBacktester:
                 open_trades[trade_id] = trade
                 current_balance -= margin
 
-                break
+            break
 
         except Exception as e:
             return None
