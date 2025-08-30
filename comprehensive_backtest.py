@@ -631,8 +631,8 @@ class ComprehensiveBacktester:
 
             break
 
-            except Exception as e:
-                return None
+        except Exception as e:
+            return None
 
     async def test_mean_reversion(self, symbol, candles_by_tf, timestamp):
         """Test mean reversion strategy"""
