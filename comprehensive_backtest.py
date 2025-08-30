@@ -421,7 +421,6 @@ class ComprehensiveBacktester:
 
             pnl = pnl_net(trade['entry_price'], exit_px)
             current_balance += (trade.get('reserved_margin', 0) + pnl)
-            final_balance = current_balance
 
             completed_trade = {
                 **trade,
@@ -435,7 +434,7 @@ class ComprehensiveBacktester:
             self.all_trades.append(completed_trade)
             self.strategy_performance[trade['strategy']].append(completed_trade)
 
-        
+        final_balance = current_balance
         log(f"💰 Final balance: ${final_balance:,.2f}")
         log(f"📈 Total return: {total_return:+.2f}%")
         log(f"📊 Total trades: {len(self.all_trades)}")
