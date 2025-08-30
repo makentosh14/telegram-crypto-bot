@@ -1,5 +1,5 @@
 # comprehensive_backtest.py - Complete Strategy Backtesting System
-# Test ALL your strategies: Core, Mean Reversion, Breakout Sniper, Pattern Matching, Range Break
+# Test ALL your trading strategies: Core, Mean Reversion, Breakout Sniper, Pattern Matching, Range Break, Stealth Detection, Pump Detection
 
 import asyncio
 import json
@@ -14,11 +14,14 @@ from logger import log
 from bybit_api import signed_request
 
 # Import all your strategies
-from score import enhanced_score_symbol, score_symbol, determine_direction, calculate_confidence
+from score import enhanced_score_symbol, score_symbol, determine_direction, calculate_confidence, has_pump_potential, detect_momentum_strength
 from mean_reversion import score_mean_reversion
 from breakout_sniper import score_breakout_sniper
 from pattern_matcher import pattern_match_scan
-from range_break_detector import range_break_detector
+from pattern_discovery import pattern_discovery_scan
+from range_break_detector import range_break_detector, scan_for_breaks_and_pumps
+from stealth_detector import detect_stealth_accumulation_advanced, calculate_accumulation_score
+from pump_detector import detect_early_pump
 from trend_filters import get_trend_context_cached
 from trade_executor import calculate_dynamic_sl_tp
 
@@ -31,36 +34,71 @@ class ComprehensiveBacktester:
         self.all_trades = []
         self.strategy_performance = defaultdict(list)
         self.daily_pnl = defaultdict(float)
+        self._ts_index = {}
         
-        # Strategy configurations
+        # Enhanced strategy configurations with ALL your strategies
         self.strategies = {
             'core_strategy': {
                 'function': self.test_core_strategy,
-                'min_score': 10.0,
-                'enabled': True
+                'min_score': 7.0,
+                'enabled': True,
+                'description': 'Main trend-following strategy'
+            },
+            'enhanced_core': {
+                'function': self.test_enhanced_core_strategy,
+                'min_score': 8.0,
+                'enabled': True,
+                'description': 'Enhanced core with advanced scoring'
             },
             'mean_reversion': {
                 'function': self.test_mean_reversion,
-                'min_score': 8.5,
-                'enabled': True
+                'min_score': 4.0,
+                'enabled': True,
+                'description': 'Mean reversion for ranging markets'
             },
             'breakout_sniper': {
                 'function': self.test_breakout_sniper,
-                'min_score': 11.0,
-                'enabled': True
+                'min_score': 4.0,
+                'enabled': True,
+                'description': 'Breakout detection with patterns'
             },
             'pattern_matching': {
                 'function': self.test_pattern_matching,
                 'min_score': 0.6,  # Similarity threshold
-                'enabled': True
+                'enabled': True,
+                'description': 'Historical pattern matching'
+            },
+            'pattern_discovery': {
+                'function': self.test_pattern_discovery,
+                'min_score': 0.7,
+                'enabled': True,
+                'description': 'Dynamic pattern discovery'
             },
             'range_break': {
                 'function': self.test_range_break,
-                'min_score': 9.0,
-                'enabled': True
+                'min_score': 6.0,
+                'enabled': True,
+                'description': 'Range breakout detection'
+            },
+            'stealth_accumulation': {
+                'function': self.test_stealth_accumulation,
+                'min_score': 0.6,
+                'enabled': True,
+                'description': 'Stealth accumulation detection'
+            },
+            'pump_detector': {
+                'function': self.test_pump_detector,
+                'min_score': 0.7,
+                'enabled': True,
+                'description': 'Early pump detection'
+            },
+            'momentum_surge': {
+                'function': self.test_momentum_surge,
+                'min_score': 8.0,
+                'enabled': True,
+                'description': 'Strong momentum detection'
             }
         }
-        
 
     async def run_comprehensive_backtest(self, symbols, days=30, initial_balance=10000):
         """Run complete backtest on all strategies"""
@@ -68,7 +106,7 @@ class ComprehensiveBacktester:
         log(f"🚀 Starting comprehensive {days}-day backtest")
         log(f"💰 Initial balance: ${initial_balance:,.2f}")
         log(f"📊 Testing {len(symbols)} symbols")
-        log(f"🎯 Strategies: {list(self.strategies.keys())}")
+        log(f"🎯 Strategies: {[name for name, config in self.strategies.items() if config['enabled']]}")
         
         # Step 1: Download historical data
         await self.download_all_historical_data(symbols, days)
@@ -82,100 +120,116 @@ class ComprehensiveBacktester:
         log("✅ Comprehensive backtest completed!")
 
     async def download_all_historical_data(self, symbols, days):
-        log(f"📥 Downloading {days} days of data for backtesting (concurrent)…")
+        """Download historical data for all symbols and timeframes"""
+        log(f"📥 Downloading {days} days of historical data...")
+        
+        timeframes = ['1', '3', '5', '15', '30', '60', '240']  # All timeframes you use
         end_time = int(time.time() * 1000)
-        start_time = end_time - days * 24 * 60 * 60 * 1000
-        timeframes = ['1', '5', '15', '60']  # keep only what you use
+        start_time = end_time - (days * 24 * 60 * 60 * 1000)
+        
+        for symbol in symbols:
+            log(f"📊 Downloading data for {symbol}...")
+            self.historical_data[symbol] = {}
+            self._ts_index[symbol] = {}
+            
+            for tf in timeframes:
+                try:
+                    # Calculate limit based on timeframe
+                    tf_minutes = int(tf)
+                    max_candles = min((days * 24 * 60) // tf_minutes, 1000)
+                    
+                    response = await signed_request(
+                        method='GET',
+                        path='/v5/market/kline',
+                        params={
+                            'category': 'spot',
+                            'symbol': symbol,
+                            'interval': tf,
+                            'start': start_time,
+                            'end': end_time,
+                            'limit': max_candles
+                        }
+                    )
+                    
+                    if response.get('result') and response['result'].get('list'):
+                        candles = []
+                        timestamps = []
+                        
+                        for kline in reversed(response['result']['list']):  # Reverse to get chronological order
+                            timestamp = int(kline[0])
+                            candle = {
+                                'timestamp': timestamp,
+                                'open': float(kline[1]),
+                                'high': float(kline[2]),
+                                'low': float(kline[3]),
+                                'close': float(kline[4]),
+                                'volume': float(kline[5])
+                            }
+                            candles.append(candle)
+                            timestamps.append(timestamp)
+                        
+                        self.historical_data[symbol][tf] = candles
+                        self._ts_index[symbol][tf] = timestamps
+                        
+                        log(f"   ✅ {tf}m: {len(candles)} candles")
+                    else:
+                        log(f"   ❌ {tf}m: No data received")
+                        self.historical_data[symbol][tf] = []
+                        self._ts_index[symbol][tf] = []
+                        
+                except Exception as e:
+                    log(f"   ❌ Error downloading {tf}m data: {e}")
+                    self.historical_data[symbol][tf] = []
+                    self._ts_index[symbol][tf] = []
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.1)
 
-        sem = asyncio.Semaphore(10)  # tune 6–12
+    def get_candles_at_timestamp(self, symbol, timestamp):
+        """Get candles for all timeframes at specific timestamp"""
+        candles_by_tf = {}
+        
+        for tf, candles in self.historical_data.get(symbol, {}).items():
+            if not candles:
+                continue
+                
+            ts_list = self._ts_index[symbol][tf]
+            i = bisect.bisect_right(ts_list, timestamp)
+            
+            # Get sufficient candles for analysis (up to last 100)
+            start_idx = max(0, i - 100)
+            end_idx = i
+            
+            if start_idx < end_idx:
+                candles_by_tf[tf] = candles[start_idx:end_idx]
+        
+        return candles_by_tf
 
-        async def fetch_one(sym, tf):
-            async with sem:
-                candles = await self.fetch_historical_candles(sym, tf, start_time, end_time)
-                if candles and len(candles) > 100:
-                    self.historical_data.setdefault(sym, {})[tf] = candles
-
-        tasks = [asyncio.create_task(fetch_one(sym, tf)) for sym in symbols for tf in timeframes]
-        await asyncio.gather(*tasks)
-
-        # Build timestamp arrays for fast slicing (used later by bisect)
-        self._ts_index = {}
-        for sym, tfs in self.historical_data.items():
-            self._ts_index[sym] = {tf: [c['timestamp'] for c in arr] for tf, arr in tfs.items()}
-
-        log(f"✅ Downloaded data for {len(self.historical_data)}/{len(symbols)} symbols")
-
-    async def fetch_historical_candles(self, symbol, interval, start_time, end_time):
-        candles, cursor = [], None
-        first = True
-        while True:
-            params = {
-                "category": "linear",
-                "symbol": symbol,
-                "interval": interval,
-                "start": start_time,
-                "end": end_time,
-                "limit": 1000,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            if first:
-                log(f"🔗 GET /v5/market/kline {symbol} {interval}m "
-                    f"{datetime.utcfromtimestamp(start_time/1000).isoformat()}→"
-                    f"{datetime.utcfromtimestamp(end_time/1000).isoformat()} UTC")
-                first = False
-
-            result = await signed_request("GET", "/v5/market/kline", params)
-            if result.get("retCode") != 0:
-                log(f"❌ API error {symbol} {interval}m: {result}", level="ERROR")
-                break
-
-            kl = result.get("result", {}).get("list", []) or []
-            for k in kl:
-                candles.append({
-                    "timestamp": int(k[0]),
-                    "open": float(k[1]),
-                    "high": float(k[2]),
-                    "low": float(k[3]),
-                    "close": float(k[4]),
-                    "volume": float(k[5]),
-                })
-
-            cursor = result.get("result", {}).get("nextPageCursor")
-            if not cursor or not kl:
-                break
-            await asyncio.sleep(0.02)
-
-        candles.sort(key=lambda x: x["timestamp"])
-        log(f"✅ {symbol} {interval}m: {len(candles)} candles")
-        return candles
-
-    def latency_ms():
-        # 3s mean, 1s std, clamp to [0, 12000] ms
-        v = random.normalvariate(3000, 1000)
-        return int(min(12000, max(0, v)))
-
-    def get_interval_ms(self, interval):
-        """Get milliseconds for interval"""
-        interval_map = {
-            '1': 60000, '3': 180000, '5': 300000, '15': 900000,
-            '30': 1800000, '60': 3600000, '240': 14400000
-        }
-        return interval_map.get(interval, 60000)
-
-    def get_next_open(self, symbol, timestamp):
-        """Open of the first 1m candle strictly after `timestamp`."""
+    def get_price_at_timestamp(self, symbol, timestamp):
+        """Get price at specific timestamp (using 1m candles)"""
         series = self.historical_data.get(symbol, {}).get('1')
         if not series:
             return None
+        
         ts_list = self._ts_index[symbol]['1']
         i = bisect.bisect_right(ts_list, timestamp)
+        
+        return series[i-1]['close'] if i > 0 else None
+
+    def get_next_open(self, symbol, timestamp):
+        """Get next candle open price (for more realistic entry simulation)"""
+        series = self.historical_data.get(symbol, {}).get('1')
+        if not series:
+            return None
+        
+        ts_list = self._ts_index[symbol]['1']
+        i = bisect.bisect_right(ts_list, timestamp)
+        
         return series[i]['open'] if 0 <= i < len(series) else None
 
-
     async def backtest_all_strategies(self, symbols, days, initial_balance):
-        """Run backtest simulation across all strategies"""
-        log("🧪 Running strategy backtests...")
+        """Run backtest simulation across all enabled strategies"""
+        log("🧪 Running comprehensive strategy backtests...")
         
         current_balance = initial_balance
         open_trades = {}
@@ -190,19 +244,15 @@ class ComprehensiveBacktester:
         
         sorted_timestamps = sorted(all_timestamps)
         
+        log(f"📈 Processing {len(sorted_timestamps)} timestamps...")
+        
         # Simulate trading at each timestamp
         for i, timestamp in enumerate(sorted_timestamps):
-            if i % 1000 == 0:  # Progress update
+            if i % 2000 == 0:  # Progress update every 2000 timestamps
                 progress = (i / len(sorted_timestamps)) * 100
-                log(f"📈 Progress: {progress:.1f}% ({i}/{len(sorted_timestamps)})")
+                log(f"📊 Progress: {progress:.1f}% ({i}/{len(sorted_timestamps)})")
             
             current_time = datetime.fromtimestamp(timestamp / 1000)
-
-            # small random latency (2–6s)
-            delay_ms = 1000 * 2
-            entry_price = self.get_next_open(symbol, timestamp + delay_ms)
-            if not entry_price:
-                continue
             
             # Check exits first
             trades_to_close = []
@@ -219,7 +269,7 @@ class ComprehensiveBacktester:
                 # Record completed trade
                 completed_trade = {
                     **trade,
-                    'exit_time': current_time.isoformat(),
+                    'exit_time': datetime.fromtimestamp(timestamp / 1000).isoformat(),
                     'exit_price': exit_result['exit_price'],
                     'exit_reason': exit_result['reason'],
                     'pnl': pnl,
@@ -230,91 +280,115 @@ class ComprehensiveBacktester:
                 self.all_trades.append(completed_trade)
                 self.strategy_performance[trade['strategy']].append(completed_trade)
                 
-                # Update daily PnL
-                date_key = current_time.date().isoformat()
-                self.daily_pnl[date_key] += pnl
-                
                 del open_trades[trade_id_key]
             
-            # Look for new trade entries (every 5 minutes to reduce computation)
-            if i % 5 == 0 and len(open_trades) < 5:  # Max 5 concurrent trades
+            # Don't open new trades if we have too many open
+            if len(open_trades) >= 5:  # Max 5 concurrent trades
+                continue
                 
-                for symbol in symbols:
-                    if symbol not in self.historical_data:
+            # Check for new signals for each symbol
+            for symbol in symbols:
+                if len(open_trades) >= 5:
+                    break
+                
+                # Skip if already have a trade on this symbol
+                if any(trade['symbol'] == symbol for trade in open_trades.values()):
+                    continue
+                
+                candles_by_tf = self.get_candles_at_timestamp(symbol, timestamp)
+                if not candles_by_tf or '1' not in candles_by_tf:
+                    continue
+                
+                # Test each enabled strategy
+                for strategy_name, strategy_config in self.strategies.items():
+                    if not strategy_config['enabled']:
                         continue
-                    
-                    # Skip if already have trade on this symbol
-                    if any(trade['symbol'] == symbol for trade in open_trades.values()):
-                        continue
-                    
-                    # Build candles_by_tf at this timestamp
-                    candles_by_tf = self.get_candles_at_timestamp(symbol, timestamp)
-                    if not candles_by_tf:
-                        continue
-                    
-                    # Test all strategies
-                    for strategy_name, config in self.strategies.items():
-                        if not config['enabled']:
-                            continue
                         
-                        try:
-                            signal = await config['function'](
-                                symbol, candles_by_tf, timestamp
-                            )
+                    if len(open_trades) >= 5:
+                        break
+                    
+                    try:
+                        signal = await strategy_config['function'](symbol, candles_by_tf, timestamp)
+                        if signal and signal.get('score', 0) >= strategy_config['min_score']:
                             
-                            if signal and signal['score'] >= config['min_score']:
-                                # Calculate position size (risk 2% per trade)
-                                risk_amount = current_balance * 0.02
-                                entry_price = self.get_price_at_timestamp(symbol, timestamp)
-                                
-                                if entry_price:
-                                    # Create trade
-                                    trade_id += 1
-                                    position_value = risk_amount * 10  # 10x leverage example
-                                    
-                                    trade = {
-                                        'id': trade_id,
-                                        'symbol': symbol,
-                                        'strategy': strategy_name,
-                                        'entry_time': current_time.isoformat(),
-                                        'entry_timestamp': timestamp,
-                                        'entry_price': entry_price,
-                                        'direction': signal['direction'],
-                                        'position_value': position_value,
-                                        'score': signal['score'],
-                                        'confidence': signal.get('confidence', 60),
-                                        'sl_price': signal.get('sl_price'),
-                                        'tp1_price': signal.get('tp1_price'),
-                                        'reserved_margin': risk_amount,
-                                        'trade_type': signal.get('trade_type', 'Intraday')
-                                    }
-                                    
-                                    open_trades[trade_id] = trade
-                                    current_balance -= risk_amount  # Reserve risk amount
-                                    break  # One strategy per symbol at a time
-                        
-                        except Exception as e:
-                            continue  # Skip failed strategy tests
+                            # Simulate entry with delay (2-6 seconds)
+                            delay_ms = random.randint(2000, 6000)
+                            entry_price = self.get_next_open(symbol, timestamp + delay_ms)
+                            
+                            if not entry_price:
+                                continue
+                            
+                            # Calculate position size (2% risk)
+                            risk_per_trade = current_balance * 0.02
+                            sl_distance_pct = abs(signal.get('sl_pct', 2.0))
+                            position_value = risk_per_trade / (sl_distance_pct / 100)
+                            
+                            # Don't risk more than 5% of balance per trade
+                            position_value = min(position_value, current_balance * 0.05)
+                            
+                            if position_value < 100:  # Minimum position size
+                                continue
+                            
+                            # Create trade record
+                            trade_id += 1
+                            trade = {
+                                'id': trade_id,
+                                'strategy': strategy_name,
+                                'symbol': symbol,
+                                'entry_time': current_time.isoformat(),
+                                'entry_timestamp': timestamp,
+                                'entry_price': entry_price,
+                                'direction': signal['direction'],
+                                'position_value': position_value,
+                                'score': signal.get('score', 0),
+                                'confidence': signal.get('confidence', 0),
+                                'sl_price': signal.get('sl_price'),
+                                'tp1_price': signal.get('tp1_price'),
+                                'trade_type': signal.get('trade_type', 'Intraday'),
+                                'reserved_margin': position_value
+                            }
+                            
+                            open_trades[trade_id] = trade
+                            current_balance -= position_value  # Reserve margin
+                            
+                            # Only take one signal per symbol per timestamp
+                            break
+                            
+                    except Exception as e:
+                        log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
+                        continue
         
-        # Close any remaining open trades
-        final_timestamp = sorted_timestamps[-1]
-        for trade in open_trades.values():
-            exit_result = self.force_close_trade(trade, final_timestamp)
-            pnl = exit_result['pnl']
-            current_balance += (trade['reserved_margin'] + pnl)
-            
-            completed_trade = {
-                **trade,
-                'exit_time': datetime.fromtimestamp(final_timestamp / 1000).isoformat(),
-                'exit_price': exit_result['exit_price'],
-                'exit_reason': 'backtest_end',
-                'pnl': pnl,
-                'pnl_pct': (pnl / trade['position_value']) * 100,
-                'duration_minutes': (final_timestamp - trade['entry_timestamp']) // 60000
-            }
-            
-            self.all_trades.append(completed_trade)
-            self.strategy_performance[trade['strategy']].append(completed_trade)
+        # Close any remaining open trades at the end
+        final_timestamp = sorted_timestamps[-1] if sorted_timestamps else int(time.time() * 1000)
+        
+        for trade in list(open_trades.values()):
+            # Simulate closing at last available price
+            exit_price = self.get_price_at_timestamp(trade['symbol'], final_timestamp)
+            if exit_price:
+                # Calculate PnL
+                if trade['direction'] == 'Long':
+                    price_change = (exit_price - trade['entry_price']) / trade['entry_price']
+                else:
+                    price_change = (trade['entry_price'] - exit_price) / trade['entry_price']
+                
+                # Apply fees and slippage
+                total_fees = FEE_PCT + SLIP_PCT
+                pnl = (price_change - total_fees) * trade['position_value']
+                
+                current_balance += (trade['position_value'] + pnl)
+                
+                completed_trade = {
+                    **trade,
+                    'exit_time': datetime.fromtimestamp(final_timestamp / 1000).isoformat(),
+                    'exit_price': exit_price,
+                    'exit_reason': 'backtest_end',
+                    'pnl': pnl,
+                    'pnl_pct': (pnl / trade['position_value']) * 100,
+                    'duration_minutes': (final_timestamp - trade['entry_timestamp']) // 60000
+                }
+                
+                self.all_trades.append(completed_trade)
+                self.strategy_performance[trade['strategy']].append(completed_trade)
         
         final_balance = current_balance
         total_return = ((final_balance - initial_balance) / initial_balance) * 100
@@ -323,34 +397,120 @@ class ComprehensiveBacktester:
         log(f"📈 Total return: {total_return:+.2f}%")
         log(f"📊 Total trades: {len(self.all_trades)}")
 
+    def check_trade_exit(self, trade, timestamp):
+        """Check if trade should be closed (SL/TP hit)"""
+        current_price = self.get_price_at_timestamp(trade['symbol'], timestamp)
+        if not current_price:
+            return None
+        
+        direction = trade['direction']
+        entry_price = trade['entry_price']
+        sl_price = trade.get('sl_price')
+        tp1_price = trade.get('tp1_price')
+        
+        # Check stop loss
+        if sl_price:
+            if (direction == 'Long' and current_price <= sl_price) or \
+               (direction == 'Short' and current_price >= sl_price):
+                
+                # Calculate PnL
+                if direction == 'Long':
+                    price_change = (current_price - entry_price) / entry_price
+                else:
+                    price_change = (entry_price - current_price) / entry_price
+                
+                total_fees = FEE_PCT + SLIP_PCT
+                pnl = (price_change - total_fees) * trade['position_value']
+                
+                return {
+                    'exit_price': current_price,
+                    'reason': 'stop_loss',
+                    'pnl': pnl
+                }
+        
+        # Check take profit
+        if tp1_price:
+            if (direction == 'Long' and current_price >= tp1_price) or \
+               (direction == 'Short' and current_price <= tp1_price):
+                
+                # Calculate PnL
+                if direction == 'Long':
+                    price_change = (current_price - entry_price) / entry_price
+                else:
+                    price_change = (entry_price - current_price) / entry_price
+                
+                total_fees = FEE_PCT + SLIP_PCT
+                pnl = (price_change - total_fees) * trade['position_value']
+                
+                return {
+                    'exit_price': current_price,
+                    'reason': 'take_profit',
+                    'pnl': pnl
+                }
+        
+        # Time-based exit (max 4 hours for intraday, 24 hours for swing)
+        max_duration_minutes = 240 if trade.get('trade_type') == 'Intraday' else 1440
+        duration_minutes = (timestamp - trade['entry_timestamp']) // 60000
+        
+        if duration_minutes >= max_duration_minutes:
+            # Calculate PnL
+            if direction == 'Long':
+                price_change = (current_price - entry_price) / entry_price
+            else:
+                price_change = (entry_price - current_price) / entry_price
+            
+            total_fees = FEE_PCT + SLIP_PCT
+            pnl = (price_change - total_fees) * trade['position_value']
+            
+            return {
+                'exit_price': current_price,
+                'reason': 'time_exit',
+                'pnl': pnl
+            }
+        
+        return None
+
     # STRATEGY TESTING FUNCTIONS
 
     async def test_core_strategy(self, symbol, candles_by_tf, timestamp):
         """Test core strategy at specific timestamp"""
         try:
-            # Your existing core strategy logic
             score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
                 symbol, candles_by_tf
             )
             
-            if score < 10.0:
+            if score < 7.0:
                 return None
             
             direction = determine_direction(tf_scores, indicator_scores)
+            if not direction:
+                return None
 
             try:
                 trend_ctx = await get_trend_context_cached()
             except Exception:
-                trend_ctx = {"btc_trend":"ranging","regime":"volatile"}
+                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
+            
             confidence = calculate_confidence(score, tf_scores, indicator_scores, used_indicators, trend_ctx, trade_type)
             
-            entry_price = self.get_next_open(symbol, timestamp)  # use next-open (see patch #3)
-            if not entry_price: return None
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
             
             # Calculate SL/TP
-            sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
-                symbol, entry_price, trade_type, direction, score, confidence, "trending"
-            )
+            try:
+                sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                    symbol, entry_price, trade_type, direction, score, confidence, "trending"
+                )
+            except:
+                # Fallback SL/TP calculation
+                if direction == "Long":
+                    sl_price = entry_price * 0.98  # 2% SL
+                    tp1_price = entry_price * 1.04  # 4% TP
+                else:
+                    sl_price = entry_price * 1.02
+                    tp1_price = entry_price * 0.96
+                sl_pct, tp1_pct = 2.0, 4.0
             
             return {
                 'score': score,
@@ -366,21 +526,68 @@ class ComprehensiveBacktester:
         except Exception as e:
             return None
 
+    async def test_enhanced_core_strategy(self, symbol, candles_by_tf, timestamp):
+        """Test enhanced core strategy"""
+        try:
+            score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
+                symbol, candles_by_tf
+            )
+            
+            if score < 8.0:
+                return None
+            
+            direction = determine_direction(tf_scores, indicator_scores)
+            if not direction:
+                return None
+
+            try:
+                trend_ctx = await get_trend_context_cached()
+            except Exception:
+                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
+            
+            confidence = calculate_confidence(score, tf_scores, indicator_scores, used_indicators, trend_ctx, trade_type)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Enhanced SL/TP calculation
+            if direction == "Long":
+                sl_price = entry_price * 0.985  # Tighter 1.5% SL
+                tp1_price = entry_price * 1.05   # Higher 5% TP
+            else:
+                sl_price = entry_price * 1.015
+                tp1_price = entry_price * 0.95
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': trade_type,
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 1.5,
+                'tp1_pct': 5.0
+            }
+            
+        except Exception as e:
+            return None
+
     async def test_mean_reversion(self, symbol, candles_by_tf, timestamp):
         """Test mean reversion strategy"""
         try:
             score, direction, confidence, reasons = score_mean_reversion(
-                symbol, candles_by_tf, "ranging"  # Assume ranging for mean reversion
+                symbol, candles_by_tf, "ranging"
             )
             
-            if score < 8.5:
+            if score < 4.0:
                 return None
             
             entry_price = self.get_price_at_timestamp(symbol, timestamp)
             if not entry_price:
                 return None
             
-            # Simple SL/TP for mean reversion
+            # Mean reversion SL/TP
             if direction == "Long":
                 sl_price = entry_price * 0.985  # 1.5% SL
                 tp1_price = entry_price * 1.025  # 2.5% TP
@@ -409,30 +616,30 @@ class ComprehensiveBacktester:
                 symbol, candles_by_tf, "volatile"
             )
             
-            if score < 11.0:
+            if score < 4.0:
                 return None
             
             entry_price = self.get_price_at_timestamp(symbol, timestamp)
             if not entry_price:
                 return None
             
-            # Breakout SL/TP (wider stops)
+            # Breakout SL/TP (wider stops for volatility)
             if direction == "Long":
                 sl_price = entry_price * 0.975  # 2.5% SL
-                tp1_price = entry_price * 1.05   # 5% TP
+                tp1_price = entry_price * 1.06   # 6% TP
             else:
                 sl_price = entry_price * 1.025
-                tp1_price = entry_price * 0.95
+                tp1_price = entry_price * 0.94
             
             return {
                 'score': score,
                 'direction': direction,
                 'confidence': confidence,
-                'trade_type': 'Scalp',
+                'trade_type': 'Intraday',
                 'sl_price': sl_price,
                 'tp1_price': tp1_price,
                 'sl_pct': 2.5,
-                'tp1_pct': 5.0
+                'tp1_pct': 6.0
             }
             
         except Exception as e:
@@ -441,26 +648,15 @@ class ComprehensiveBacktester:
     async def test_pattern_matching(self, symbol, candles_by_tf, timestamp):
         """Test pattern matching strategy"""
         try:
-            # This would need your pattern database to be loaded
-            # For now, simulate pattern matching
-            from pattern_detector import detect_pattern
-            
             if '5' not in candles_by_tf:
                 return None
-            
-            pattern = detect_pattern(candles_by_tf['5'][-10:])
-            if not pattern:
+                
+            result = pattern_match_scan(symbol, candles_by_tf['5'])
+            if not result or result.get('similarity', 0) < 0.6:
                 return None
             
-            # Simulate pattern prediction (you'd use real pattern database)
-            # For demo, assume 60% confidence
-            confidence = 0.6
-            
-            if confidence < 0.6:
-                return None
-            
-            # Simulate direction based on pattern (would be from historical data)
-            direction = "Long"  # Simplified
+            direction = result.get('expected_direction', 'Long')
+            similarity = result.get('similarity', 0)
             
             entry_price = self.get_price_at_timestamp(symbol, timestamp)
             if not entry_price:
@@ -468,16 +664,16 @@ class ComprehensiveBacktester:
             
             # Pattern-based SL/TP
             if direction == "Long":
-                sl_price = entry_price * 0.98   # 2% SL
-                tp1_price = entry_price * 1.04  # 4% TP (based on historical pattern performance)
+                sl_price = entry_price * 0.98
+                tp1_price = entry_price * 1.04
             else:
                 sl_price = entry_price * 1.02
                 tp1_price = entry_price * 0.96
             
             return {
-                'score': confidence,
+                'score': similarity * 10,  # Convert to score
                 'direction': direction,
-                'confidence': confidence * 100,
+                'confidence': similarity,
                 'trade_type': 'Intraday',
                 'sl_price': sl_price,
                 'tp1_price': tp1_price,
@@ -488,217 +684,297 @@ class ComprehensiveBacktester:
         except Exception as e:
             return None
 
-    async def test_range_break(self, symbol, candles_by_tf, timestamp):
-        """Test range break strategy"""
+    async def test_pattern_discovery(self, symbol, candles_by_tf, timestamp):
+        """Test pattern discovery strategy"""
         try:
-            # Simulate range break detection
-            if '15' not in candles_by_tf or len(candles_by_tf['15']) < 50:
+            if '5' not in candles_by_tf:
+                return None
+                
+            result = pattern_discovery_scan(symbol, candles_by_tf['5'])
+            if not result or result.get('confidence', 0) < 0.7:
                 return None
             
-            # Simple range break logic
-            recent_candles = candles_by_tf['15'][-20:]
-            highs = [c['high'] for c in recent_candles[:-1]]
-            lows = [c['low'] for c in recent_candles[:-1]]
+            direction = result.get('direction', 'Long')
+            confidence = result.get('confidence', 0)
             
-            resistance = max(highs[-10:])
-            support = min(lows[-10:])
-            current_price = recent_candles[-1]['close']
-            
-            # Check for breakout
-            if current_price > resistance * 1.002:  # 0.2% above resistance
-                direction = "Long"
-                score = 9.5
-            elif current_price < support * 0.998:  # 0.2% below support
-                direction = "Short"
-                score = 9.5
-            else:
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
                 return None
             
-            entry_price = current_price
-            
-            # Range break SL/TP
+            # Discovery pattern SL/TP
             if direction == "Long":
-                sl_price = support * 0.995   # Below support
-                tp1_price = entry_price * 1.035  # 3.5% TP
+                sl_price = entry_price * 0.98
+                tp1_price = entry_price * 1.045
             else:
-                sl_price = resistance * 1.005  # Above resistance
-                tp1_price = entry_price * 0.965
+                sl_price = entry_price * 1.02
+                tp1_price = entry_price * 0.955
             
             return {
-                'score': score,
+                'score': confidence * 10,
                 'direction': direction,
-                'confidence': 70,
+                'confidence': confidence,
                 'trade_type': 'Intraday',
                 'sl_price': sl_price,
                 'tp1_price': tp1_price,
                 'sl_pct': 2.0,
+                'tp1_pct': 4.5
+            }
+            
+        except Exception as e:
+            return None
+
+    async def test_range_break(self, symbol, candles_by_tf, timestamp):
+        """Test range break strategy"""
+        try:
+            if '15' not in candles_by_tf:
+                return None
+                
+            result = range_break_detector(symbol, candles_by_tf, "ranging")
+            if not result or result.get('score', 0) < 6.0:
+                return None
+            
+            direction = result.get('direction', 'Long')
+            score = result.get('score', 0)
+            confidence = result.get('confidence', 0.5)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Range break SL/TP
+            if direction == "Long":
+                sl_price = entry_price * 0.975
+                tp1_price = entry_price * 1.055
+            else:
+                sl_price = entry_price * 1.025
+                tp1_price = entry_price * 0.945
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.5,
+                'tp1_pct': 5.5
+            }
+            
+        except Exception as e:
+            return None
+
+    async def test_stealth_accumulation(self, symbol, candles_by_tf, timestamp):
+        """Test stealth accumulation strategy"""
+        try:
+            if '5' not in candles_by_tf:
+                return None
+                
+            # Test stealth accumulation
+            stealth_result = detect_stealth_accumulation_advanced(candles_by_tf['5'])
+            if not stealth_result.get('detected', False):
+                return None
+            
+            strength = stealth_result.get('strength', 0)
+            if strength < 0.6:
+                return None
+            
+            # Calculate accumulation score
+            accum_score = calculate_accumulation_score(candles_by_tf['5'])
+            if accum_score < 0.6:
+                return None
+            
+            # Stealth accumulation is typically bullish
+            direction = 'Long'
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Conservative SL/TP for accumulation
+            sl_price = entry_price * 0.985  # 1.5% SL
+            tp1_price = entry_price * 1.035  # 3.5% TP
+            
+            return {
+                'score': accum_score * 10,
+                'direction': direction,
+                'confidence': strength,
+                'trade_type': 'Swing',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 1.5,
                 'tp1_pct': 3.5
             }
             
         except Exception as e:
             return None
 
-    # HELPER FUNCTIONS
-
-    def get_candles_at_timestamp(self, symbol, timestamp):
-        """Fast slice: last 100 candles per TF up to timestamp (using bisect)."""
-        if symbol not in self.historical_data:
+    async def test_pump_detector(self, symbol, candles_by_tf, timestamp):
+        """Test early pump detection strategy"""
+        try:
+            if '1' not in candles_by_tf or '3' not in candles_by_tf:
+                return None
+                
+            # Test for early pump signals
+            pump_result = detect_early_pump(symbol, candles_by_tf)
+            if not pump_result or pump_result.get('confidence', 0) < 0.7:
+                return None
+            
+            # Also check for pump potential
+            has_potential = has_pump_potential(symbol, candles_by_tf)
+            if not has_potential:
+                return None
+            
+            direction = pump_result.get('direction', 'Long')
+            confidence = pump_result.get('confidence', 0)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Pump detection SL/TP (aggressive for quick moves)
+            if direction == "Long":
+                sl_price = entry_price * 0.97   # 3% SL
+                tp1_price = entry_price * 1.08   # 8% TP
+            else:
+                sl_price = entry_price * 1.03
+                tp1_price = entry_price * 0.92
+            
+            return {
+                'score': confidence * 10,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Scalp',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 3.0,
+                'tp1_pct': 8.0
+            }
+            
+        except Exception as e:
             return None
-        out = {}
-        for tf, series in self.historical_data[symbol].items():
-            ts_list = self._ts_index[symbol].get(tf)
-            if not ts_list:
-                continue
-            i = bisect.bisect_right(ts_list, timestamp)
-            if i >= 30:
-                out[tf] = series[max(0, i-100):i]
-        return out or None
 
-    def get_price_at_timestamp(self, symbol, timestamp):
-        """Get price at specific timestamp"""
-        if symbol not in self.historical_data or '1' not in self.historical_data[symbol]:
+    async def test_momentum_surge(self, symbol, candles_by_tf, timestamp):
+        """Test momentum surge detection"""
+        try:
+            if '3' not in candles_by_tf or '15' not in candles_by_tf:
+                return None
+                
+            # Detect strong momentum
+            momentum_strength = detect_momentum_strength(symbol, candles_by_tf)
+            if not momentum_strength or momentum_strength.get('score', 0) < 8.0:
+                return None
+            
+            direction = momentum_strength.get('direction', 'Long')
+            score = momentum_strength.get('score', 0)
+            confidence = momentum_strength.get('confidence', 0.5)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Momentum SL/TP (wider TP for strong moves)
+            if direction == "Long":
+                sl_price = entry_price * 0.98
+                tp1_price = entry_price * 1.065  # 6.5% TP
+            else:
+                sl_price = entry_price * 1.02
+                tp1_price = entry_price * 0.935
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.0,
+                'tp1_pct': 6.5
+            }
+            
+        except Exception as e:
             return None
-        
-        # Find closest 1m candle
-        candles = self.historical_data[symbol]['1']
-        for candle in reversed(candles):
-            if candle['timestamp'] <= timestamp:
-                return candle['close']
-        
-        return None
-
-    def _pnl_with_costs(self, entry, exit_, direction, notional):
-        gross = (exit_ - entry)/entry if direction == "Long" else (entry - exit_)/entry
-        net = gross - (2*FEE_PCT) - (2*SLIP_PCT)
-        return notional * net
-
-    def check_trade_exit(self, trade, current_timestamp):
-        # use the full 1m candle at ts (needs high/low)
-        series = self.historical_data.get(trade['symbol'], {}).get('1')
-        if not series:
-            return None
-        ts_list = self._ts_index[trade['symbol']]['1']
-        i = bisect.bisect_left(ts_list, current_timestamp)
-        if i >= len(series) or series[i]['timestamp'] != current_timestamp:
-            return None
-
-        c = series[i]
-        hi, lo, close = c['high'], c['low'], c['close']
-        entry, sl, tp = trade['entry_price'], trade.get('sl_price'), trade.get('tp1_price')
-        dirn = trade['direction']
-
-        # stop-first (conservative intrabar path)
-        if dirn == "Long":
-            if sl and lo <= sl:
-                exit_px = sl * (1 - SLIP_PCT)
-                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
-                return {'exit_price': exit_px, 'reason': 'stop_loss', 'pnl': pnl}
-            if tp and hi >= tp:
-                exit_px = tp * (1 + SLIP_PCT)
-                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
-                return {'exit_price': exit_px, 'reason': 'take_profit', 'pnl': pnl}
-        else:
-            if sl and hi >= sl:
-                exit_px = sl * (1 + SLIP_PCT)
-                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
-                return {'exit_price': exit_px, 'reason': 'stop_loss', 'pnl': pnl}
-            if tp and lo <= tp:
-                exit_px = tp * (1 - SLIP_PCT)
-                pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
-                return {'exit_price': exit_px, 'reason': 'take_profit', 'pnl': pnl}
-
-        # time exit
-        duration_hours = (current_timestamp - trade['entry_timestamp']) / 3_600_000
-        max_duration = {'Scalp': 1, 'Intraday': 24, 'Swing': 168}
-        if duration_hours >= max_duration.get(trade['trade_type'], 24):
-            # apply exit slippage too
-            slip_factor = (1 + SLIP_PCT) if dirn == "Long" else (1 - SLIP_PCT)
-            exit_px = close * slip_factor
-            pnl = self._pnl_with_costs(entry, exit_px, dirn, trade['position_value'])
-            return {'exit_price': exit_px, 'reason': 'time_exit', 'pnl': pnl}
-        return None
-
-    def force_close_trade(self, trade, timestamp):
-        """Force close trade at end of backtest"""
-        current_price = self.get_price_at_timestamp(trade['symbol'], timestamp)
-        if not current_price:
-            current_price = trade['entry_price']  # Break even if no price
-        
-        pnl = self.calculate_pnl(trade['entry_price'], current_price, trade['direction'], trade['position_value'])
-        return {'exit_price': current_price, 'reason': 'backtest_end', 'pnl': pnl}
-
-    def calculate_pnl(self, entry_price, exit_price, direction, position_value):
-        """Calculate PnL for a trade"""
-        if direction == "Long":
-            price_change_pct = (exit_price - entry_price) / entry_price
-        else:
-            price_change_pct = (entry_price - exit_price) / entry_price
-        
-        return position_value * price_change_pct
 
     def generate_comprehensive_report(self, initial_balance):
-        """Generate detailed backtest report"""
-        log("📊 Generating comprehensive backtest report...")
+        """Generate detailed performance report for all strategies"""
         
         if not self.all_trades:
             log("❌ No trades to analyze")
             return
         
-        # Overall statistics
+        log("📊 Generating comprehensive performance report...")
+        
+        # Overall performance
+        total_pnl = sum(trade['pnl'] for trade in self.all_trades)
         total_trades = len(self.all_trades)
-        winning_trades = [t for t in self.all_trades if t['pnl'] > 0]
-        losing_trades = [t for t in self.all_trades if t['pnl'] < 0]
+        winning_trades = len([t for t in self.all_trades if t['pnl'] > 0])
+        win_rate = winning_trades / total_trades if total_trades > 0 else 0
         
-        win_rate = len(winning_trades) / total_trades if total_trades > 0 else 0
-        total_pnl = sum(t['pnl'] for t in self.all_trades)
-        avg_win = sum(t['pnl'] for t in winning_trades) / len(winning_trades) if winning_trades else 0
-        avg_loss = sum(t['pnl'] for t in losing_trades) / len(losing_trades) if losing_trades else 0
-        
-        # Strategy performance
+        # Strategy-specific performance
         strategy_stats = {}
-        for strategy, trades in self.strategy_performance.items():
-            if trades:
-                strategy_wins = [t for t in trades if t['pnl'] > 0]
-                strategy_pnl = sum(t['pnl'] for t in trades)
+        for strategy_name in self.strategies.keys():
+            strategy_trades = self.strategy_performance[strategy_name]
+            
+            if strategy_trades:
+                strategy_pnl = sum(t['pnl'] for t in strategy_trades)
+                strategy_wins = len([t for t in strategy_trades if t['pnl'] > 0])
+                strategy_win_rate = strategy_wins / len(strategy_trades)
+                avg_duration = sum(t['duration_minutes'] for t in strategy_trades) / len(strategy_trades)
+                avg_pnl = strategy_pnl / len(strategy_trades)
                 
-                strategy_stats[strategy] = {
-                    'trades': len(trades),
-                    'win_rate': len(strategy_wins) / len(trades),
+                strategy_stats[strategy_name] = {
+                    'total_trades': len(strategy_trades),
                     'total_pnl': strategy_pnl,
-                    'avg_pnl': strategy_pnl / len(trades),
-                    'avg_duration': sum(t['duration_minutes'] for t in trades) / len(trades)
+                    'win_rate': strategy_win_rate,
+                    'avg_pnl_per_trade': avg_pnl,
+                    'avg_duration_minutes': avg_duration,
+                    'return_pct': (strategy_pnl / initial_balance) * 100
+                }
+            else:
+                strategy_stats[strategy_name] = {
+                    'total_trades': 0,
+                    'total_pnl': 0,
+                    'win_rate': 0,
+                    'avg_pnl_per_trade': 0,
+                    'avg_duration_minutes': 0,
+                    'return_pct': 0
                 }
         
-        # Print report
+        # Print summary
         print("\n" + "="*80)
-        print("🎯 COMPREHENSIVE STRATEGY BACKTEST REPORT")
+        print("📈 COMPREHENSIVE STRATEGY BACKTEST RESULTS")
         print("="*80)
         
         print(f"\n💰 OVERALL PERFORMANCE:")
         print(f"   Initial Balance: ${initial_balance:,.2f}")
         print(f"   Final Balance: ${initial_balance + total_pnl:,.2f}")
-        print(f"   Total Return: {(total_pnl / initial_balance) * 100:+.2f}%")
         print(f"   Total PnL: ${total_pnl:+,.2f}")
-        
-        print(f"\n📊 TRADE STATISTICS:")
+        print(f"   Total Return: {(total_pnl / initial_balance) * 100:+.2f}%")
         print(f"   Total Trades: {total_trades}")
         print(f"   Win Rate: {win_rate:.1%}")
-        print(f"   Average Win: ${avg_win:+.2f}")
-        print(f"   Average Loss: ${avg_loss:+.2f}")
-        print(f"   Profit Factor: {abs(avg_win / avg_loss) if avg_loss != 0 else 'N/A'}")
+        print(f"   Avg PnL per Trade: ${total_pnl / total_trades:+.2f}")
         
-        print(f"\n🎯 STRATEGY PERFORMANCE:")
-        for strategy, stats in sorted(strategy_stats.items(), key=lambda x: x[1]['total_pnl'], reverse=True):
-            print(f"   {strategy.upper()}:")
-            print(f"      Trades: {stats['trades']}")
-            print(f"      Win Rate: {stats['win_rate']:.1%}")
-            print(f"      Total PnL: ${stats['total_pnl']:+.2f}")
-            print(f"      Avg PnL/Trade: ${stats['avg_pnl']:+.2f}")
-            print(f"      Avg Duration: {stats['avg_duration']:.0f} minutes")
+        print(f"\n🎯 STRATEGY BREAKDOWN:")
+        print("-" * 80)
+        
+        # Sort strategies by return percentage
+        sorted_strategies = sorted(strategy_stats.items(), key=lambda x: x[1]['return_pct'], reverse=True)
+        
+        for i, (strategy, stats) in enumerate(sorted_strategies, 1):
+            emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            strategy_description = self.strategies[strategy].get('description', strategy.replace('_', ' ').title())
+            
+            print(f"\n{emoji} {strategy_description}")
+            print(f"   Return: {stats['return_pct']:+.2f}%")
+            print(f"   PnL: ${stats['total_pnl']:+,.2f}")
+            print(f"   Trades: {stats['total_trades']}")
+            if stats['total_trades'] > 0:
+                print(f"   Win Rate: {stats['win_rate']:.1%}")
+                print(f"   Avg PnL/Trade: ${stats['avg_pnl_per_trade']:+.2f}")
+                print(f"   Avg Duration: {stats['avg_duration_minutes']:.0f} min")
         
         # Save detailed report
         report_data = {
-            'timestamp': datetime.now().isoformat(),
+            'backtest_date': datetime.now().isoformat(),
             'initial_balance': initial_balance,
             'final_balance': initial_balance + total_pnl,
             'total_return_pct': (total_pnl / initial_balance) * 100,
@@ -706,10 +982,12 @@ class ComprehensiveBacktester:
             'total_trades': total_trades,
             'win_rate': win_rate,
             'strategy_performance': strategy_stats,
+            'strategy_configurations': {name: config for name, config in self.strategies.items()},
             'all_trades': self.all_trades,
             'daily_pnl': dict(self.daily_pnl)
         }
         
+        # Save JSON report
         with open('comprehensive_backtest_report.json', 'w') as f:
             json.dump(report_data, f, indent=2, default=str)
         
@@ -719,8 +997,8 @@ class ComprehensiveBacktester:
             df.to_csv('backtest_trades.csv', index=False)
         
         print(f"\n📄 Detailed reports saved:")
-        print(f"   comprehensive_backtest_report.json - Full analysis")
-        print(f"   backtest_trades.csv - All trade details")
+        print(f"   📊 comprehensive_backtest_report.json - Full analysis")
+        print(f"   📈 backtest_trades.csv - Individual trade details")
         
         print("="*80)
 
@@ -745,18 +1023,127 @@ async def run_full_strategy_backtest():
     backtester = ComprehensiveBacktester()
     await backtester.run_comprehensive_backtest(symbols, days=30, initial_balance=10000)
 
-if __name__ == "__main__":
-    print("🚀 Comprehensive Strategy Backtester")
-    print("Choose test duration:")
-    print("1. Quick test (7 days, 5 symbols)")
-    print("2. Full test (30 days, 20 symbols)")
+async def run_strategy_comparison():
+    """Compare individual strategies head-to-head"""
     
-    choice = input("Enter choice (1 or 2): ").strip()
+    print("🥊 INDIVIDUAL STRATEGY COMPARISON")
+    print("=" * 50)
+    
+    # Test each strategy individually
+    strategies_to_test = {
+        'core_only': ['core_strategy'],
+        'enhanced_core_only': ['enhanced_core'],
+        'mean_reversion_only': ['mean_reversion'],
+        'breakout_only': ['breakout_sniper'],
+        'pattern_matching_only': ['pattern_matching'],
+        'pattern_discovery_only': ['pattern_discovery'],
+        'range_break_only': ['range_break'],
+        'stealth_accumulation_only': ['stealth_accumulation'],
+        'pump_detector_only': ['pump_detector'],
+        'momentum_surge_only': ['momentum_surge']
+    }
+    
+    symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT']
+    results = {}
+    
+    for test_name, enabled_strategies in strategies_to_test.items():
+        print(f"\n🧪 Testing: {test_name.replace('_only', '').replace('_', ' ').title()}")
+        
+        backtester = ComprehensiveBacktester()
+        
+        # Disable all strategies except the one being tested
+        for strategy in backtester.strategies:
+            backtester.strategies[strategy]['enabled'] = strategy in enabled_strategies
+        
+        await backtester.run_comprehensive_backtest(symbols, days=10, initial_balance=10000)
+        
+        # Store results
+        if backtester.all_trades:
+            total_pnl = sum(t['pnl'] for t in backtester.all_trades)
+            win_rate = len([t for t in backtester.all_trades if t['pnl'] > 0]) / len(backtester.all_trades)
+            results[test_name] = {
+                'total_pnl': total_pnl,
+                'win_rate': win_rate,
+                'total_trades': len(backtester.all_trades),
+                'return_pct': (total_pnl / 10000) * 100
+            }
+        else:
+            results[test_name] = {
+                'total_pnl': 0,
+                'win_rate': 0,
+                'total_trades': 0,
+                'return_pct': 0
+            }
+    
+    # Print comparison
+    print(f"\n🏆 INDIVIDUAL STRATEGY RESULTS")
+    print(f"=" * 50)
+    
+    sorted_results = sorted(results.items(), key=lambda x: x[1]['return_pct'], reverse=True)
+    
+    for i, (strategy, stats) in enumerate(sorted_results, 1):
+        emoji = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+        strategy_name = strategy.replace('_only', '').replace('_', ' ').title()
+        
+        print(f"\n{emoji} {strategy_name}")
+        print(f"   Return: {stats['return_pct']:+.2f}%")
+        print(f"   Win Rate: {stats['win_rate']:.1%}")
+        print(f"   Trades: {stats['total_trades']}")
+        print(f"   PnL: ${stats['total_pnl']:+.2f}")
+
+if __name__ == "__main__":
+    print("🚀 COMPREHENSIVE STRATEGY BACKTESTER")
+    print("=" * 60)
+    print()
+    print("Available Tests:")
+    print("1. 🏃‍♂️ Quick Test (7 days, 5 symbols)")
+    print("2. 📊 Full Test (30 days, 20 symbols)")
+    print("3. 🥊 Strategy Comparison (individual performance)")
+    print("4. 🎯 Custom Test")
+    
+    choice = input("\nEnter your choice (1-4): ").strip()
     
     if choice == "1":
+        print("\n⚡ Running quick test...")
         asyncio.run(run_quick_strategy_test())
     elif choice == "2":
+        print("\n📈 Running full backtest...")
         asyncio.run(run_full_strategy_backtest())
+    elif choice == "3":
+        print("\n🔍 Running strategy comparison...")
+        asyncio.run(run_strategy_comparison())
+    elif choice == "4":
+        print("\n🛠️ Custom Test Configuration:")
+        days = int(input("Number of days (1-90): ") or "14")
+        balance = int(input("Initial balance ($): ") or "10000")
+        
+        print("\nSymbol options:")
+        print("1. Top 5 (BTC, ETH, SOL, ADA, DOGE)")
+        print("2. Top 10 (includes XRP, DOT, UNI, LINK, LTC)")
+        print("3. Top 20 (full crypto selection)")
+        
+        symbol_choice = input("Symbol set (1-3): ").strip()
+        
+        if symbol_choice == "1":
+            symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT']
+        elif symbol_choice == "2":
+            symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT',
+                      'XRPUSDT', 'DOTUSDT', 'UNIUSDT', 'LINKUSDT', 'LTCUSDT']
+        else:
+            symbols = [
+                'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'ADAUSDT', 'DOGEUSDT',
+                'XRPUSDT', 'DOTUSDT', 'UNIUSDT', 'LINKUSDT', 'LTCUSDT',
+                'AVAXUSDT', 'ATOMUSDT', 'NEARUSDT', 'FILUSDT', 'SANDUSDT',
+                'MATICUSDT', 'ALGOUSDT', 'VETUSDT', 'FTMUSDT', 'ICPUSDT'
+            ]
+        
+        print(f"\n🚀 Running custom backtest...")
+        print(f"   📅 Duration: {days} days")
+        print(f"   💰 Balance: ${balance:,}")
+        print(f"   📊 Symbols: {len(symbols)} pairs")
+        
+        backtester = ComprehensiveBacktester()
+        asyncio.run(backtester.run_comprehensive_backtest(symbols, days, balance))
     else:
         print("Invalid choice, running quick test...")
         asyncio.run(run_quick_strategy_test())
