@@ -335,44 +335,73 @@ class ComprehensiveBacktester:
                 # --- pick the strongest candidate (by score)
                 if not candidates:
                     continue
-
                 strategy_name, signal = max(candidates, key=lambda x: x[1].get('score', 0))
                             
-                            # Calculate position size (2% risk)
-                            risk_per_trade = current_balance * 0.02
-                            sl_distance_pct = abs(signal.get('sl_pct', 2.0))
-                            position_value = risk_per_trade / (sl_distance_pct / 100)
-                            
-                            # Don't risk more than 5% of balance per trade
-                            position_value = min(position_value, current_balance * 0.05)
-                            
-                            if position_value < 100:  # Minimum position size
-                                continue
-                            
-                            # Create trade record
-                            trade_id += 1
-                            trade = {
-                                'id': trade_id,
-                                'strategy': strategy_name,
-                                'symbol': symbol,
-                                'entry_time': datetime.utcfromtimestamp(exec_ts/1000).isoformat(),
-                                'entry_timestamp': exec_ts,
-                                'entry_price': entry_price,
-                                'direction': signal['direction'],
-                                'position_value': national,
-                                'score': signal.get('score', 0),
-                                'confidence': signal.get('confidence', 0),
-                                'sl_price": sl_price,
-                                'tp1_price": tp1_price,
-                                'trade_type': signal.get('trade_type', 'Intraday'),
-                                'reserved_margin': margin
-                            }
-                            
-                            open_trades[trade_id] = trade
-                            current_balance -= margin  # Reserve margin
-                            
-                            # Only take one signal per symbol per timestamp
-                            break
+                # --- ENTRY EXECUTION (latency -> next 1m open) ---
+                delay_ms = random.randint(2000, 6000)
+                exec_ts = timestamp + delay_ms
+                entry_price = self.get_next_open(symbol, exec_ts)
+                if not entry_price:
+                    continue
+
+                # --- RECOMPUTE SL/TP AROUND THE REAL ENTRY ---
+                try:
+                    sl_price, tp1_price, sl_pct, trailing_pct, tp1_pct = calculate_dynamic_sl_tp(
+                        candles_by_tf=candles_by_tf,
+                        price=entry_price,
+                        trade_type=signal.get('trade_type', 'Intraday'),
+                        direction=signal['direction'],
+                        score=signal.get('score', 0),
+                        confidence=signal.get('confidence', 0),
+                        regime='trending'
+                    )
+                except Exception:
+                    if signal.get('sl_price') and signal.get('tp1_price'):
+                        old_entry = self.get_price_at_timestamp(symbol, timestamp) or entry_price
+                        scale = entry_price / old_entry if old_entry else 1.0
+                        sl_price = signal['sl_price'] * scale
+                        tp1_price = signal['tp1_price'] * scale
+                        sl_pct = abs((entry_price - sl_price) / entry_price) * 100
+                        tp1_pct = abs((tp1_price - entry_price) / entry_price) * 100
+                    else:
+                        if signal['direction'] == 'Long':
+                            sl_price, tp1_price, sl_pct, tp1_pct = entry_price*0.99, entry_price*1.015, 1.0, 1.5
+                        else:
+                            sl_price, tp1_price, sl_pct, tp1_pct = entry_price*1.01, entry_price*0.985, 1.0, 1.5
+
+                # --- LEVERAGE-AWARE SIZING (reserve margin, not full notional) ---
+                risk_ccy = current_balance * 0.02                   # 2% risk
+                sl_dist_pct = max(1e-6, abs(sl_pct)) / 100.0
+                target_notional = risk_ccy / sl_dist_pct
+                max_margin = current_balance * 0.05                 # cap margin per trade
+                margin = min(target_notional / LEVERAGE, max_margin)
+                notional = margin * LEVERAGE
+                if margin < 50:                                     # ignore tiny orders
+                    continue
+
+                # --- OPEN THE TRADE ---
+                trade_id += 1
+                trade = {
+                    "id": trade_id,
+                    "strategy": strategy_name,
+                    "symbol": symbol,
+                    "entry_time": datetime.utcfromtimestamp(exec_ts/1000).isoformat(),
+                    "entry_timestamp": exec_ts,
+                    "entry_price": entry_price,
+                    "direction": signal["direction"],
+                    "position_value": notional,
+                    "score": float(signal.get("score", 0)),
+                    "confidence": float(signal.get("confidence", 0)),
+                    "sl_price": sl_price,
+                    "tp1_price": tp1_price,
+                    "trade_type": signal.get("trade_type", "Intraday"),
+                    "reserved_margin": margin,
+                }
+                open_trades[trade_id] = trade
+                current_balance -= margin  # Reserve margin
+
+                # Only take one signal per symbol per timestamp
+                break
                             
                     except Exception as e:
                         log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
