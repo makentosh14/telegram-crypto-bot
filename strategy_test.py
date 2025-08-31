@@ -172,7 +172,7 @@ class FinalFixedBacktester:
                         method='GET',
                         endpoint='/v5/market/kline',
                         params={
-                            'category': 'spot',
+                            'category': 'linear',
                             'symbol': symbol,
                             'interval': tf,
                             'start': start_time,
