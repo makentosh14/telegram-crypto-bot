@@ -172,7 +172,7 @@ class FinalFixedBacktester:
                         method='GET',
                         endpoint='/v5/market/kline',
                         params={
-                            'category': 'linear',
+                            'category': 'spot',
                             'symbol': symbol,
                             'interval': tf,
                             'start': start_time,
@@ -275,55 +275,57 @@ class FinalFixedBacktester:
         
         # Simulate trading at each timestamp
         for i, timestamp in enumerate(sorted_timestamps):
-            if i % 2000 == 0:
+            if i % 500 == 0:  # More frequent progress updates
                 progress = (i / len(sorted_timestamps)) * 100
                 log(f"📊 Progress: {progress:.1f}% ({i}/{len(sorted_timestamps)})")
             
-            current_time = datetime.fromtimestamp(timestamp / 1000)
-            
-            # Check exits first
-            trades_to_close = []
-            for trade_id_key, trade in open_trades.items():
-                exit_result = self.check_trade_exit(trade, timestamp)
-                if exit_result:
-                    trades_to_close.append((trade_id_key, trade, exit_result))
-            
-            # Close trades
-            for trade_id_key, trade, exit_result in trades_to_close:
-                pnl = exit_result['pnl']
-                current_balance += pnl
+            # FORCE TESTING: Test strategies on every 10th timestamp for debugging
+            if i % 10 == 0 or len(open_trades) < 5:
+                current_time = datetime.fromtimestamp(timestamp / 1000)
                 
-                completed_trade = {
-                    **trade,
-                    'exit_time': current_time.isoformat(),
-                    'exit_price': exit_result['exit_price'],
-                    'exit_reason': exit_result['reason'],
-                    'pnl': pnl,
-                    'pnl_pct': (pnl / trade['position_value']) * 100,
-                    'duration_minutes': (timestamp - trade['entry_timestamp']) // 60000
-                }
+                # Check exits first
+                trades_to_close = []
+                for trade_id_key, trade in open_trades.items():
+                    exit_result = self.check_trade_exit(trade, timestamp)
+                    if exit_result:
+                        trades_to_close.append((trade_id_key, trade, exit_result))
                 
-                self.all_trades.append(completed_trade)
-                self.strategy_performance[trade['strategy']].append(completed_trade)
+                # Close trades
+                for trade_id_key, trade, exit_result in trades_to_close:
+                    pnl = exit_result['pnl']
+                    current_balance += pnl
+                    
+                    completed_trade = {
+                        **trade,
+                        'exit_time': current_time.isoformat(),
+                        'exit_price': exit_result['exit_price'],
+                        'exit_reason': exit_result['reason'],
+                        'pnl': pnl,
+                        'pnl_pct': (pnl / trade['position_value']) * 100,
+                        'duration_minutes': (timestamp - trade['entry_timestamp']) // 60000
+                    }
+                    
+                    self.all_trades.append(completed_trade)
+                    self.strategy_performance[trade['strategy']].append(completed_trade)
+                    
+                    del open_trades[trade_id_key]
                 
-                del open_trades[trade_id_key]
-            
-            if len(open_trades) >= 5:
-                continue
-                
-            # Check for new signals
-            for symbol in symbols:
                 if len(open_trades) >= 5:
-                    break
-                
-                if any(trade['symbol'] == symbol for trade in open_trades.values()):
                     continue
+                    
+                # Check for new signals - TEST ALL SYMBOLS MORE FREQUENTLY
+                for symbol in symbols:
+                    if len(open_trades) >= 5:
+                        break
+                    
+                    if any(trade['symbol'] == symbol for trade in open_trades.values()):
+                        continue
+                    
+                    candles_by_tf = self.get_candles_at_timestamp(symbol, timestamp)
+                    if not candles_by_tf or '1' not in candles_by_tf:
+                        continue
                 
-                candles_by_tf = self.get_candles_at_timestamp(symbol, timestamp)
-                if not candles_by_tf or '1' not in candles_by_tf:
-                    continue
-                
-                # Test each strategy with debugging
+                # Test each strategy with AGGRESSIVE debugging
                 for strategy_name, strategy_config in self.strategies.items():
                     if not strategy_config['enabled']:
                         continue
@@ -332,6 +334,8 @@ class FinalFixedBacktester:
                         break
                     
                     try:
+                        log(f"🔍 Testing {strategy_name} on {symbol}...")
+                        
                         # Add debugging for strategy testing
                         signal = await strategy_config['function'](symbol, candles_by_tf, timestamp)
                         
@@ -339,51 +343,50 @@ class FinalFixedBacktester:
                         if signal:
                             score = signal.get('score', 0)
                             min_score = strategy_config['min_score']
+                            log(f"✅ {strategy_name}: Score {score:.2f} >= {min_score} ({'PASS' if score >= min_score else 'FAIL'})")
+                            
                             if score >= min_score:
-                                log(f"✅ {strategy_name}: Score {score:.2f} >= {min_score} (PASS)")
-                            else:
-                                log(f"❌ {strategy_name}: Score {score:.2f} < {min_score} (FAIL)")
+                                delay_ms = random.randint(2000, 6000)
+                                entry_price = self.get_next_open(symbol, timestamp + delay_ms)
+                                
+                                if not entry_price:
+                                    log(f"❌ {strategy_name}: No entry price available")
+                                    continue
+                                
+                                risk_per_trade = current_balance * 0.02
+                                sl_distance_pct = abs(signal.get('sl_pct', 2.0))
+                                position_value = risk_per_trade / (sl_distance_pct / 100)
+                                position_value = min(position_value, current_balance * 0.05)
+                                
+                                if position_value < 100:
+                                    log(f"❌ {strategy_name}: Position value too small ({position_value:.2f})")
+                                    continue
+                                
+                                trade_id += 1
+                                trade = {
+                                    'id': trade_id,
+                                    'strategy': strategy_name,
+                                    'symbol': symbol,
+                                    'entry_time': current_time.isoformat(),
+                                    'entry_timestamp': timestamp,
+                                    'entry_price': entry_price,
+                                    'direction': signal['direction'],
+                                    'position_value': position_value,
+                                    'score': signal.get('score', 0),
+                                    'confidence': signal.get('confidence', 0),
+                                    'sl_price': signal.get('sl_price'),
+                                    'tp1_price': signal.get('tp1_price'),
+                                    'trade_type': signal.get('trade_type', 'Intraday'),
+                                    'reserved_margin': position_value
+                                }
+                                
+                                open_trades[trade_id] = trade
+                                current_balance -= position_value
+                                
+                                log(f"📈 {strategy_name} SIGNAL: {symbol} {signal['direction']} @ {entry_price:.6f} (score: {signal.get('score', 0):.2f})")
+                                break
                         else:
-                            log(f"⚠️ {strategy_name}: No signal returned")
-                        
-                        if signal and signal.get('score', 0) >= strategy_config['min_score']:
-                            delay_ms = random.randint(2000, 6000)
-                            entry_price = self.get_next_open(symbol, timestamp + delay_ms)
-                            
-                            if not entry_price:
-                                continue
-                            
-                            risk_per_trade = current_balance * 0.02
-                            sl_distance_pct = abs(signal.get('sl_pct', 2.0))
-                            position_value = risk_per_trade / (sl_distance_pct / 100)
-                            position_value = min(position_value, current_balance * 0.05)
-                            
-                            if position_value < 100:
-                                continue
-                            
-                            trade_id += 1
-                            trade = {
-                                'id': trade_id,
-                                'strategy': strategy_name,
-                                'symbol': symbol,
-                                'entry_time': current_time.isoformat(),
-                                'entry_timestamp': timestamp,
-                                'entry_price': entry_price,
-                                'direction': signal['direction'],
-                                'position_value': position_value,
-                                'score': signal.get('score', 0),
-                                'confidence': signal.get('confidence', 0),
-                                'sl_price': signal.get('sl_price'),
-                                'tp1_price': signal.get('tp1_price'),
-                                'trade_type': signal.get('trade_type', 'Intraday'),
-                                'reserved_margin': position_value
-                            }
-                            
-                            open_trades[trade_id] = trade
-                            current_balance -= position_value
-                            
-                            log(f"📈 {strategy_name} SIGNAL: {symbol} {signal['direction']} @ {entry_price:.6f} (score: {signal.get('score', 0):.2f})")
-                            break
+                            log(f"⚠️ {strategy_name}: No signal returned (None)")
                             
                     except Exception as e:
                         log(f"❌ Error testing {strategy_name} on {symbol}: {e}")
