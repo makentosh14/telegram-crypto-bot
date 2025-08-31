@@ -179,7 +179,7 @@ class FixedComprehensiveBacktester:
                     
                     response = await signed_request(
                         method='GET',
-                        path='/v5/market/kline',
+                        endpoint='/v5/market/kline',
                         params={
                             'category': 'spot',
                             'symbol': symbol,
