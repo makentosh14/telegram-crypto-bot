@@ -471,8 +471,6 @@ class FinalFixedBacktester:
             log(f"❌ Error checking trade exit for {trade.get('symbol')}: {e}")
             return None
 
-    # FIXED STRATEGY TESTING FUNCTIONS
-
     async def test_core_strategy_fixed(self, symbol, candles_by_tf, timestamp):
         """FIXED: Test core strategy with correct function signatures"""
         try:
@@ -483,7 +481,6 @@ class FinalFixedBacktester:
             if score < 7.0:
                 return None
             
-            # FIX: determine_direction only takes tf_scores (1 parameter)
             direction = determine_direction(tf_scores)
             if not direction:
                 return None
@@ -500,7 +497,6 @@ class FinalFixedBacktester:
             if not entry_price:
                 return None
             
-            # Simple SL/TP calculation
             if direction == "Long":
                 sl_price = entry_price * 0.98
                 tp1_price = entry_price * 1.04
@@ -533,7 +529,6 @@ class FinalFixedBacktester:
             if score < 8.0:
                 return None
             
-            # FIX: determine_direction only takes tf_scores (1 parameter)
             direction = determine_direction(tf_scores)
             if not direction:
                 return None
@@ -705,10 +700,8 @@ class FinalFixedBacktester:
             if '5' not in candles_by_tf or len(candles_by_tf['5']) < 50:
                 return None
             
-            # FIX: Based on the project knowledge, this returns a 4-tuple: (detected, direction, confidence, details)
             try:
                 if hasattr(range_break_detector, 'detect_range_breakout'):
-                    # It's an object with methods - pass trend context as 4th parameter
                     result = range_break_detector.detect_range_breakout(symbol, candles_by_tf['5'], '5', {"regime": "ranging"})
                 else:
                     log(f"❌ range_break_detector does not have detect_range_breakout method")
@@ -717,11 +710,9 @@ class FinalFixedBacktester:
                 log(f"❌ Range break detector call failed: {e}")
                 return None
             
-            # FIX: Handle None result (which was causing the 'NoneType' error)
             if result is None:
                 return None
                 
-            # FIX: Expect a 4-tuple: (detected, direction, confidence, details)
             if not isinstance(result, tuple) or len(result) < 4:
                 log(f"❌ Range break detector returned unexpected format: {type(result)}")
                 return None
@@ -731,7 +722,6 @@ class FinalFixedBacktester:
             if not detected or not direction or confidence is None:
                 return None
             
-            # Convert confidence to score
             score = confidence * 10 if isinstance(confidence, (int, float)) else 6.0
             
             if score < 6.0:
@@ -781,7 +771,7 @@ class FinalFixedBacktester:
             if accum_score < 0.6:
                 return None
             
-            direction = 'Long'  # Stealth accumulation is typically bullish
+            direction = 'Long'
             
             entry_price = self.get_price_at_timestamp(symbol, timestamp)
             if not entry_price:
@@ -806,12 +796,11 @@ class FinalFixedBacktester:
             return None
 
     async def test_pump_detector_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test early pump detection - correct parameter order and async handling"""
+        """FIXED: Test early pump detection with correct parameter order"""
         try:
             if '1' not in candles_by_tf or '3' not in candles_by_tf:
                 return None
             
-            # FIX: Correct parameter order is (candles_by_tf, symbol) and it's async
             try:
                 raw_result = await detect_early_pump(candles_by_tf, symbol)
             except Exception as e:
@@ -821,18 +810,15 @@ class FinalFixedBacktester:
             if not raw_result:
                 return None
             
-            # Extract trigger count and individual signals
             trigger_count = raw_result.get('trigger_count', 0)
             volume_spike = raw_result.get('volume_spike', False)
             whale_activity = raw_result.get('whale_activity', False)
             base_breakout = raw_result.get('base_breakout', False)
             social_hype = raw_result.get('social_hype', False)
             
-            # Need at least 2 triggers to consider it a valid pump signal
             if trigger_count < 2:
                 return None
             
-            # Convert trigger count to confidence score
             if trigger_count >= 4:
                 confidence = 0.9
             elif trigger_count == 3:
@@ -840,10 +826,8 @@ class FinalFixedBacktester:
             else:
                 confidence = 0.7
             
-            # Pump signals are typically Long (bullish)
             direction = 'Long'
             
-            # Check pump potential with correct parameter order
             try:
                 has_potential = has_pump_potential(candles_by_tf, direction)
             except Exception as e:
@@ -857,56 +841,8 @@ class FinalFixedBacktester:
             if not entry_price:
                 return None
             
-            # Pump detection SL/TP (aggressive for quick moves)
             sl_price = entry_price * 0.97
             tp1_price = entry_price * 1.08
-            
-            return {
-                'score': confidence * 10,
-                'direction': direction,
-                'confidence': confidence,
-                'trade_type': 'Scalp',
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 3.0,
-                'tp1_pct': 8.0
-            }
-            
-        except Exception as e:
-            log(f"❌ Pump detector strategy error for {symbol}: {e}")
-            return NoneLong'
-                confidence = 0.7
-            
-            if confidence < 0.7:
-                return None
-            
-            # Also check for pump potential - handle different parameter signatures
-            try:
-                # Try with both candles_by_tf and just symbol parameter formats
-                if 'has_pump_potential' in dir():
-                    try:
-                        has_potential = has_pump_potential(symbol, candles_by_tf)
-                    except TypeError:
-                        # Try with different signature
-                        has_potential = has_pump_potential(candles_by_tf, direction)
-                else:
-                    has_potential = True
-            except Exception:
-                has_potential = True  # Assume true if function fails
-            
-            if not has_potential:
-                return None
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.97
-                tp1_price = entry_price * 1.08
-            else:
-                sl_price = entry_price * 1.03
-                tp1_price = entry_price * 0.92
             
             return {
                 'score': confidence * 10,
@@ -929,13 +865,10 @@ class FinalFixedBacktester:
             if '1' not in candles_by_tf or len(candles_by_tf['1']) < 20:
                 return None
             
-            # FIX: Based on project knowledge, detect_momentum_strength expects just candles, not symbol + candles
             try:
-                # Try different parameter combinations based on the actual function signature
                 momentum_strength = detect_momentum_strength(candles_by_tf.get('1', []))
             except TypeError:
                 try:
-                    # Try with symbol parameter
                     momentum_strength = detect_momentum_strength(symbol, candles_by_tf)
                 except Exception as e:
                     log(f"❌ Momentum strength call failed with both signatures: {e}")
@@ -947,38 +880,30 @@ class FinalFixedBacktester:
             if not momentum_strength:
                 return None
             
-            # FIX: Handle the "dict + int" operation error by properly extracting values
             if isinstance(momentum_strength, dict):
-                # Extract score, direction, and confidence from dict
                 score = momentum_strength.get('score')
                 direction = momentum_strength.get('direction', 'Long')
                 confidence = momentum_strength.get('confidence', 0.5)
                 
-                # Handle nested dict structures that might cause the addition error
                 if isinstance(score, dict):
-                    # If score is a dict, try to extract a numeric value
                     score = score.get('value', score.get('total', score.get('strength', 8.0)))
                 elif score is None:
                     score = 8.0
                     
-                # Ensure score is numeric
                 if not isinstance(score, (int, float)):
                     score = 8.0
                     
             elif isinstance(momentum_strength, tuple) and len(momentum_strength) >= 3:
-                # (has_momentum, direction, strength) format
                 has_momentum, direction, strength = momentum_strength[0], momentum_strength[1], momentum_strength[2]
                 if not has_momentum:
                     return None
                     
-                # Handle strength being a dict (this was likely causing the dict + int error)
                 if isinstance(strength, dict):
                     score = strength.get('value', strength.get('total', strength.get('score', 8.0)))
                 else:
                     score = strength * 10 if isinstance(strength, (int, float)) else 8.0
                     
                 confidence = strength if isinstance(strength, (int, float)) else 0.6
-                # Convert direction format
                 direction = 'Long' if direction == 'bullish' else 'Short' if direction == 'bearish' else 'Long'
                 
             elif isinstance(momentum_strength, (int, float)):
@@ -989,7 +914,6 @@ class FinalFixedBacktester:
                 log(f"⚠️ Unknown momentum_strength format: {type(momentum_strength)}")
                 return None
             
-            # Ensure all values are proper types
             if not isinstance(score, (int, float)) or score < 8.0:
                 return None
                 
@@ -1031,13 +955,11 @@ class FinalFixedBacktester:
         
         log("📊 Generating FINAL FIXED comprehensive performance report...")
         
-        # Overall performance
         total_pnl = sum(trade['pnl'] for trade in self.all_trades)
         total_trades = len(self.all_trades)
         winning_trades = len([t for t in self.all_trades if t['pnl'] > 0])
         win_rate = winning_trades / total_trades if total_trades > 0 else 0
         
-        # Strategy-specific performance
         strategy_stats = {}
         for strategy_name in self.strategies.keys():
             strategy_trades = self.strategy_performance[strategy_name]
@@ -1067,7 +989,6 @@ class FinalFixedBacktester:
                     'return_pct': 0
                 }
         
-        # Print summary
         print("\n" + "="*80)
         print("📈 FINAL FIXED COMPREHENSIVE STRATEGY BACKTEST RESULTS")
         print("="*80)
@@ -1084,7 +1005,6 @@ class FinalFixedBacktester:
         print(f"\n🎯 FINAL FIXED STRATEGY BREAKDOWN:")
         print("-" * 80)
         
-        # Sort strategies by return percentage
         sorted_strategies = sorted(strategy_stats.items(), key=lambda x: x[1]['return_pct'], reverse=True)
         
         for i, (strategy, stats) in enumerate(sorted_strategies, 1):
@@ -1100,7 +1020,6 @@ class FinalFixedBacktester:
                 print(f"   Avg PnL/Trade: ${stats['avg_pnl_per_trade']:+.2f}")
                 print(f"   Avg Duration: {stats['avg_duration_minutes']:.0f} min")
         
-        # Save detailed report
         report_data = {
             'backtest_date': datetime.now().isoformat(),
             'backtest_type': 'final_fixed_comprehensive',
@@ -1116,7 +1035,6 @@ class FinalFixedBacktester:
             'daily_pnl': dict(self.daily_pnl)
         }
         
-        # Save reports
         with open('final_fixed_backtest_report.json', 'w') as f:
             json.dump(report_data, f, indent=2, default=str)
         
@@ -1129,8 +1047,6 @@ class FinalFixedBacktester:
         print(f"   📈 final_fixed_backtest_trades.csv - Individual trade details")
         
         print("="*80)
-
-# USAGE FUNCTIONS
 
 async def run_final_fixed_test():
     """Run the final fixed comprehensive test"""
