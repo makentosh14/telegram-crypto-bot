@@ -34,43 +34,60 @@ def _now_str() -> str:
 
 # -------------- Bybit fetchers -----------------
 
-async def _fetch_positions_linear() -> List[Dict[str, Any]]:
+async def _fetch_positions_linear(settle_coin: str = "USDT", symbol: str | None = None):
     """
-    Bybit v5 positions (linear). Returns list of position dicts.
+    Bybit v5 positions (linear). You must provide either symbol or settleCoin.
+    - settle_coin: e.g., "USDT" for USDT-settled perps
+    - symbol: set this if you want a single symbol (then settleCoin is not required)
+    Returns a list of position dicts (may be empty).
     """
-    resp = await signed_request("GET", "/v5/position/list", {
-        "category": "linear"
-    })
-    if resp.get("retCode") != 0:
-        raise RuntimeError(f"Bybit position error: {resp.get('retMsg')}")
-    return resp.get("result", {}).get("list", []) or []
+    params = {"category": "linear"}
+    if symbol:
+        params["symbol"] = symbol
+    else:
+        params["settleCoin"] = settle_coin  # <-- REQUIRED when no symbol
 
-async def _fetch_open_stop_orders(symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    out = []
+    cursor = None
+    while True:
+        if cursor:
+            params["cursor"] = cursor
+        resp = await signed_request("GET", "/v5/position/list", params)
+        if resp.get("retCode") != 0:
+            raise RuntimeError(f"Bybit position error: {resp.get('retMsg')}")
+        result = resp.get("result", {}) or {}
+        out.extend(result.get("list", []) or [])
+        cursor = result.get("nextPageCursor")
+        if not cursor:
+            break
+    return out
+
+async def _fetch_open_stop_orders(symbols: list[str], settle_coin: str = "USDT") -> dict:
     """
-    Get open stop orders and map SL per symbol: {symbol: {"sl": float, "sl_order_id": str}}
+    Fetch open conditional/stop orders and index by symbol.
+    When no symbol is given, include settleCoin for unified accounts.
     """
-    # You can filter per symbol if needed; querying all and filtering is simpler.
-    resp = await signed_request("GET", "/v5/order/realtime", {
-        "category": "linear",
-        "openOnly": "1"
-    })
+    params = {"category": "linear", "openOnly": "1", "settleCoin": settle_coin}
+    resp = await signed_request("GET", "/v5/order/realtime", params)
     if resp.get("retCode") != 0:
         log(f"⚠️ SYNC: order/realtime error: {resp.get('retMsg')}", level="WARN")
         return {}
     open_orders = resp.get("result", {}).get("list", []) or []
-    out = {}
+    by_symbol = {}
+    want = set(symbols or [])
     for o in open_orders:
         sym = o.get("symbol")
-        if not sym or (symbols and sym not in symbols):
+        if want and sym not in want:
             continue
-        stop_type = (o.get("stopOrderType") or "").lower()  # 'stoploss','takeprofit','trailingstop'
+        stop_type = (o.get("stopOrderType") or "").lower()
         trig = o.get("triggerPrice")
         if stop_type == "stoploss" and trig:
             try:
-                out[sym] = {"sl": float(trig), "sl_order_id": o.get("orderId")}
+                by_symbol[sym] = {"sl": float(trig), "sl_order_id": o.get("orderId")}
             except Exception:
                 pass
-    return out
+    return by_symbol
+
 
 # -------------- Mapping -----------------
 
@@ -128,7 +145,7 @@ async def sync_bot_with_bybit(send_telegram: bool = True) -> Dict[str, Any]:
     """
     try:
         # 1) Positions from exchange
-        positions = await _fetch_positions_linear()
+        positions = await _fetch_positions_linear(settle_coin="USDT")
         bybit_symbols = [p.get("symbol") for p in positions if p.get("symbol")]
         pos_map: Dict[str, Dict[str, Any]] = {}
         for p in positions:
@@ -138,7 +155,7 @@ async def sync_bot_with_bybit(send_telegram: bool = True) -> Dict[str, Any]:
 
         # 2) Attach SL info best-effort
         try:
-            sl_map = await _fetch_open_stop_orders(bybit_symbols) if bybit_symbols else {}
+            sl_map = await _fetch_open_stop_orders(bybit_symbols, settle_coin="USDT")
             for sym, slinfo in sl_map.items():
                 if sym in pos_map:
                     pos_map[sym]["sl"] = slinfo.get("sl")
