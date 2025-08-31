@@ -439,15 +439,331 @@ class FinalFixedBacktester:
                 if (direction == 'Long' and current_price <= sl_price) or \
                    (direction == 'Short' and current_price >= sl_price):
                     return {
-                    'score': score,
-                    'direction': direction,
-                    'confidence': confidence if isinstance(confidence, float) else 0.7,
-                    'trade_type': 'Intraday',
-                    'sl_price': sl_price,
-                    'tp1_price': tp1_price,
-                    'sl_pct': 2.5,
-                    'tp1_pct': 5.5
+                        'exit_price': current_price,
+                        'reason': 'stop_loss',
+                        'pnl': calculate_pnl_with_fees(current_price)
+                    }
+            
+            # Check take profit
+            if tp1_price:
+                if (direction == 'Long' and current_price >= tp1_price) or \
+                   (direction == 'Short' and current_price <= tp1_price):
+                    return {
+                        'exit_price': current_price,
+                        'reason': 'take_profit',
+                        'pnl': calculate_pnl_with_fees(current_price)
+                    }
+            
+            # Time-based exit
+            max_duration_minutes = 240 if trade.get('trade_type') == 'Intraday' else 1440
+            duration_minutes = (timestamp - trade['entry_timestamp']) // 60000
+            
+            if duration_minutes >= max_duration_minutes:
+                return {
+                    'exit_price': current_price,
+                    'reason': 'time_exit',
+                    'pnl': calculate_pnl_with_fees(current_price)
                 }
+            
+            return None
+            
+        except Exception as e:
+            log(f"❌ Error checking trade exit for {trade.get('symbol')}: {e}")
+            return None
+
+    # FIXED STRATEGY TESTING FUNCTIONS
+
+    async def test_core_strategy_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test core strategy with correct function signatures"""
+        try:
+            score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
+                symbol, candles_by_tf
+            )
+            
+            if score < 7.0:
+                return None
+            
+            # FIX: determine_direction only takes tf_scores (1 parameter)
+            direction = determine_direction(tf_scores)
+            if not direction:
+                return None
+
+            try:
+                from trend_filters import get_trend_context_cached
+                trend_ctx = await get_trend_context_cached()
+            except Exception:
+                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
+            
+            confidence = calculate_confidence(score, tf_scores, trend_ctx, trade_type)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Simple SL/TP calculation
+            if direction == "Long":
+                sl_price = entry_price * 0.98
+                tp1_price = entry_price * 1.04
+            else:
+                sl_price = entry_price * 1.02
+                tp1_price = entry_price * 0.96
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': trade_type,
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.0,
+                'tp1_pct': 4.0
+            }
+            
+        except Exception as e:
+            log(f"❌ Core strategy error for {symbol}: {e}")
+            return None
+
+    async def test_enhanced_core_strategy_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test enhanced core strategy"""
+        try:
+            score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
+                symbol, candles_by_tf
+            )
+            
+            if score < 8.0:
+                return None
+            
+            # FIX: determine_direction only takes tf_scores (1 parameter)
+            direction = determine_direction(tf_scores)
+            if not direction:
+                return None
+
+            try:
+                from trend_filters import get_trend_context_cached
+                trend_ctx = await get_trend_context_cached()
+            except Exception:
+                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
+            
+            confidence = calculate_confidence(score, tf_scores, trend_ctx, trade_type)
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            if direction == "Long":
+                sl_price = entry_price * 0.985
+                tp1_price = entry_price * 1.05
+            else:
+                sl_price = entry_price * 1.015
+                tp1_price = entry_price * 0.95
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': trade_type,
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 1.5,
+                'tp1_pct': 5.0
+            }
+            
+        except Exception as e:
+            log(f"❌ Enhanced core strategy error for {symbol}: {e}")
+            return None
+
+    async def test_mean_reversion_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test mean reversion strategy"""
+        try:
+            score, direction, confidence, reasons = score_mean_reversion(
+                symbol, candles_by_tf, "ranging"
+            )
+            
+            if score < 4.0:
+                return None
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            if direction == "Long":
+                sl_price = entry_price * 0.985
+                tp1_price = entry_price * 1.025
+            else:
+                sl_price = entry_price * 1.015
+                tp1_price = entry_price * 0.975
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 1.5,
+                'tp1_pct': 2.5
+            }
+            
+        except Exception as e:
+            log(f"❌ Mean reversion strategy error for {symbol}: {e}")
+            return None
+
+    async def test_breakout_sniper_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test breakout sniper strategy"""
+        try:
+            score, direction, confidence, reasons = score_breakout_sniper(
+                symbol, candles_by_tf, "volatile"
+            )
+            
+            if score < 4.0:
+                return None
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            if direction == "Long":
+                sl_price = entry_price * 0.975
+                tp1_price = entry_price * 1.06
+            else:
+                sl_price = entry_price * 1.025
+                tp1_price = entry_price * 0.94
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.5,
+                'tp1_pct': 6.0
+            }
+            
+        except Exception as e:
+            log(f"❌ Breakout sniper strategy error for {symbol}: {e}")
+            return None
+
+    async def test_pattern_matching_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test pattern matching with proper implementation"""
+        try:
+            if '5' not in candles_by_tf or len(candles_by_tf['5']) < 20:
+                return None
+            
+            candles = candles_by_tf['5']
+            current_pattern = detect_pattern(candles)
+            
+            if not current_pattern:
+                return None
+            
+            patterns_db = load_pattern_memory()
+            if not patterns_db:
+                return None
+            
+            pattern_records = [r for r in patterns_db if r.get('pattern') == current_pattern]
+            if not pattern_records:
+                return None
+            
+            profitable = sum(1 for r in pattern_records if r.get('move_pct', 0) > 1.0)
+            win_rate = profitable / len(pattern_records) if pattern_records else 0
+            
+            if win_rate < 0.6:
+                return None
+            
+            avg_move = sum(r.get('move_pct', 0) for r in pattern_records) / len(pattern_records)
+            direction = 'Long' if avg_move > 0 else 'Short'
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            if direction == "Long":
+                sl_price = entry_price * 0.98
+                tp1_price = entry_price * 1.04
+            else:
+                sl_price = entry_price * 1.02
+                tp1_price = entry_price * 0.96
+            
+            return {
+                'score': win_rate * 10,
+                'direction': direction,
+                'confidence': win_rate,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.0,
+                'tp1_pct': 4.0
+            }
+            
+        except Exception as e:
+            log(f"❌ Pattern matching strategy error for {symbol}: {e}")
+            return None
+
+    async def test_range_break_fixed(self, symbol, candles_by_tf, timestamp):
+        """FIXED: Test range break strategy - handle object vs function issue"""
+        try:
+            if '15' not in candles_by_tf or len(candles_by_tf['15']) < 20:
+                return None
+            
+            # FIX: Check if range_break_detector is a function or needs to be called differently
+            try:
+                if hasattr(range_break_detector, 'detect_range_breakout'):
+                    # It's an object with methods
+                    result = range_break_detector.detect_range_breakout(symbol, candles_by_tf['15'], '15')
+                elif callable(range_break_detector):
+                    # It's a function
+                    result = range_break_detector(symbol, candles_by_tf, "ranging")
+                else:
+                    log(f"⚠️ range_break_detector type issue: {type(range_break_detector)}")
+                    return None
+            except Exception as e:
+                log(f"❌ Range break detector call failed: {e}")
+                return None
+            
+            if not result or not isinstance(result, (dict, tuple)):
+                return None
+            
+            # Handle different result formats
+            if isinstance(result, tuple):
+                if len(result) >= 3:
+                    detected, direction, confidence = result[0], result[1], result[2]
+                else:
+                    return None
+            else:
+                detected = result.get('detected', False)
+                direction = result.get('direction', 'Long')
+                confidence = result.get('confidence', 0.5)
+            
+            if not detected:
+                return None
+            
+            # Convert confidence to score
+            score = confidence * 10 if isinstance(confidence, float) else 6.0
+            
+            if score < 6.0:
+                return None
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            if direction == "Long":
+                sl_price = entry_price * 0.975
+                tp1_price = entry_price * 1.055
+            else:
+                sl_price = entry_price * 1.025
+                tp1_price = entry_price * 0.945
+            
+            return {
+                'score': score,
+                'direction': direction,
+                'confidence': confidence if isinstance(confidence, float) else 0.7,
+                'trade_type': 'Intraday',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 2.5,
+                'tp1_pct': 5.5
+            }
             
         except Exception as e:
             log(f"❌ Range break strategy error for {symbol}: {e}")
@@ -783,316 +1099,3 @@ if __name__ == "__main__":
     else:
         print("Running FINAL FIXED test...")
         asyncio.run(run_final_fixed_test())
-        return {
-            'exit_price': current_price,
-            'reason': 'stop_loss',
-            'pnl': calculate_pnl_with_fees(current_price)
-        }
-        
-        # Check take profit
-        if tp1_price:
-            if (direction == 'Long' and current_price >= tp1_price) or \
-               (direction == 'Short' and current_price <= tp1_price):
-                return {
-                    'exit_price': current_price,
-                    'reason': 'take_profit',
-                    'pnl': calculate_pnl_with_fees(current_price)
-                }
-        
-        # Time-based exit
-        max_duration_minutes = 240 if trade.get('trade_type') == 'Intraday' else 1440
-        duration_minutes = (timestamp - trade['entry_timestamp']) // 60000
-        
-        if duration_minutes >= max_duration_minutes:
-            return {
-                'exit_price': current_price,
-                'reason': 'time_exit',
-                'pnl': calculate_pnl_with_fees(current_price)
-            }
-        
-        return None
-
-    # FIXED STRATEGY TESTING FUNCTIONS
-
-    async def test_core_strategy_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test core strategy with correct function signatures"""
-        try:
-            score, tf_scores, trade_type, indicator_scores, used_indicators = score_symbol(
-                symbol, candles_by_tf
-            )
-            
-            if score < 7.0:
-                return None
-            
-            # FIX: determine_direction only takes tf_scores (1 parameter)
-            direction = determine_direction(tf_scores)
-            if not direction:
-                return None
-
-            try:
-                from trend_filters import get_trend_context_cached
-                trend_ctx = await get_trend_context_cached()
-            except Exception:
-                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
-            
-            confidence = calculate_confidence(score, tf_scores, trend_ctx, trade_type)
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            # Simple SL/TP calculation
-            if direction == "Long":
-                sl_price = entry_price * 0.98
-                tp1_price = entry_price * 1.04
-            else:
-                sl_price = entry_price * 1.02
-                tp1_price = entry_price * 0.96
-            
-            return {
-                'score': score,
-                'direction': direction,
-                'confidence': confidence,
-                'trade_type': trade_type,
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 2.0,
-                'tp1_pct': 4.0
-            }
-            
-        except Exception as e:
-            log(f"❌ Core strategy error for {symbol}: {e}")
-            return None
-
-    async def test_enhanced_core_strategy_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test enhanced core strategy"""
-        try:
-            score, tf_scores, trade_type, indicator_scores, used_indicators = enhanced_score_symbol(
-                symbol, candles_by_tf
-            )
-            
-            if score < 8.0:
-                return None
-            
-            # FIX: determine_direction only takes tf_scores (1 parameter)
-            direction = determine_direction(tf_scores)
-            if not direction:
-                return None
-
-            try:
-                from trend_filters import get_trend_context_cached
-                trend_ctx = await get_trend_context_cached()
-            except Exception:
-                trend_ctx = {"btc_trend": "ranging", "regime": "volatile"}
-            
-            confidence = calculate_confidence(score, tf_scores, trend_ctx, trade_type)
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.985
-                tp1_price = entry_price * 1.05
-            else:
-                sl_price = entry_price * 1.015
-                tp1_price = entry_price * 0.95
-            
-            return {
-                'score': score,
-                'direction': direction,
-                'confidence': confidence,
-                'trade_type': trade_type,
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 1.5,
-                'tp1_pct': 5.0
-            }
-            
-        except Exception as e:
-            log(f"❌ Enhanced core strategy error for {symbol}: {e}")
-            return None
-
-    async def test_mean_reversion_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test mean reversion strategy"""
-        try:
-            score, direction, confidence, reasons = score_mean_reversion(
-                symbol, candles_by_tf, "ranging"
-            )
-            
-            if score < 4.0:
-                return None
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.985
-                tp1_price = entry_price * 1.025
-            else:
-                sl_price = entry_price * 1.015
-                tp1_price = entry_price * 0.975
-            
-            return {
-                'score': score,
-                'direction': direction,
-                'confidence': confidence,
-                'trade_type': 'Intraday',
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 1.5,
-                'tp1_pct': 2.5
-            }
-            
-        except Exception as e:
-            log(f"❌ Mean reversion strategy error for {symbol}: {e}")
-            return None
-
-    async def test_breakout_sniper_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test breakout sniper strategy"""
-        try:
-            score, direction, confidence, reasons = score_breakout_sniper(
-                symbol, candles_by_tf, "volatile"
-            )
-            
-            if score < 4.0:
-                return None
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.975
-                tp1_price = entry_price * 1.06
-            else:
-                sl_price = entry_price * 1.025
-                tp1_price = entry_price * 0.94
-            
-            return {
-                'score': score,
-                'direction': direction,
-                'confidence': confidence,
-                'trade_type': 'Intraday',
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 2.5,
-                'tp1_pct': 6.0
-            }
-            
-        except Exception as e:
-            log(f"❌ Breakout sniper strategy error for {symbol}: {e}")
-            return None
-
-    async def test_pattern_matching_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test pattern matching with proper implementation"""
-        try:
-            if '5' not in candles_by_tf or len(candles_by_tf['5']) < 20:
-                return None
-            
-            candles = candles_by_tf['5']
-            current_pattern = detect_pattern(candles)
-            
-            if not current_pattern:
-                return None
-            
-            patterns_db = load_pattern_memory()
-            if not patterns_db:
-                return None
-            
-            pattern_records = [r for r in patterns_db if r.get('pattern') == current_pattern]
-            if not pattern_records:
-                return None
-            
-            profitable = sum(1 for r in pattern_records if r.get('move_pct', 0) > 1.0)
-            win_rate = profitable / len(pattern_records) if pattern_records else 0
-            
-            if win_rate < 0.6:
-                return None
-            
-            avg_move = sum(r.get('move_pct', 0) for r in pattern_records) / len(pattern_records)
-            direction = 'Long' if avg_move > 0 else 'Short'
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.98
-                tp1_price = entry_price * 1.04
-            else:
-                sl_price = entry_price * 1.02
-                tp1_price = entry_price * 0.96
-            
-            return {
-                'score': win_rate * 10,
-                'direction': direction,
-                'confidence': win_rate,
-                'trade_type': 'Intraday',
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 2.0,
-                'tp1_pct': 4.0
-            }
-            
-        except Exception as e:
-            log(f"❌ Pattern matching strategy error for {symbol}: {e}")
-            return None
-
-    async def test_range_break_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test range break strategy - handle object vs function issue"""
-        try:
-            if '15' not in candles_by_tf or len(candles_by_tf['15']) < 20:
-                return None
-            
-            # FIX: Check if range_break_detector is a function or needs to be called differently
-            try:
-                if hasattr(range_break_detector, 'detect_range_breakout'):
-                    # It's an object with methods
-                    result = range_break_detector.detect_range_breakout(symbol, candles_by_tf['15'], '15')
-                elif callable(range_break_detector):
-                    # It's a function
-                    result = range_break_detector(symbol, candles_by_tf, "ranging")
-                else:
-                    log(f"⚠️ range_break_detector type issue: {type(range_break_detector)}")
-                    return None
-            except Exception as e:
-                log(f"❌ Range break detector call failed: {e}")
-                return None
-            
-            if not result or not isinstance(result, (dict, tuple)):
-                return None
-            
-            # Handle different result formats
-            if isinstance(result, tuple):
-                if len(result) >= 3:
-                    detected, direction, confidence = result[0], result[1], result[2]
-                else:
-                    return None
-            else:
-                detected = result.get('detected', False)
-                direction = result.get('direction', 'Long')
-                confidence = result.get('confidence', 0.5)
-            
-            if not detected:
-                return None
-            
-            # Convert confidence to score
-            score = confidence * 10 if isinstance(confidence, float) else 6.0
-            
-            if score < 6.0:
-                return None
-            
-            entry_price = self.get_price_at_timestamp(symbol, timestamp)
-            if not entry_price:
-                return None
-            
-            if direction == "Long":
-                sl_price = entry_price * 0.975
-                tp1_price = entry_price * 1.055
-            else:
-                sl_price = entry_price * 1.025
-                tp1_price = entry_price * 0.945
-            
-            return {
