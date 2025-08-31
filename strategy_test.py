@@ -890,7 +890,7 @@ class FinalFixedBacktester:
             
         except Exception as e:
             log(f"❌ Pump detector strategy error for {symbol}: {e}")
-            return NoneLong'
+            return NoneLong
                 confidence = 0.7
             
             if confidence < 0.7:
