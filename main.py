@@ -15,6 +15,7 @@ from config import (
 )
 from performance_tracker import track_signal
 from logger import log
+from bybit_sync import sync_bot_with_bybit
 from monitor_report import log_trade_result, send_daily_report
 from trade_executor import calculate_dynamic_sl_tp, execute_trade_if_valid
 from pump_detector import detect_early_pump
@@ -1941,6 +1942,14 @@ async def startup_cleanup():
     except Exception as e:
         log(f"❌ Startup cleanup failed: {e}")
 
+async def bybit_sync_loop(interval_sec: int = 120):
+    while True:
+        try:
+            await sync_bot_with_bybit(send_telegram=False)  # less spam; startup already notified
+        except Exception as e:
+            await send_error_to_telegram(f"Bybit sync error: {e}")
+        await asyncio.sleep(interval_sec)
+
 async def periodic_cleanup():
     """Periodically verify trade cleanup"""
     while True:
@@ -1973,6 +1982,8 @@ async def run_bot():
 
     load_active_trades()
     log_strategy_activation()
+
+    await sync_bot_with_bybit(send_telegram=True)
     
     if len(active_trades) == 0:
         await recover_active_trades_from_exchange()
@@ -1997,6 +2008,8 @@ async def run_bot():
     asyncio.create_task(stealth_activity_report())
     asyncio.create_task(range_break_scanner_loop(symbols))
     asyncio.create_task(verify_all_positions(30))
+    asyncio.create_task(bybit_sync_loop(120))  # sync every 2 minutes
+
 
     await startup_cleanup()
 
@@ -2042,6 +2055,7 @@ if __name__ == "__main__":
                 await asyncio.sleep(10)
 
     asyncio.run(restart_forever())
+
 
 
 
