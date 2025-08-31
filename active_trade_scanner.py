@@ -61,6 +61,9 @@ async def scan_active_trades():
     MAIN SCANNER FUNCTION - FIXED VERSION
     Uses unified exit manager to prevent double logic
     """
+
+    global _active_trades_cache, _cache_timestamp
+
     try:
         # Load current active trades
         active_trades = load_active_trades_directly()
@@ -125,7 +128,7 @@ async def scan_active_trades():
                 _processing_symbols.discard(symbol)
         
         # Clear the cache to force reload next time
-        _active_trades_cache = {}
+        _active_trades_cache.clear()
         _cache_timestamp = 0
         
     except Exception as e:
