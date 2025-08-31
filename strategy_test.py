@@ -1,4 +1,4 @@
-# strategy_test.py - ALL FUNCTION SIGNATURE ISSUES FIXED
+# final_comprehensive_backtest.py - ALL FUNCTION SIGNATURE ISSUES FIXED
 # This version addresses every single error from your log output
 
 import asyncio
@@ -806,42 +806,91 @@ class FinalFixedBacktester:
             return None
 
     async def test_pump_detector_fixed(self, symbol, candles_by_tf, timestamp):
-        """FIXED: Test early pump detection - handle string returns and missing attributes"""
+        """FIXED: Test early pump detection - correct parameter order and async handling"""
         try:
             if '1' not in candles_by_tf or '3' not in candles_by_tf:
                 return None
             
-            # FIX: Handle detect_early_pump which might return string
+            # FIX: Correct parameter order is (candles_by_tf, symbol) and it's async
             try:
-                if asyncio.iscoroutinefunction(detect_early_pump):
-                    pump_result = await detect_early_pump(symbol, candles_by_tf)
-                else:
-                    pump_result = detect_early_pump(symbol, candles_by_tf)
+                # The function signature is detect_early_pump(candles_by_tf, symbol) and it's async
+                raw_result = await detect_early_pump(candles_by_tf, symbol)
             except Exception as e:
                 log(f"❌ Pump detector call failed: {e}")
                 return None
             
-            if not pump_result:
+            # Exit early if no result
+            if not raw_result:
                 return None
             
-            # FIX: Handle string return (which was causing the 'str' object has no attribute 'get' error)
-            if isinstance(pump_result, str):
-                # If it's a string, it's probably a direction
-                direction = pump_result if pump_result in ['Long', 'Short'] else 'Long'
-                confidence = 0.7  # Default confidence for string returns
-            elif isinstance(pump_result, dict):
-                confidence = pump_result.get('confidence', 0.7)
-                direction = pump_result.get('direction', 'Long')
-            elif isinstance(pump_result, tuple) and len(pump_result) >= 2:
-                direction = pump_result[0] if pump_result[0] in ['Long', 'Short'] else 'Long'
-                confidence = pump_result[1] if isinstance(pump_result[1], (int, float)) else 0.7
-            elif isinstance(pump_result, bool):
-                # If it's just True/False
-                direction = 'Long'
-                confidence = 0.7 if pump_result else 0
-            else:
-                # Unknown format, use defaults
-                direction = 'Long'
+            # FIX: Based on pump_detector.py, it returns a dict with these keys:
+            # {"volume_spike": bool, "whale_activity": bool, "base_breakout": bool, "social_hype": bool, "trigger_count": int}
+            
+            # Extract trigger count and individual signals
+            trigger_count = raw_result.get('trigger_count', 0)
+            volume_spike = raw_result.get('volume_spike', False)
+            whale_activity = raw_result.get('whale_activity', False)
+            base_breakout = raw_result.get('base_breakout', False)
+            social_hype = raw_result.get('social_hype', False)
+            
+            # Need at least 2 triggers to consider it a valid pump signal
+            if trigger_count < 2:
+                return None
+            
+            # Convert trigger count to confidence score
+            # 2 triggers = 0.7, 3 triggers = 0.8, 4+ triggers = 0.9
+            if trigger_count >= 4:
+                confidence = 0.9
+            elif trigger_count == 3:
+                confidence = 0.8
+            else:  # trigger_count == 2
+                confidence = 0.7
+            
+            # Pump signals are typically Long (bullish)
+            direction = 'Long'
+            
+            # Check pump potential with correct parameter order
+            try:
+                # From score.py: has_pump_potential(candles_by_tf, direction)
+                has_potential = has_pump_potential(candles_by_tf, direction)
+            except Exception as e:
+                log(f"❌ Error checking pump potential: {e}")
+                has_potential = True  # Assume true if function fails
+            
+            if not has_potential:
+                return None
+            
+            entry_price = self.get_price_at_timestamp(symbol, timestamp)
+            if not entry_price:
+                return None
+            
+            # Pump detection SL/TP (aggressive for quick moves)
+            sl_price = entry_price * 0.97   # 3% stop loss
+            tp1_price = entry_price * 1.08  # 8% take profit
+            
+            log(f"   🚀 Pump signals detected: vol={volume_spike}, whale={whale_activity}, breakout={base_breakout}, social={social_hype}")
+            
+            return {
+                'score': confidence * 10,
+                'direction': direction,
+                'confidence': confidence,
+                'trade_type': 'Scalp',
+                'sl_price': sl_price,
+                'tp1_price': tp1_price,
+                'sl_pct': 3.0,
+                'tp1_pct': 8.0,
+                'trigger_details': {
+                    'volume_spike': volume_spike,
+                    'whale_activity': whale_activity,
+                    'base_breakout': base_breakout,
+                    'social_hype': social_hype,
+                    'trigger_count': trigger_count
+                }
+            }
+            
+        except Exception as e:
+            log(f"❌ Pump detector strategy error for {symbol}: {e}")
+            return NoneLong'
                 confidence = 0.7
             
             if confidence < 0.7:
