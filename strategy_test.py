@@ -813,18 +813,13 @@ class FinalFixedBacktester:
             
             # FIX: Correct parameter order is (candles_by_tf, symbol) and it's async
             try:
-                # The function signature is detect_early_pump(candles_by_tf, symbol) and it's async
                 raw_result = await detect_early_pump(candles_by_tf, symbol)
             except Exception as e:
                 log(f"❌ Pump detector call failed: {e}")
                 return None
             
-            # Exit early if no result
             if not raw_result:
                 return None
-            
-            # FIX: Based on pump_detector.py, it returns a dict with these keys:
-            # {"volume_spike": bool, "whale_activity": bool, "base_breakout": bool, "social_hype": bool, "trigger_count": int}
             
             # Extract trigger count and individual signals
             trigger_count = raw_result.get('trigger_count', 0)
@@ -838,12 +833,11 @@ class FinalFixedBacktester:
                 return None
             
             # Convert trigger count to confidence score
-            # 2 triggers = 0.7, 3 triggers = 0.8, 4+ triggers = 0.9
             if trigger_count >= 4:
                 confidence = 0.9
             elif trigger_count == 3:
                 confidence = 0.8
-            else:  # trigger_count == 2
+            else:
                 confidence = 0.7
             
             # Pump signals are typically Long (bullish)
@@ -851,11 +845,10 @@ class FinalFixedBacktester:
             
             # Check pump potential with correct parameter order
             try:
-                # From score.py: has_pump_potential(candles_by_tf, direction)
                 has_potential = has_pump_potential(candles_by_tf, direction)
             except Exception as e:
                 log(f"❌ Error checking pump potential: {e}")
-                has_potential = True  # Assume true if function fails
+                has_potential = True
             
             if not has_potential:
                 return None
@@ -865,10 +858,8 @@ class FinalFixedBacktester:
                 return None
             
             # Pump detection SL/TP (aggressive for quick moves)
-            sl_price = entry_price * 0.97   # 3% stop loss
-            tp1_price = entry_price * 1.08  # 8% take profit
-            
-            log(f"   🚀 Pump signals detected: vol={volume_spike}, whale={whale_activity}, breakout={base_breakout}, social={social_hype}")
+            sl_price = entry_price * 0.97
+            tp1_price = entry_price * 1.08
             
             return {
                 'score': confidence * 10,
@@ -878,14 +869,7 @@ class FinalFixedBacktester:
                 'sl_price': sl_price,
                 'tp1_price': tp1_price,
                 'sl_pct': 3.0,
-                'tp1_pct': 8.0,
-                'trigger_details': {
-                    'volume_spike': volume_spike,
-                    'whale_activity': whale_activity,
-                    'base_breakout': base_breakout,
-                    'social_hype': social_hype,
-                    'trigger_count': trigger_count
-                }
+                'tp1_pct': 8.0
             }
             
         except Exception as e:
