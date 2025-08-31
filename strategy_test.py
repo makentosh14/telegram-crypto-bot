@@ -433,20 +433,20 @@ class FinalFixedBacktester:
             total_fees = FEE_PCT + SLIP_PCT
             return (price_change - total_fees) * trade['position_value']
         
-        # Check stop loss
-        if sl_price:
-            if (direction == 'Long' and current_price <= sl_price) or \
-               (direction == 'Short' and current_price >= sl_price):
-                return {
-                'score': score,
-                'direction': direction,
-                'confidence': confidence if isinstance(confidence, float) else 0.7,
-                'trade_type': 'Intraday',
-                'sl_price': sl_price,
-                'tp1_price': tp1_price,
-                'sl_pct': 2.5,
-                'tp1_pct': 5.5
-            }
+            # Check stop loss
+            if sl_price:
+                if (direction == 'Long' and current_price <= sl_price) or \
+                   (direction == 'Short' and current_price >= sl_price):
+                    return {
+                    'score': score,
+                     'direction': direction,
+                    'confidence': confidence if isinstance(confidence, float) else 0.7,
+                    'trade_type': 'Intraday',
+                    'sl_price': sl_price,
+                    'tp1_price': tp1_price,
+                    'sl_pct': 2.5,
+                    'tp1_pct': 5.5
+                }
             
         except Exception as e:
             log(f"❌ Range break strategy error for {symbol}: {e}")
