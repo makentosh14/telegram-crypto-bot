@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 from scanner import symbol_category_map
 from logger import log
 from error_handler import send_error_to_telegram
+from bybit_api import signed_request
 
 live_candles = defaultdict(lambda: defaultdict(lambda: deque(maxlen=100)))
 SUPPORTED_INTERVALS = ['1', '3', '5', '15', '30', '60', '240']
@@ -89,6 +90,47 @@ async def handle_stream(url, symbols, category, interval):
         log(reconnect_msg)
         await send_error_to_telegram(reconnect_msg)
         await asyncio.sleep(RECONNECT_DELAY)
+
+async def fetch_candles_rest(symbol: str, interval: str = '1', limit: int = 200, category: str = 'linear'):
+    """
+    Fetch historical candles via Bybit REST v5.
+    Returns a list[dict] shaped like websocket 'live_candles' entries:
+      { "timestamp": int(ms), "open": str, "high": str, "low": str, "close": str, "volume": str }
+    """
+    if interval not in SUPPORTED_INTERVALS:
+        raise ValueError(f"Unsupported interval: {interval}")
+
+    # Clamp limit to Bybit's max 200 and min 1
+    safe_limit = max(1, min(int(limit), 200))
+
+    params = {
+        "category": category,          # "linear" for perps (your default)
+        "symbol": symbol,
+        "interval": interval,          # minutes as string (e.g., '1', '5', '60')
+        "limit": str(safe_limit)
+    }
+
+    resp = await signed_request("GET", "/v5/market/kline", params)
+
+    if resp.get("retCode") != 0:
+        # Surface a helpful error so the caller can log it
+        raise RuntimeError(f"Bybit kline error for {symbol} ({interval}m): {resp.get('retMsg')}")
+
+    raw = resp.get("result", {}).get("list", []) or []
+
+    # Bybit returns newest-first; normalize to oldest->newest to match how you append WebSocket candles
+    candles = []
+    for c in reversed(raw):
+        # Bybit format: [start, open, high, low, close, volume, turnover]
+        candles.append({
+            "timestamp": int(c[0]),
+            "open": str(c[1]),
+            "high": str(c[2]),
+            "low":  str(c[3]),
+            "close": str(c[4]),
+            "volume": str(c[5]),
+        })
+    return candles
 
 async def stream_candles(symbols):
     futures_url = "wss://stream.bybit.com/v5/public/linear"
