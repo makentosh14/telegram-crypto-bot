@@ -155,7 +155,7 @@ async def sync_bot_with_bybit(send_telegram: bool = True) -> Dict[str, Any]:
 
         # 2) Attach SL info best-effort
         try:
-            sl_map = await _fetch_open_stop_orders(bybit_symbols, settle_coin="USDT")
+            sl_map = await _fetch_open_stop_orders(bybit_symbols, settle_coin="USDT") if bybit_symbols else {}
             for sym, slinfo in sl_map.items():
                 if sym in pos_map:
                     pos_map[sym]["sl"] = slinfo.get("sl")
