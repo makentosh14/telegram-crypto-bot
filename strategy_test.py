@@ -783,10 +783,11 @@ if __name__ == "__main__":
     else:
         print("Running FINAL FIXED test...")
         asyncio.run(run_final_fixed_test())
-                    'exit_price': current_price,
-                    'reason': 'stop_loss',
-                    'pnl': calculate_pnl_with_fees(current_price)
-                }
+        return {
+            'exit_price': current_price,
+            'reason': 'stop_loss',
+            'pnl': calculate_pnl_with_fees(current_price)
+        }
         
         # Check take profit
         if tp1_price:
